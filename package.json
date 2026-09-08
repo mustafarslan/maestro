@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "pnpm -r --filter './packages/**' run build",
-    "build:binary": "bun build --compile --outfile dist/maestro apps/cli/src/index.ts",
-    "typecheck": "tsc -b",
+    "build:binary": "tsc -b && bun build --compile --outfile dist/maestro apps/cli/dist/index.js",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
@@ -20,5 +20,13 @@
     "@types/node": "^22.15.3",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.49",
+    "@ai-sdk/google": "4.0.64",
+    "@ai-sdk/openai": "4.0.60",
+    "@ai-sdk/openai-compatible": "3.0.44",
+    "ai": "7.0.93",
+    "zod": "4.5.4"
   }
 }

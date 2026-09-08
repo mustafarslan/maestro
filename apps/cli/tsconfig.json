@@ -11,6 +11,9 @@
     },
     {
       "path": "../../packages/playbook"
+    },
+    {
+      "path": "../../packages/llm"
     }
   ],
   "exclude": ["src/**/*.test.ts"]

@@ -2,6 +2,7 @@
 import { logger } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
 import { init } from "./commands/init.js";
+import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
 import { color } from "./ui.js";
 
@@ -17,6 +18,7 @@ ${color.bold("USAGE")}
 ${color.bold("COMMANDS")}
   init                 create ~/.maestro, run migrations, seed the default playbook
   doctor               check runtime, git, docker, database and playbook health
+  llm <sub>            providers, model catalog, conformance tests, API keys
   playbook <sub>       inspect, export, import and activate playbook versions
   version              print the version
 
@@ -43,6 +45,8 @@ async function main(): Promise<number> {
       return init();
     case "doctor":
       return doctor();
+    case "llm":
+      return llm(rest);
     case "playbook":
       return playbook(rest);
     default:

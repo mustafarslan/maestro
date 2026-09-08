@@ -31,7 +31,14 @@ async function probe(cmd: string, args: string[]): Promise<string | null> {
 export async function doctor(): Promise<number> {
   const checks: Check[] = [];
 
-  checks.push({ status: "ok", label: "runtime", detail: `${detectRuntime()} ${process.version}` });
+  const runtime = detectRuntime();
+  const bunVersion = (globalThis as { Bun?: { version: string } }).Bun?.version;
+  checks.push({
+    status: "ok",
+    label: "runtime",
+    detail:
+      runtime === "bun" ? `bun ${bunVersion} (node ${process.version})` : `node ${process.version}`,
+  });
 
   const homeExists = existsSync(maestroHome());
   checks.push({

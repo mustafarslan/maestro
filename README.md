@@ -14,7 +14,7 @@ graph, so adding a reviewer or repointing one at a different LLM provider is a c
 Phase 0 of 10 complete. See the implementation plan for the full roadmap.
 
 - [x] **Phase 0** — foundation: store, migrations, job queue, playbook schema + graph validation, CLI, single-binary build
-- [ ] Phase 1 — LLM provider layer (Anthropic / OpenAI / Gemini / OpenAI-compatible incl. Ollama)
+- [x] **Phase 1** — LLM provider layer: 4 adapters, own agent loop with budgets, cost accounting, conformance suite
 - [ ] Phase 2 — graph engine + sandbox + first agent, running locally
 - [ ] Phase 3 — GitHub App, webhooks, consolidated review posting
 - [ ] Phase 4 — MCP server
@@ -44,6 +44,11 @@ node apps/cli/dist/index.js init      # or: ./dist/maestro init
 ./dist/maestro playbook nodes         # the closed node registry the canvas may draw
 ./dist/maestro playbook export pb.yaml
 ./dist/maestro playbook import pb.yaml --activate
+
+./dist/maestro llm providers            # credential status per provider
+echo $KEY | ./dist/maestro llm key set anthropic
+./dist/maestro llm models               # fetch + cache each provider's live model list
+./dist/maestro llm test                 # conformance suite against real providers
 ```
 
 ## Layout
@@ -52,6 +57,7 @@ node apps/cli/dist/index.js init      # or: ./dist/maestro init
 | --- | --- |
 | `packages/core` | store interface, portable SQLite driver, migrations, job queue, spans, logging |
 | `packages/playbook` | playbook schema, graph validation, node registry, prompt layering, versioned store |
+| `packages/llm` | provider adapters, agent loop, budgets, pricing/capabilities, conformance suite |
 | `apps/cli` | `maestro` entrypoint |
 
 ## Design notes
@@ -67,3 +73,13 @@ persona edit — including one made in the Studio — can remove the injection d
 
 **Teardown is not a graph node.** It is a guaranteed finalizer the engine runs on every terminal
 state, so no drawable graph can leak containers.
+
+**Maestro owns the agent loop.** The Vercel AI SDK is used for per-call provider normalisation
+only — its own retry and multi-step helpers are switched off. Owning the loop is what makes
+per-agent budgets, honest token accounting, and the terminal-tool contract possible. Providers are
+*instances*, not a fixed list: `openai-compatible` covers Ollama, vLLM, LM Studio and OpenRouter
+with one config row each.
+
+**Pricing is data with provenance.** `packages/llm/src/pricing.ts` carries a `fetchedAt` stamp and
+a source per provider, because those numbers go straight into a PR comment's metrics block. Cached
+and uncached input tokens are billed disjointly so cached tokens are never charged twice.
