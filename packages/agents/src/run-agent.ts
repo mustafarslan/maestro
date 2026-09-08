@@ -18,6 +18,8 @@ export interface ReviewAgentRequest {
   allowedCommands: string[];
   baseRef: string;
   commandTimeoutSec: number;
+  /** Dependency install did not complete; command output is unreliable evidence. */
+  setupFailed?: boolean;
   context: PromptContext;
   budget: { maxSteps: number; costCapCents: number; deadlineMs?: number };
   signal?: AbortSignal;
@@ -54,7 +56,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
   };
 
   const system = buildAgentSystemPrompt(req.agent, req.context);
-  const prompt = buildUserPrompt(req.context, req.allowedCommands);
+  const prompt = buildUserPrompt(req.context, req.allowedCommands, req.setupFailed);
 
   const loop = await runAgent({
     provider: req.provider,
@@ -109,7 +111,11 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
   };
 }
 
-function buildUserPrompt(ctx: PromptContext, allowedCommands: string[]): string {
+function buildUserPrompt(
+  ctx: PromptContext,
+  allowedCommands: string[],
+  setupFailed?: boolean,
+): string {
   const parts: string[] = ["Review the pull request described below."];
 
   if (ctx.pr?.title || ctx.pr?.description) {
@@ -162,6 +168,13 @@ function buildUserPrompt(ctx: PromptContext, allowedCommands: string[]): string 
     allowedCommands.length
       ? `You may run these commands to verify a suspicion:\n${allowedCommands.map((c) => `  ${c}`).join("\n")}`
       : "No commands are available in this environment; reason from the code alone.",
+    // Without this an agent blames the code for a broken environment and reports a
+    // phantom defect - observed on the first real run against a live repository.
+    setupFailed
+      ? "IMPORTANT: dependency installation did not complete in this environment. Build and test " +
+          "commands may fail for reasons unrelated to the change under review. Do not report a " +
+          "failing command as a defect unless you can tie it to the diff itself."
+      : "",
     `When you are done, call ${TERMINAL_TOOL}. Reporting nothing is better than reporting noise.`,
   );
 

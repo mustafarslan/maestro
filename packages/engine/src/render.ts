@@ -84,6 +84,15 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     );
   }
 
+  if (outcome.setupFailed) {
+    lines.push(
+      "> **Environment warning:** dependency installation did not complete, so build and test",
+      "> commands may fail for reasons unrelated to this change. Findings that rest on command",
+      "> output should be treated with caution.",
+      "",
+    );
+  }
+
   const blocked = outcome.egressLog.filter((e) => !e.allowed);
   lines.push(
     `**Environment** — toolchain \`${outcome.toolchain ?? "unknown"}\`, ` +
@@ -92,7 +101,8 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
         ? ` ${blocked.length} egress attempt(s) blocked during dependency install.`
         : ""),
     "",
-    `**Total** — ${outcome.costCents.toFixed(2)}¢ across ${agentRows.filter((n) => n.state === "done").length} agent(s) in ${(outcome.durationMs / 1000).toFixed(1)}s.`,
+    `**Total** — ${outcome.costKnown === false ? "cost unpriced for this provider" : `${outcome.costCents.toFixed(2)}¢`}` +
+      ` across ${agentRows.filter((n) => n.state === "done").length} agent(s) in ${(outcome.durationMs / 1000).toFixed(1)}s.`,
     "",
     "</details>",
   );

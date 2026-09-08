@@ -42,6 +42,10 @@ export interface NodeOutcome {
 
 export interface ReviewOutcome {
   reviewId: string;
+  /** False when a provider has no pricing data, so cost is unknown rather than zero. */
+  costKnown?: boolean;
+  /** True when a setup step failed, making command output unreliable evidence. */
+  setupFailed?: boolean;
   state: "done" | "failed" | "skipped";
   skipReason?: string;
   route?: RouteDecision;
@@ -74,14 +78,18 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
   let prepared: PreparedEnvironment | undefined;
   const sandboxes: Sandbox[] = [];
   let totalCost = 0;
+  let modelSteps = 0;
 
   const finish = (over: Partial<ReviewOutcome>): ReviewOutcome => ({
     reviewId: req.reviewId,
     state: "done",
     nodes,
     costCents: totalCost,
+    // Steps ran but nothing was charged => the model is not in the pricing table.
+    costKnown: !(modelSteps > 0 && totalCost === 0),
     durationMs: Date.now() - startedAt,
     toolchain: prepared?.toolchain.kind,
+    setupFailed: prepared?.setupResults.some((r) => r.exitCode !== 0) ?? false,
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],
     ...over,
@@ -175,6 +183,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             allowedCommands: readyEnv.allowedCommands,
             baseRef: req.baseRef,
             commandTimeoutSec: spec.timeouts.commandSec,
+            setupFailed: readyEnv.setupResults.some((r) => r.exitCode !== 0),
             context: req.context,
             budget: {
               // The router's tier caps the whole review; an agent may not exceed its own
@@ -187,6 +196,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           });
 
           totalCost += result.loop.costCents;
+          modelSteps += result.loop.steps.length;
           if (deps.db) {
             const { ReviewRecorder } = await import("./recorder.js");
             const recorder = new ReviewRecorder(deps.db);

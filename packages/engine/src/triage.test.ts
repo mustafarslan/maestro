@@ -102,3 +102,83 @@ describe("triage", () => {
     expect(result.summary).toContain("No issues met the reporting threshold");
   });
 });
+
+describe("cost honesty", () => {
+  it("says a provider is unpriced rather than printing 0.00 cents", async () => {
+    // A fabricated number in a PR comment is worse than an absent one - this is the
+    // same class of bug the pricing provenance table exists to prevent.
+    const { renderReview } = await import("./render.js");
+    const md = renderReview({
+      reviewId: "rv_1",
+      state: "done",
+      nodes: [
+        {
+          nodeId: "n1",
+          kind: "agent",
+          agentId: "security",
+          state: "done",
+          durationMs: 1000,
+          costCents: 0,
+        },
+      ],
+      costCents: 0,
+      costKnown: false,
+      durationMs: 1000,
+      allowedCommands: [],
+      egressLog: [],
+    });
+    expect(md).toContain("cost unpriced for this provider");
+    expect(md).not.toContain("0.00¢");
+  });
+
+  it("prints a real total when the model is priced", async () => {
+    const { renderReview } = await import("./render.js");
+    const md = renderReview({
+      reviewId: "rv_1",
+      state: "done",
+      nodes: [],
+      costCents: 12.5,
+      costKnown: true,
+      durationMs: 1000,
+      allowedCommands: [],
+      egressLog: [],
+    });
+    expect(md).toContain("12.50¢");
+  });
+});
+
+describe("environment honesty", () => {
+  it("warns the reader when a broken install makes command output unreliable", async () => {
+    // The first real run reported typecheck exit 2 that was caused by Maestro's own
+    // failed install, not by the code under review.
+    const { renderReview } = await import("./render.js");
+    const md = renderReview({
+      reviewId: "rv_1",
+      state: "done",
+      nodes: [],
+      costCents: 1,
+      costKnown: true,
+      setupFailed: true,
+      durationMs: 1000,
+      allowedCommands: ["npm test"],
+      egressLog: [],
+    });
+    expect(md).toContain("dependency installation did not complete");
+  });
+
+  it("stays quiet when the environment was fine", async () => {
+    const { renderReview } = await import("./render.js");
+    const md = renderReview({
+      reviewId: "rv_1",
+      state: "done",
+      nodes: [],
+      costCents: 1,
+      costKnown: true,
+      setupFailed: false,
+      durationMs: 1000,
+      allowedCommands: [],
+      egressLog: [],
+    });
+    expect(md).not.toContain("dependency installation did not complete");
+  });
+});
