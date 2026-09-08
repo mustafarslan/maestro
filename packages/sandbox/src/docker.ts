@@ -191,6 +191,24 @@ export class DockerSandboxDriver implements SandboxDriver {
 
       await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR], { timeoutMs: 20_000 });
 
+      // The checkout is copied in from the host, so its files are owned by the host uid
+      // and git refuses to touch it ("dubious ownership"). Without this every git tool
+      // fails and the agent silently loses the diff.
+      await docker(
+        ["exec", containerId, "git", "config", "--global", "--add", "safe.directory", WORKDIR],
+        { timeoutMs: 20_000 },
+      );
+
+      const gitCheck = await docker(["exec", containerId, "git", "--version"], {
+        timeoutMs: 20_000,
+      });
+      if (gitCheck.exitCode !== 0) {
+        log.warn(
+          { image },
+          "git is unavailable in this image; git_diff/git_log/git_blame will not work",
+        );
+      }
+
       const setupResults: ExecResult[] = [];
       for (const command of setup) {
         log.info({ command }, "setup");
@@ -293,6 +311,12 @@ export class DockerSandboxDriver implements SandboxDriver {
     const run = await docker(args, { timeoutMs: 60_000 });
     if (run.exitCode !== 0) throw new Error(`docker run failed: ${run.stderr}`);
     await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR], { timeoutMs: 20_000 });
+    // Belt and braces: the snapshot carries the global config, but a custom base image
+    // may not, and a silent git failure costs the agent its diff.
+    await docker(
+      ["exec", containerId, "git", "config", "--global", "--add", "safe.directory", WORKDIR],
+      { timeoutMs: 20_000 },
+    );
 
     return {
       id,

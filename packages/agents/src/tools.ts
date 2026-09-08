@@ -184,10 +184,20 @@ export function buildDispatch(ctx: ToolContext) {
         if (typeof path !== "string") return { output: path.error, isError: true };
         const flags = input.stat ? "--stat" : "--unified=3";
         const suffix = path ? ` -- ${shellQuote(path)}` : "";
+        // Three-dot needs a merge base, which a shallow fetch may not have; two-dot is
+        // the fallback. stderr is NOT discarded: swallowing it once turned a missing
+        // `git` binary into a silent "(no changes)", and the agent duly reported the
+        // empty diff as a defect in the code.
         const res = await ctx.sandbox.exec(
-          `git diff ${flags} ${shellQuote(ctx.baseRef)}...HEAD${suffix} 2>/dev/null || git diff ${flags} ${shellQuote(ctx.baseRef)}${suffix}`,
+          `git diff ${flags} ${shellQuote(ctx.baseRef)}...HEAD${suffix} || git diff ${flags} ${shellQuote(ctx.baseRef)}${suffix}`,
         );
-        return { output: res.stdout.trim() || "(no changes)" };
+        if (res.exitCode !== 0) {
+          return {
+            output: `git diff failed: ${res.stderr.trim() || "unknown error"}`,
+            isError: true,
+          };
+        }
+        return { output: res.stdout.trim() || "(no changes between the base and this head)" };
       }
 
       case "git_log": {
@@ -196,6 +206,12 @@ export function buildDispatch(ctx: ToolContext) {
         const limit = Math.min(Number(input.limit ?? 10), 50);
         const suffix = path ? ` -- ${shellQuote(path)}` : "";
         const res = await ctx.sandbox.exec(`git log --oneline -n ${limit}${suffix}`);
+        if (res.exitCode !== 0) {
+          return {
+            output: `git log failed: ${res.stderr.trim() || "unknown error"}`,
+            isError: true,
+          };
+        }
         return { output: res.stdout.trim() || "(no history)" };
       }
 

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
@@ -24,7 +25,7 @@ let box: Sandbox | undefined;
 
 const REVIEW_ID = `rv_test_${Date.now()}`;
 const spec = EnvSpecSchema.parse({
-  image: "node:22-bookworm-slim",
+  image: "node:22-bookworm",
   cpus: 2,
   memory: "1GiB",
   timeouts: { prepareSec: 300, analyzeSec: 300, commandSec: 60 },
@@ -43,6 +44,14 @@ beforeAll(async () => {
     JSON.stringify({ name: "fixture", scripts: { test: "node -e \"console.log('tests pass')\"" } }),
   );
   writeFileSync(join(sourceDir, "index.js"), "module.exports = 1;\n");
+  // A real git repo, so the git tooling assertions below exercise the real path.
+  const git = (args: string[]) =>
+    execFileSync("git", ["-C", sourceDir, ...args], { stdio: "ignore" });
+  git(["init", "--quiet"]);
+  git(["config", "user.email", "test@maestro.local"]);
+  git(["config", "user.name", "Maestro Test"]);
+  git(["add", "."]);
+  git(["commit", "--quiet", "-m", "fixture"]);
 
   env = await driver.prepare({ reviewId: REVIEW_ID, sourcePath: sourceDir, spec });
   box = await driver.analyze(env, { agentId: "architecture", spec });
@@ -80,6 +89,22 @@ describe("prepare phase", () => {
 });
 
 describe("analyze phase security posture", () => {
+  itDocker("has a working git, which every git tool depends on", async () => {
+    // The slim base images ship without git; that silently broke git_diff/git_log and
+    // cost every review its diff.
+    const version = await box!.exec("git --version");
+    expect(version.exitCode).toBe(0);
+    expect(version.stdout).toContain("git version");
+  });
+
+  itDocker("can run git against the copied checkout despite host file ownership", async () => {
+    // Files copied in from the host are owned by the host uid; without an explicit
+    // safe.directory git refuses with "dubious ownership".
+    const res = await box!.exec("git log --oneline -1");
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout.trim().length).toBeGreaterThan(0);
+  });
+
   itDocker("has the checkout available", async () => {
     const res = await box!.exec("ls package.json index.js");
     expect(res.exitCode).toBe(0);

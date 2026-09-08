@@ -20,6 +20,12 @@
       "path": "./packages/engine"
     },
     {
+      "path": "./packages/integrations"
+    },
+    {
+      "path": "./packages/server"
+    },
+    {
       "path": "./apps/cli"
     }
   ]

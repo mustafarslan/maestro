@@ -14,6 +14,12 @@ import type { TriagedFinding } from "./triage.js";
 export class ReviewRecorder {
   constructor(private readonly db: SqlDatabase) {}
 
+  /**
+   * Returns the id of the row that now exists for this (review, node).
+   *
+   * On a re-review the upsert keeps the ORIGINAL row and its id; returning the freshly
+   * generated one made every subsequent llm_calls insert fail its foreign key.
+   */
   recordNode(reviewId: string, node: NodeOutcome): string {
     const id = newId("tk");
     const now = new Date().toISOString();
@@ -46,7 +52,11 @@ export class ReviewRecorder {
         now,
         now,
       );
-    return id;
+
+    const row = this.db
+      .prepare("SELECT id FROM tasks WHERE review_id=? AND node_id=?")
+      .get<{ id: string }>(reviewId, node.nodeId);
+    return row?.id ?? id;
   }
 
   /** One row per model call, so cost and latency are attributable per step. */
@@ -119,6 +129,8 @@ export class ReviewRecorder {
 
   recordOutcome(reviewId: string, outcome: ReviewOutcome): void {
     this.db.transaction(() => {
+      // A re-review replaces its findings rather than stacking a second set on top.
+      this.db.prepare("DELETE FROM findings WHERE review_id=?").run(reviewId);
       for (const node of outcome.nodes) this.recordNode(reviewId, node);
       if (outcome.triage)
         this.recordFindings(reviewId, outcome.triage.posted, outcome.triage.suppressed);

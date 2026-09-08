@@ -4,6 +4,7 @@ import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import { ReviewRecorder, renderReview, runReview } from "@maestro/engine";
+import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
@@ -13,9 +14,11 @@ const exec = promisify(execFile);
 
 function usage(): number {
   console.log(`
-${color.bold("maestro review")} <path> [options]
+${color.bold("maestro review")} <path | pr-url | owner/repo#123> [options]
 
-  --base <ref>          diff against this ref (default: HEAD~1)
+  --base <ref>          diff against this ref (local reviews only; default HEAD~1)
+  --dry-run             for a pull request, print the review instead of posting it
+  --force               re-review a head SHA that has already been reviewed
   --agent <id>          run only this agent (repeatable)
   --provider <id>       override every agent's provider
   --model <id>          override every agent's model
@@ -44,11 +47,15 @@ export async function review(argv: string[]): Promise<number> {
   const target = argv[0];
   if (!target || target.startsWith("--")) return usage();
 
-  const sourcePath = resolve(target);
-  if (!existsSync(sourcePath)) {
-    console.error(`no such path: ${sourcePath}`);
-    return 1;
+  const prRef = parsePullRequestRef(target);
+  if (!prRef) {
+    const asPath = resolve(target);
+    if (!existsSync(asPath)) {
+      console.error(`no such path, and not a pull request reference: ${target}`);
+      return 1;
+    }
   }
+  const sourcePath = prRef ? "" : resolve(target);
 
   const baseRef = args(argv, "--base")[0] ?? "HEAD~1";
   const onlyAgents = args(argv, "--agent");
@@ -73,6 +80,50 @@ export async function review(argv: string[]): Promise<number> {
     for (const a of playbook.agents) {
       if (providerOverride) a.model.providerId = providerOverride;
       if (modelOverride) a.model.model = modelOverride;
+    }
+
+    const driverForPr = new DockerSandboxDriver();
+    if (prRef) {
+      const client = GitHubClient.fromEnv();
+      if (!client) {
+        console.error(
+          "no GitHub credential found. Set GITHUB_TOKEN, or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY.",
+        );
+        return 1;
+      }
+      if (!(await driverForPr.available())) {
+        console.error("docker is not available - run 'maestro doctor'");
+        return 1;
+      }
+
+      const providersPr = new ProviderConfigStore(db);
+      providersPr.ensureDefaults();
+
+      console.error(color.dim(`reviewing ${prRef.owner}/${prRef.repo}#${prRef.number}...`));
+      const result = await reviewPullRequest({
+        client,
+        db,
+        deps: {
+          driver: driverForPr,
+          registry: await providersPr.buildRegistry(),
+          spans: new SpanRecorder(db),
+        },
+        playbook,
+        playbookVersionId: playbookRecord.id,
+        pr: prRef,
+        dryRun: argv.includes("--dry-run"),
+        force: argv.includes("--force"),
+      });
+
+      if (result.skipped) {
+        console.error(color.yellow(`skipped: ${result.skipped}`));
+        return 0;
+      }
+      if (asJson) console.log(JSON.stringify(result.outcome, null, 2));
+      else console.log(result.markdown ?? "(no review produced)");
+      if (result.posted)
+        console.error(color.green(`posted (${result.posted.mode}) #${result.posted.id}`));
+      return result.state === "failed" ? 1 : 0;
     }
 
     let changedFiles: string[] = [];

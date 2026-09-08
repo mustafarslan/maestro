@@ -30,12 +30,17 @@ export interface RepoSnapshot {
   read: (path: string) => string | undefined;
 }
 
-const NODE_IMAGE = "node:22-bookworm-slim";
-const PYTHON_IMAGE = "python:3.12-slim-bookworm";
+/**
+ * Base images deliberately are NOT the `-slim` variants: those ship without git, which
+ * silently breaks git_diff, git_log and git_blame — and the diff is the single most
+ * important input an agent has. Paying for a larger image once beats every review
+ * losing its diff.
+ */
+const NODE_IMAGE = "node:22-bookworm";
+const PYTHON_IMAGE = "python:3.12-bookworm";
 const GO_IMAGE = "golang:1.25-bookworm";
-const RUST_IMAGE = "rust:1-slim-bookworm";
-/** Mixed repos get a base with git + build essentials and no language runtime opinion. */
-const POLYGLOT_IMAGE = "debian:bookworm-slim";
+const RUST_IMAGE = "rust:1-bookworm";
+const POLYGLOT_IMAGE = "buildpack-deps:bookworm-scm";
 
 export function detectToolchain(snap: RepoSnapshot): Toolchain {
   const has = (f: string) => snap.files.includes(f);

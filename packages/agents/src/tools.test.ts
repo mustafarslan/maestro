@@ -140,6 +140,43 @@ describe("read_file", () => {
   });
 });
 
+describe("git tools", () => {
+  it("reports a git failure instead of returning it as an empty diff", async () => {
+    // Regression: `git` was missing from the slim base image, stderr was discarded, and
+    // the agent saw "(no changes)". It then reported the empty diff as a defect in the
+    // code under review. A broken tool must look broken.
+    const sandbox = fakeSandbox(() => ({ exitCode: 127, stderr: "sh: 1: git: not found" }));
+    const res = await buildDispatch(ctxFor(sandbox))({ name: "git_diff", input: {} });
+
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("git: not found");
+    expect(res.output).not.toContain("no changes");
+  });
+
+  it("distinguishes a genuinely empty diff from a broken one", async () => {
+    const sandbox = fakeSandbox(() => ({ exitCode: 0, stdout: "" }));
+    const res = await buildDispatch(ctxFor(sandbox))({ name: "git_diff", input: {} });
+
+    expect(res.isError).toBeFalsy();
+    expect(res.output).toContain("no changes between the base and this head");
+  });
+
+  it("reports a git log failure too", async () => {
+    const sandbox = fakeSandbox(() => ({ exitCode: 128, stderr: "detected dubious ownership" }));
+    const res = await buildDispatch(ctxFor(sandbox))({ name: "git_log", input: {} });
+
+    expect(res.isError).toBe(true);
+    expect(res.output).toContain("dubious ownership");
+  });
+
+  it("falls back to two-dot diff when the shallow clone has no merge base", async () => {
+    const sandbox = fakeSandbox();
+    await buildDispatch(ctxFor(sandbox))({ name: "git_diff", input: {} });
+    expect(sandbox.commands[0]).toContain("...HEAD");
+    expect(sandbox.commands[0]).toContain("|| git diff");
+  });
+});
+
 describe("grep", () => {
   it("treats no matches as an answer, not a failure", async () => {
     // grep exits 1 when nothing matches; surfacing that as an error wastes agent steps.

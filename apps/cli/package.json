@@ -14,7 +14,8 @@
     "@maestro/playbook": "workspace:*",
     "@maestro/llm": "workspace:*",
     "@maestro/engine": "workspace:*",
-    "@maestro/sandbox": "workspace:*"
+    "@maestro/sandbox": "workspace:*",
+    "@maestro/integrations": "workspace:*"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
