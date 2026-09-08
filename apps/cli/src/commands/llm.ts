@@ -134,8 +134,15 @@ export async function llm(argv: string[]): Promise<number> {
               checkLine(c.passed ? "ok" : "fail", `  ${c.name}`, `${c.detail} (${c.durationMs}ms)`),
             );
           }
+          // A model that silently ignores tools still "passes" overall, because
+          // text-only work is valid - but binding a review agent to it would fail
+          // at run time, so say so loudly here.
+          const toolNote =
+            report.observed.tools === false
+              ? color.yellow("  tools: UNSUPPORTED - unusable for review agents")
+              : "";
           console.log(
-            `    ${report.passed ? color.green("passed") : color.red("failed")}` +
+            `    ${report.passed ? color.green("passed") : color.red("failed")}${toolNote}` +
               color.dim(`  cost ~${report.costCents.toFixed(3)}c\n`),
           );
         }

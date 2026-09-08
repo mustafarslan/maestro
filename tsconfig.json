@@ -1,8 +1,26 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/core" },
-    { "path": "./packages/playbook" },
-    { "path": "./apps/cli" }
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/playbook"
+    },
+    {
+      "path": "./packages/llm"
+    },
+    {
+      "path": "./packages/sandbox"
+    },
+    {
+      "path": "./packages/agents"
+    },
+    {
+      "path": "./packages/engine"
+    },
+    {
+      "path": "./apps/cli"
+    }
   ]
 }

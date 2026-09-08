@@ -297,6 +297,7 @@ and is far better than inventing filler.`,
       egressAllowlist: ["registry.npmjs.org", "pypi.org", "proxy.golang.org", "crates.io"],
       secrets: "none",
       trust: "trusted",
+      writableWorkdir: false,
     },
   };
 }

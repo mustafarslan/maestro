@@ -222,3 +222,90 @@ describe("agent loop", () => {
     expect(onStep).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("budget awareness", () => {
+  it("tells the agent to wrap up as its step budget runs out", async () => {
+    // Without this nudge an exploratory model spends the whole budget reading and never
+    // submits - full cost, zero findings.
+    const t = anthropicTransport([{ toolCalls: [{ id: "x", name: "echo", input: {} }] }]);
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 5, costCapCents: 1000 },
+      wrapUpAtStepsRemaining: 2,
+    });
+
+    const nudges = t.requests.filter((r) =>
+      JSON.stringify(r.body).includes("call submit now with what you already have"),
+    );
+    expect(nudges.length).toBeGreaterThan(0);
+  });
+
+  it("does not nag while there is plenty of budget left", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: {} }] },
+      { toolCalls: [{ id: "2", name: "submit", input: { answer: "done" } }] },
+    ]);
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 30, costCapCents: 1000 },
+      wrapUpAtStepsRemaining: 2,
+    });
+
+    expect(t.requests.every((r) => !JSON.stringify(r.body).includes("steps left"))).toBe(true);
+  });
+
+  it("also wraps up when the cost budget is nearly spent", async () => {
+    // 1M input tokens on Opus 5 = 500 cents, so one turn crosses 80% of a 600-cent cap.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "x", name: "echo", input: {} }], usage: { input: 1e6, output: 0 } },
+    ]);
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 30, costCapCents: 600 },
+    });
+
+    expect(t.requests.some((r) => JSON.stringify(r.body).includes("near your cost budget"))).toBe(
+      true,
+    );
+  });
+});
+
+describe("prose answers", () => {
+  it("asks once for a proper submission before discarding a prose answer", async () => {
+    // A model that answers in text has still done the analysis; throwing that away
+    // wastes the entire agent run.
+    const t = anthropicTransport([
+      { text: "I reviewed it and found a SQL injection." },
+      { toolCalls: [{ id: "1", name: "submit", input: { answer: "sql injection" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 6, costCapCents: 100 },
+    });
+
+    expect(result.stopKind).toBe("terminal-tool");
+    expect(result.terminalInput).toEqual({ answer: "sql injection" });
+    expect(JSON.stringify(t.requests.at(-1)?.body)).toContain("is discarded");
+  });
+
+  it("gives up after one re-ask rather than looping", async () => {
+    const t = anthropicTransport([{ text: "Still just prose." }]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 8, costCapCents: 100 },
+    });
+
+    expect(result.stopKind).toBe("no-tool-calls");
+    expect(t.requests).toHaveLength(2);
+  });
+});

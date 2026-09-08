@@ -4,6 +4,7 @@ import { doctor } from "./commands/doctor.js";
 import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
+import { review } from "./commands/review.js";
 import { color } from "./ui.js";
 
 const VERSION = "0.1.0";
@@ -20,9 +21,10 @@ ${color.bold("COMMANDS")}
   doctor               check runtime, git, docker, database and playbook health
   llm <sub>            providers, model catalog, conformance tests, API keys
   playbook <sub>       inspect, export, import and activate playbook versions
+  review <path>        review a local checkout in an isolated container
   version              print the version
 
-${color.dim("Coming in later phases: serve, review, mcp, eval")}
+${color.dim("Coming in later phases: serve, mcp, eval")}
 `);
   return 0;
 }
@@ -49,6 +51,8 @@ async function main(): Promise<number> {
       return llm(rest);
     case "playbook":
       return playbook(rest);
+    case "review":
+      return review(rest);
     default:
       console.error(`unknown command: ${cmd}\n`);
       usage();

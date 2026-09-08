@@ -1,0 +1,104 @@
+import type { Finding } from "@maestro/agents";
+import { defaultPlaybook } from "@maestro/playbook";
+import { describe, expect, it } from "vitest";
+import { triage } from "./triage.js";
+
+const doc = defaultPlaybook();
+
+const f = (over: Partial<Finding> = {}): Finding => ({
+  file: "src/a.ts",
+  lineStart: 10,
+  lineEnd: 10,
+  category: "sql-injection",
+  severity: "high",
+  confidence: 0.8,
+  title: "Unsanitised input",
+  body: "User input reaches the query.",
+  ...over,
+});
+
+describe("triage", () => {
+  it("merges the same defect found by two agents into one comment", () => {
+    // Saying it twice is the fastest way to make a review look automated and ignorable.
+    const result = triage(doc, [
+      { agentId: "security", findings: [f()] },
+      { agentId: "architecture", findings: [f({ title: "SQL built by concatenation" })] },
+    ]);
+
+    expect(result.posted).toHaveLength(1);
+    expect(result.posted[0]?.agentIds.sort()).toEqual(["architecture", "security"]);
+    expect(result.posted[0]?.agreementCount).toBe(2);
+  });
+
+  it("raises confidence when agents agree, because agreement is evidence", () => {
+    const alone = triage(doc, [{ agentId: "security", findings: [f({ confidence: 0.7 })] }]);
+    const agreed = triage(doc, [
+      { agentId: "security", findings: [f({ confidence: 0.7 })] },
+      { agentId: "architecture", findings: [f({ confidence: 0.7 })] },
+    ]);
+    expect(agreed.posted[0]!.confidence).toBeGreaterThan(alone.posted[0]!.confidence);
+  });
+
+  it("treats nearby lines in the same file and category as one defect", () => {
+    // Agents rarely anchor to the identical line.
+    const result = triage(doc, [
+      { agentId: "security", findings: [f({ lineStart: 10 })] },
+      { agentId: "architecture", findings: [f({ lineStart: 12 })] },
+    ]);
+    expect(result.posted).toHaveLength(1);
+  });
+
+  it("keeps different categories in the same file separate", () => {
+    const result = triage(doc, [
+      { agentId: "security", findings: [f({ category: "sql-injection" })] },
+      { agentId: "architecture", findings: [f({ category: "null-deref" })] },
+    ]);
+    expect(result.posted).toHaveLength(2);
+  });
+
+  it("suppresses findings below the confidence threshold", () => {
+    const result = triage(doc, [{ agentId: "security", findings: [f({ confidence: 0.3 })] }]);
+    expect(result.posted).toHaveLength(0);
+    expect(result.suppressed[0]?.suppressedReason).toContain("below threshold");
+  });
+
+  it("caps the number of posted comments and says how many it held back", () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      f({ file: `src/f${i}.ts`, category: `cat-${i}`, confidence: 0.9 }),
+    );
+    const result = triage(doc, [{ agentId: "security", findings: many }]);
+
+    expect(result.posted).toHaveLength(doc.triage.maxInlineComments);
+    expect(result.suppressed.length).toBe(40 - doc.triage.maxInlineComments);
+    expect(result.suppressed.every((s) => s.suppressedReason?.includes("cap"))).toBe(true);
+  });
+
+  it("ranks by severity first, then by confidence", () => {
+    const result = triage(doc, [
+      {
+        agentId: "security",
+        findings: [
+          f({ category: "a", severity: "low", confidence: 0.99 }),
+          f({ category: "b", severity: "critical", confidence: 0.7 }),
+          f({ category: "c", severity: "high", confidence: 0.95 }),
+          f({ category: "d", severity: "high", confidence: 0.75 }),
+        ],
+      },
+    ]);
+    expect(result.posted.map((x) => x.category)).toEqual(["b", "c", "d", "a"]);
+  });
+
+  it("keeps the most severe rating when two agents disagree on severity", () => {
+    const result = triage(doc, [
+      { agentId: "security", findings: [f({ severity: "critical" })] },
+      { agentId: "architecture", findings: [f({ severity: "low" })] },
+    ]);
+    expect(result.posted[0]?.severity).toBe("critical");
+  });
+
+  it("reports a clean review as a real outcome, not a failure", () => {
+    const result = triage(doc, [{ agentId: "security", findings: [] }]);
+    expect(result.posted).toHaveLength(0);
+    expect(result.summary).toContain("No issues met the reporting threshold");
+  });
+});

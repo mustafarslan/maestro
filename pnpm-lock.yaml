@@ -20,9 +20,15 @@ importers:
       '@ai-sdk/openai-compatible':
         specifier: 3.0.44
         version: 3.0.44(zod@4.5.4)
+      '@types/picomatch':
+        specifier: 4.0.2
+        version: 4.0.2
       ai:
         specifier: 7.0.93
         version: 7.0.93(zod@4.5.4)
+      picomatch:
+        specifier: 4.0.4
+        version: 4.0.4
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -45,12 +51,36 @@ importers:
       '@maestro/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@maestro/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@maestro/llm':
         specifier: workspace:*
         version: link:../../packages/llm
       '@maestro/playbook':
         specifier: workspace:*
         version: link:../../packages/playbook
+      '@maestro/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
+
+  packages/agents:
+    dependencies:
+      '@maestro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@maestro/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@maestro/playbook':
+        specifier: workspace:*
+        version: link:../playbook
+      '@maestro/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
 
   packages/core:
     dependencies:
@@ -60,6 +90,27 @@ importers:
       zod:
         specifier: ^4.1.5
         version: 4.5.4
+
+  packages/engine:
+    dependencies:
+      '@maestro/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@maestro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@maestro/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@maestro/playbook':
+        specifier: workspace:*
+        version: link:../playbook
+      '@maestro/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      picomatch:
+        specifier: 4.0.4
+        version: 4.0.4
 
   packages/llm:
     dependencies:
@@ -96,6 +147,15 @@ importers:
       zod:
         specifier: ^4.1.5
         version: 4.5.4
+
+  packages/sandbox:
+    dependencies:
+      '@maestro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@maestro/playbook':
+        specifier: workspace:*
+        version: link:../playbook
 
 packages:
 
@@ -500,6 +560,9 @@ packages:
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
+  '@types/picomatch@4.0.2':
+    resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
+
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
@@ -642,8 +705,8 @@ packages:
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
-  picomatch@4.0.7:
-    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
+  picomatch@4.0.4:
+    resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
   pino-abstract-transport@2.0.0:
@@ -1081,6 +1144,8 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/picomatch@4.0.2': {}
+
   '@vercel/oidc@3.2.0': {}
 
   '@vitest/expect@3.2.7':
@@ -1195,9 +1260,9 @@ snapshots:
 
   expect-type@1.4.0: {}
 
-  fdir@6.5.0(picomatch@4.0.7):
+  fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
-      picomatch: 4.0.7
+      picomatch: 4.0.4
 
   fsevents@2.3.3:
     optional: true
@@ -1224,7 +1289,7 @@ snapshots:
 
   picocolors@1.1.1: {}
 
-  picomatch@4.0.7: {}
+  picomatch@4.0.4: {}
 
   pino-abstract-transport@2.0.0:
     dependencies:
@@ -1320,8 +1385,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
 
   tinypool@1.1.1: {}
 
@@ -1359,8 +1424,8 @@ snapshots:
   vite@7.3.6(@types/node@22.20.1)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
       postcss: 8.5.28
       rollup: 4.63.1
       tinyglobby: 0.2.17
@@ -1384,7 +1449,7 @@ snapshots:
       expect-type: 1.4.0
       magic-string: 0.30.21
       pathe: 2.0.3
-      picomatch: 4.0.7
+      picomatch: 4.0.4
       std-env: 3.10.0
       tinybench: 2.9.0
       tinyexec: 0.3.2

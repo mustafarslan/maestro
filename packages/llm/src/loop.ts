@@ -68,6 +68,12 @@ export interface RunAgentOptions {
   maxRetriesPerStep?: number;
   /** Base for exponential backoff; lowered in tests to keep them fast. */
   backoffBaseMs?: number;
+  /**
+   * Steps remaining at which the agent is told to wrap up. Without this an exploratory
+   * model spends its whole budget reading and never submits, which produces a review
+   * with zero findings and full cost — the worst possible outcome.
+   */
+  wrapUpAtStepsRemaining?: number;
 }
 
 const DEFAULT_RETRIES = 3;
@@ -90,6 +96,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   let usage = ZERO_USAGE;
   let totalCost = 0;
   let finalText = "";
+  let askedToSubmit = false;
 
   const stop = (stopKind: StopKind, terminalInput?: unknown): LoopResult => ({
     steps,
@@ -121,6 +128,20 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       steps.push(step);
       await opts.onStep?.(step);
       messages.push({ role: "assistant", content: response.text });
+
+      // Some models answer in prose instead of calling the terminal tool. Discarding
+      // that work outright wastes a whole agent run, so ask once, explicitly, before
+      // giving up. Only once: a model that ignores the second ask will ignore a third.
+      if (!askedToSubmit && index < budget.maxSteps - 1) {
+        askedToSubmit = true;
+        messages.push({
+          role: "user",
+          content:
+            `You answered in prose, but only ${terminalTool} is recorded - anything outside that call is discarded. ` +
+            `Call ${terminalTool} now with the findings from your analysis. An empty list is valid if you found nothing.`,
+        });
+        continue;
+      }
       return stop("no-tool-calls");
     }
 
@@ -155,6 +176,24 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
     );
 
     messages.push({ role: "tool", results: toolResults });
+
+    // Budget awareness. A model that cannot see its own step budget will happily explore
+    // until it is cut off; telling it how much room is left converts a wasted run into a
+    // submitted one.
+    const wrapUpAt = opts.wrapUpAtStepsRemaining ?? 3;
+    const remaining = budget.maxSteps - index - 1;
+    const nearCostCap = totalCost >= budget.costCapCents * 0.8;
+    if (remaining > 0 && (remaining <= wrapUpAt || nearCostCap)) {
+      messages.push({
+        role: "user",
+        content:
+          `You have ${remaining} step${remaining === 1 ? "" : "s"} left` +
+          (nearCostCap ? " and are near your cost budget" : "") +
+          `. Stop investigating and call ${terminalTool} now with what you already have. ` +
+          "Reporting fewer, well-supported findings is the expected outcome; an empty list is valid.",
+      });
+    }
+
     const step: LoopStep = { index, response, toolResults, costCents: stepCost };
     steps.push(step);
     await opts.onStep?.(step);

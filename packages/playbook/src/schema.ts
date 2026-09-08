@@ -32,6 +32,12 @@ export const EnvSpecSchema = z.object({
     .default(["registry.npmjs.org", "pypi.org", "proxy.golang.org", "crates.io"]),
   secrets: z.literal("none").default("none"),
   trust: TrustLevel.default("trusted"),
+  /**
+   * Analyze runs with a read-only rootfs. Repos whose tests write into the checkout
+   * (coverage output, .next, build caches) need a writable scratch overlay; it is
+   * opt-in so the default posture stays locked down.
+   */
+  writableWorkdir: z.boolean().default(false),
 });
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;
 

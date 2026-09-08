@@ -12,7 +12,9 @@
   "dependencies": {
     "@maestro/core": "workspace:*",
     "@maestro/playbook": "workspace:*",
-    "@maestro/llm": "workspace:*"
+    "@maestro/llm": "workspace:*",
+    "@maestro/engine": "workspace:*",
+    "@maestro/sandbox": "workspace:*"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

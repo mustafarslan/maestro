@@ -26,7 +26,9 @@
     "@ai-sdk/google": "4.0.64",
     "@ai-sdk/openai": "4.0.60",
     "@ai-sdk/openai-compatible": "3.0.44",
+    "@types/picomatch": "4.0.2",
     "ai": "7.0.93",
+    "picomatch": "4.0.4",
     "zod": "4.5.4"
   }
 }

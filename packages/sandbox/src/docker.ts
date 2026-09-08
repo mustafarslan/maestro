@@ -1,0 +1,367 @@
+import { spawn } from "node:child_process";
+import { logger, newId } from "@maestro/core";
+import type { EnvSpec } from "@maestro/playbook";
+import { startEgressProxy } from "./egress-proxy.js";
+import { detectedCommands, detectToolchain, expandAuto } from "./toolchain.js";
+import type {
+  ExecResult,
+  PreparedEnvironment,
+  PrepareRequest,
+  Sandbox,
+  SandboxDriver,
+} from "./types.js";
+
+export const LABEL_MANAGED = "maestro.managed";
+export const LABEL_REVIEW = "maestro.review";
+export const LABEL_CREATED = "maestro.created";
+
+const WORKDIR = "/work";
+/** Caches must live somewhere writable, because the analyze rootfs is read-only. */
+const CACHE_DIR = "/tmp/maestro-cache";
+
+interface RunOptions {
+  timeoutMs: number;
+  input?: string;
+  signal?: AbortSignal;
+  /** Cap captured output; a runaway build can emit tens of MB. */
+  maxOutputBytes?: number;
+}
+
+const DEFAULT_MAX_OUTPUT = 512 * 1024;
+
+async function docker(args: string[], opts: Partial<RunOptions> = {}): Promise<ExecResult> {
+  const started = Date.now();
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const maxBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
+
+  return new Promise((resolve) => {
+    const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let outBytes = 0;
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
+
+    const onAbort = () => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    child.stdout.on("data", (d: Buffer) => {
+      outBytes += d.length;
+      if (outBytes <= maxBytes) stdout += d.toString();
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      if (stderr.length < maxBytes) stderr += d.toString();
+    });
+    if (opts.input !== undefined) child.stdin.end(opts.input);
+    else child.stdin.end();
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      if (outBytes > maxBytes) {
+        stdout += `\n... [output truncated: ${outBytes} bytes total, showing first ${maxBytes}]`;
+      }
+      resolve({
+        command: `docker ${args.join(" ")}`,
+        exitCode: timedOut ? 124 : (code ?? 1),
+        stdout,
+        stderr,
+        durationMs: Date.now() - started,
+        timedOut,
+      });
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({
+        command: `docker ${args.join(" ")}`,
+        exitCode: 127,
+        stdout: "",
+        stderr: err.message,
+        durationMs: Date.now() - started,
+        timedOut: false,
+      });
+    });
+  });
+}
+
+function parseMemory(value: string): string {
+  // Docker wants "4g"/"512m"; the playbook writes "4GiB"/"512MiB".
+  const m = /^(\d+(?:\.\d+)?)\s*([kKmMgG])?i?[bB]?$/.exec(value.trim());
+  if (!m) return "2g";
+  return `${m[1]}${(m[2] ?? "g").toLowerCase()}`;
+}
+
+export class DockerSandboxDriver implements SandboxDriver {
+  readonly name = "docker";
+
+  async available(): Promise<boolean> {
+    const res = await docker(["version", "--format", "{{.Server.Version}}"], { timeoutMs: 10_000 });
+    return res.exitCode === 0;
+  }
+
+  async prepare(req: PrepareRequest): Promise<PreparedEnvironment> {
+    const { spec, reviewId } = req;
+    const id = newId("env");
+    const log = logger.child({ reviewId, envId: id });
+
+    const snapshot = await snapshotOfDirectory(req.sourcePath);
+    const toolchain = detectToolchain(snapshot);
+    const image = spec.image === "auto" ? toolchain.image : spec.image;
+    const setup = expandAuto(spec.setup, toolchain.setup);
+    const allowedCommands = expandAuto(spec.allowedCommands, detectedCommands(toolchain));
+
+    log.info({ toolchain: toolchain.kind, image, setup, allowedCommands }, "preparing environment");
+
+    const pull = await docker(["pull", image], { timeoutMs: spec.timeouts.prepareSec * 1000 });
+    if (pull.exitCode !== 0 && !pull.stderr.includes("up to date")) {
+      log.warn({ stderr: pull.stderr.slice(0, 500) }, "image pull failed; trying local image");
+    }
+
+    // Network for the prepare phase goes through an allowlist proxy — nothing else.
+    const proxy = await startEgressProxy(spec.egressAllowlist);
+    const containerId = `maestro-prep-${id}`;
+
+    try {
+      const hostGateway =
+        process.platform === "linux" ? ["--add-host", "host.docker.internal:host-gateway"] : [];
+      const proxyUrl = `http://host.docker.internal:${proxy.port}`;
+
+      const create = await docker(
+        [
+          "create",
+          "--name",
+          containerId,
+          "--label",
+          `${LABEL_MANAGED}=true`,
+          "--label",
+          `${LABEL_REVIEW}=${reviewId}`,
+          "--label",
+          `${LABEL_CREATED}=${new Date().toISOString()}`,
+          ...hostGateway,
+          "--memory",
+          parseMemory(spec.memory),
+          "--cpus",
+          String(spec.cpus),
+          "--pids-limit",
+          String(spec.pids),
+          "--security-opt",
+          "no-new-privileges",
+          // Proxy vars are the ONLY route out; the container has no direct egress path
+          // it can use without them for the package managers we drive.
+          "--env",
+          `HTTP_PROXY=${proxyUrl}`,
+          "--env",
+          `HTTPS_PROXY=${proxyUrl}`,
+          "--env",
+          `http_proxy=${proxyUrl}`,
+          "--env",
+          `https_proxy=${proxyUrl}`,
+          "--env",
+          "NO_PROXY=localhost,127.0.0.1",
+          "--env",
+          `npm_config_cache=${CACHE_DIR}/npm`,
+          "--env",
+          `XDG_CACHE_HOME=${CACHE_DIR}`,
+          "--workdir",
+          WORKDIR,
+          image,
+          "sleep",
+          String(spec.timeouts.prepareSec + 60),
+        ],
+        { timeoutMs: 60_000 },
+      );
+      if (create.exitCode !== 0) throw new Error(`docker create failed: ${create.stderr}`);
+
+      // The checkout is copied in rather than bind-mounted: the host source must not be
+      // mutable from inside the container.
+      const copy = await docker(["cp", `${req.sourcePath}/.`, `${containerId}:${WORKDIR}`], {
+        timeoutMs: spec.timeouts.prepareSec * 1000,
+      });
+      if (copy.exitCode !== 0) throw new Error(`docker cp failed: ${copy.stderr}`);
+
+      const start = await docker(["start", containerId], { timeoutMs: 30_000 });
+      if (start.exitCode !== 0) throw new Error(`docker start failed: ${start.stderr}`);
+
+      await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR], { timeoutMs: 20_000 });
+
+      const setupResults: ExecResult[] = [];
+      for (const command of setup) {
+        log.info({ command }, "setup");
+        const res = await docker(
+          ["exec", "--workdir", WORKDIR, containerId, "sh", "-lc", command],
+          { timeoutMs: spec.timeouts.prepareSec * 1000, signal: req.signal },
+        );
+        setupResults.push({ ...res, command });
+        if (res.exitCode !== 0) {
+          log.warn(
+            { command, exitCode: res.exitCode, stderr: res.stderr.slice(0, 800) },
+            "setup step failed",
+          );
+        }
+      }
+
+      // Snapshot so every agent gets an identical starting point without repeating install.
+      const commit = await docker(
+        [
+          "commit",
+          "--change",
+          `LABEL ${LABEL_MANAGED}=true`,
+          "--change",
+          `LABEL ${LABEL_REVIEW}=${reviewId}`,
+          "--change",
+          `LABEL ${LABEL_CREATED}=${new Date().toISOString()}`,
+          containerId,
+          `maestro/snapshot:${id}`,
+        ],
+        { timeoutMs: spec.timeouts.prepareSec * 1000 },
+      );
+      if (commit.exitCode !== 0) throw new Error(`docker commit failed: ${commit.stderr}`);
+
+      return {
+        id,
+        reviewId,
+        imageId: `maestro/snapshot:${id}`,
+        toolchain,
+        allowedCommands,
+        setupResults,
+        egressLog: proxy.log.map((e) => ({ host: e.host, allowed: e.allowed })),
+      };
+    } finally {
+      // The proxy closes with the phase: no network survives into analyze.
+      await proxy.close();
+      await docker(["rm", "-f", containerId], { timeoutMs: 60_000 });
+    }
+  }
+
+  async analyze(
+    env: PreparedEnvironment,
+    opts: { agentId?: string; spec: EnvSpec },
+  ): Promise<Sandbox> {
+    const { spec } = opts;
+    const id = newId("env");
+    const containerId = `maestro-run-${id}`;
+
+    const args = [
+      "run",
+      "-d",
+      "--name",
+      containerId,
+      "--label",
+      `${LABEL_MANAGED}=true`,
+      "--label",
+      `${LABEL_REVIEW}=${env.reviewId}`,
+      "--label",
+      `${LABEL_CREATED}=${new Date().toISOString()}`,
+      // The analyze posture: no network, no privileges, no writable system, no secrets.
+      "--network",
+      "none",
+      "--read-only",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      String(spec.pids),
+      "--memory",
+      parseMemory(spec.memory),
+      "--cpus",
+      String(spec.cpus),
+      "--tmpfs",
+      `/tmp:rw,size=${spec.tmpfs.replace(/i?[bB]$/, "")},exec`,
+      "--env",
+      `TMPDIR=${CACHE_DIR}`,
+      "--env",
+      `npm_config_cache=${CACHE_DIR}/npm`,
+      "--env",
+      `XDG_CACHE_HOME=${CACHE_DIR}`,
+      "--workdir",
+      WORKDIR,
+    ];
+    // Tests commonly write into the checkout (coverage, .next, caches). A writable
+    // overlay is opt-in per playbook so the default stays locked down.
+    if (spec.writableWorkdir) args.push("--tmpfs", `${WORKDIR}/.maestro-scratch:rw,exec`);
+
+    args.push(env.imageId, "sleep", String(spec.timeouts.analyzeSec + 60));
+
+    const run = await docker(args, { timeoutMs: 60_000 });
+    if (run.exitCode !== 0) throw new Error(`docker run failed: ${run.stderr}`);
+    await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR], { timeoutMs: 20_000 });
+
+    return {
+      id,
+      agentId: opts.agentId,
+      containerId,
+      exec: async (command, execOpts) => ({
+        ...(await docker(["exec", "--workdir", WORKDIR, containerId, "sh", "-lc", command], {
+          timeoutMs: (execOpts?.timeoutSec ?? spec.timeouts.commandSec) * 1000,
+        })),
+        command,
+      }),
+      readFile: async (path, maxBytes = 256 * 1024) => {
+        const res = await docker(
+          ["exec", "--workdir", WORKDIR, containerId, "head", "-c", String(maxBytes), path],
+          { timeoutMs: 30_000, maxOutputBytes: maxBytes + 1024 },
+        );
+        if (res.exitCode !== 0) throw new Error(res.stderr.trim() || `cannot read ${path}`);
+        return res.stdout;
+      },
+      destroy: async () => {
+        await docker(["rm", "-f", containerId], { timeoutMs: 60_000 });
+      },
+    };
+  }
+
+  async reap(opts: { reviewId?: string; olderThanMs?: number } = {}): Promise<{
+    containers: number;
+    images: number;
+  }> {
+    const filters = [`label=${LABEL_MANAGED}=true`];
+    if (opts.reviewId) filters.push(`label=${LABEL_REVIEW}=${opts.reviewId}`);
+    const filterArgs = filters.flatMap((f) => ["--filter", f]);
+
+    const containers = await listIds(["ps", "-aq", ...filterArgs]);
+    for (const c of containers) await docker(["rm", "-f", c], { timeoutMs: 60_000 });
+
+    // Snapshot images are where disk actually fills up; a reaper that only sweeps
+    // containers leaves the layers behind.
+    const images = await listIds(["images", "-q", ...filterArgs]);
+    for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
+
+    return { containers: containers.length, images: images.length };
+  }
+}
+
+async function listIds(args: string[]): Promise<string[]> {
+  const res = await docker(args, { timeoutMs: 30_000 });
+  return res.exitCode === 0
+    ? res.stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
+}
+
+async function snapshotOfDirectory(path: string) {
+  const { readdirSync, readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const files = existsSync(path) ? readdirSync(path) : [];
+  return {
+    files,
+    read: (rel: string): string | undefined => {
+      try {
+        return readFileSync(join(path, rel), "utf8");
+      } catch {
+        return undefined;
+      }
+    },
+  };
+}
+
+export { docker as dockerCommand };

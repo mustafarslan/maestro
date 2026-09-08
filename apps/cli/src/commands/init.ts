@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dbPath, logsDir, maestroHome, migrate, openStore, workspacesDir } from "@maestro/core";
+import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { checkLine, color } from "../ui.js";
 
@@ -28,6 +29,19 @@ export async function init(): Promise<number> {
       `'${record.doc.name}' v${record.version} - ${record.doc.agents.map((a) => a.id).join(", ")}`,
     ),
   );
+  const providers = new ProviderConfigStore(db);
+  providers.ensureDefaults();
+  console.log(
+    checkLine(
+      "ok",
+      "providers",
+      providers
+        .list()
+        .map((p) => p.id)
+        .join(", "),
+    ),
+  );
+
   db.close();
 
   console.log(`\n${color.green("ready")}. Next: ${color.cyan("maestro doctor")}\n`);
