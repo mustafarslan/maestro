@@ -1,0 +1,22 @@
+{
+  "name": "@maestro/playbook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@maestro/core": "workspace:*",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.5"
+  },
+  "types": "./dist/index.d.ts"
+}
