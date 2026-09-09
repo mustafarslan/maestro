@@ -1,4 +1,6 @@
+import { inClause } from "./finding-status.js";
 import { newId } from "./ids.js";
+import { ACTIVE_TASK_STATES } from "./lifecycle.js";
 import type { SqlDatabase } from "./store/driver.js";
 
 export interface CreateReviewInput {
@@ -243,8 +245,9 @@ export function recoverStaleReviews(db: SqlDatabase, olderThanMs: number): numbe
     // sandbox the UI shows as live for ever and nothing ever reconciles.
     db.prepare(
       `UPDATE tasks SET state='failed', error=?, finished_at=?
-       WHERE review_id IN (${list}) AND state IN ('pending','ready','running')`,
-    ).run("interrupted with its review", now, ...stale);
+       WHERE review_id IN (${list})
+         AND state IN (${inClause(ACTIVE_TASK_STATES).sql})`,
+    ).run("interrupted with its review", now, ...stale, ...inClause(ACTIVE_TASK_STATES).params);
 
     // 'leaked', not 'destroyed': whether the container actually went away is unknown,
     // and claiming it was cleaned up is the assertion that hides a disk filling.

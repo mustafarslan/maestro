@@ -1,6 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { bySeverity, JobQueue, maestroHome, type SqlDatabase } from "@maestro/core";
+import {
+  bySeverity,
+  JobQueue,
+  LIVE_ENVIRONMENT_STATES,
+  maestroHome,
+  type SqlDatabase,
+} from "@maestro/core";
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
@@ -202,7 +208,13 @@ const routes: Route[] = [
               e.created_at DESC
             LIMIT 200`,
         )
-        .all(),
+        .all<{ state: string }>()
+        // Decided here, from the one definition, so the browser bundle needs no copy of a
+        // vocabulary it cannot import.
+        .map((row) => ({
+          ...row,
+          live: (LIVE_ENVIRONMENT_STATES as readonly string[]).includes(row.state),
+        })),
     }),
   },
   {

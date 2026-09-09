@@ -10,7 +10,11 @@ import { api, type EnvironmentRow } from "./api";
  * something leaked but not what — this says which review, which agent, and when the lease
  * expired, which is the difference between a number and something you can act on.
  */
-const LIVE = new Set(["creating", "ready", "running", "destroying"]);
+// No state vocabulary here at all. This file used to keep its own set of "live" states,
+// enumerating three — creating, ready, destroying — that nothing ever writes, which implied
+// a lifecycle the code does not have. The UI is a browser bundle and cannot import the
+// canonical list from `core`, so rather than duplicate it the server now decides: each row
+// arrives with `live`, computed there from the one definition.
 
 function age(iso: string | null): string {
   if (!iso) return "—";
@@ -54,7 +58,7 @@ export function Environments() {
     );
   }
 
-  const live = rows.filter((r) => LIVE.has(r.state));
+  const live = rows.filter((r) => r.live);
   // A leaked row keeps its state for ever — that a review could not clean up after
   // itself is worth remembering — so "still leaking" is the ones no sweep has collected.
   const leaked = rows.filter((r) => r.state === "leaked" && !r.destroyed_at);
@@ -94,7 +98,7 @@ export function Environments() {
                 <tr key={r.id}>
                   <td>
                     <span
-                      className={`badge ${r.state === "leaked" ? "failed" : LIVE.has(r.state) ? "running" : "done"}`}
+                      className={`badge ${r.state === "leaked" ? "failed" : r.live ? "running" : "done"}`}
                     >
                       {r.state}
                     </span>
@@ -108,7 +112,7 @@ export function Environments() {
                     {r.container_id ? r.container_id.slice(0, 12) : "—"}
                   </td>
                   <td className="muted">{age(r.created_at)}</td>
-                  <td className={expired && LIVE.has(r.state) ? "" : "muted"}>
+                  <td className={expired && r.live ? "" : "muted"}>
                     {/* `lease_until` is stamped once, at creation, as prepare plus analyze
                         timeouts; nothing renews it. So an expired lease on a row still
                         marked live means the environment has outlived the entire time
@@ -116,7 +120,7 @@ export function Environments() {
                         is not what `reap` keys on: that sweeps by Docker label and age,
                         which is why this is a signal to look rather than a duplicate of
                         the reaper's own state. */}
-                    {LIVE.has(r.state)
+                    {r.live
                       ? expired
                         ? `expired ${age(r.lease_until)} ago`
                         : `${age(r.lease_until)} left`

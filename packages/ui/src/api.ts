@@ -245,6 +245,8 @@ export interface EnvironmentRow {
   repo: string;
   pr_number: number;
   review_state: string;
+  /** Decided by the server: the UI keeps no state vocabulary of its own. */
+  live: boolean;
 }
 
 /** Recorded golden-set scores, and the version-versus-version comparison built from them. */

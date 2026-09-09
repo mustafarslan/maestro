@@ -1757,6 +1757,28 @@ to answer.
     to apply looked exactly like a guard that holds. The harness prints "anchor missing" for this
     reason; by hand I had to assert it applied, which is now what I do.
 
+153. **The schema describes lifecycles the code never enacts.** `environments` declares
+    `creating|ready|running|destroying|destroyed|leaked` and only three are ever written;
+    `tasks` declares seven and only four are. The unwritten states are not inert:
+    `recoverStaleReviews` filtered stranded tasks on `state IN ('pending','ready','running')`,
+    and nothing has ever written the first two — so two-thirds of the condition that recovers a
+    crashed daemon's work could never match. It happened to be correct, because the one state
+    that does get written was in the list.
+
+    The admin UI kept its own hand-written set of "live" environment states enumerating three
+    that never occur, so anyone reading either file would believe in a lifecycle that does not
+    exist. That set is gone rather than corrected: the UI is a browser bundle and cannot import
+    the canonical list from `core`, so instead of a second copy the server now sends `live` per
+    row, decided from the one definition. The vocabulary left the client entirely.
+
+    `ENVIRONMENT_STATES` and `TASK_STATES` record what the system does rather than what it was
+    once imagined doing, with the active subsets derived and pinned. The migration is left
+    untouched: it is applied history, and rewriting its comments would not change any database
+    that already exists.
+
+    Third vocabulary in three findings — review states, finding statuses, now lifecycles — and
+    the same shape each time: a set of strings that several files agree on by coincidence.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
