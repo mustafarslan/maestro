@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arg, has } from "./args.js";
+import { arg, has, numberArg } from "./args.js";
 
 describe("flag parsing", () => {
   it("accepts both spellings, because both are conventional", () => {
@@ -36,5 +36,41 @@ describe("flag parsing", () => {
     expect(has(["--force"], "--force")).toBe(true);
     expect(has(["--force=true"], "--force")).toBe(true);
     expect(has(["--other"], "--force")).toBe(false);
+  });
+});
+
+describe("numeric flags", () => {
+  it("rejects a value that is not a number instead of passing NaN downstream", () => {
+    // Measured before the fix: --workers abc made `for (i = 0; i < NaN; i++)` run zero
+    // times, so the daemon started, printed a healthy banner and never reviewed
+    // anything. --poll-interval abc became setInterval(fn, NaN), which the spec coerces
+    // to 1ms — a tight loop against the GitHub API. Both look like they are working,
+    // which is what makes them worse than a crash.
+    expect(() => numberArg(["--workers", "abc"], "--workers")).toThrow(/must be a number/);
+  });
+
+  it("rejects a fractional count", () => {
+    expect(() => numberArg(["--workers", "2.5"], "--workers")).toThrow(/whole number/);
+  });
+
+  it("enforces the range it is given", () => {
+    expect(() => numberArg(["--workers", "0"], "--workers", { min: 1 })).toThrow(/at least 1/);
+    expect(() => numberArg(["--admin-port", "70000"], "--admin-port", { max: 65535 })).toThrow(
+      /at most 65535/,
+    );
+  });
+
+  it("returns the fallback when the flag is absent, and only then", () => {
+    expect(numberArg([], "--workers", { fallback: 3 })).toBe(3);
+    expect(numberArg(["--workers", "8"], "--workers", { fallback: 3 })).toBe(8);
+  });
+
+  it("accepts zero where zero is meaningful", () => {
+    // --webhook-port 0 asks the OS for any free port, which the tests rely on.
+    expect(numberArg(["--webhook-port", "0"], "--webhook-port", { min: 0 })).toBe(0);
+  });
+
+  it("reads the inline spelling too", () => {
+    expect(numberArg(["--workers=8"], "--workers")).toBe(8);
   });
 });

@@ -426,6 +426,16 @@ These are recorded because each was invisible to the test suite that existed at 
     earlier that day, so `--all=true` was silently ignored — the same `--flag=value` gap that had
     made the whole Compose deployment do nothing.
 
+60. **Numeric flags accepted anything and passed NaN downstream.** `Number("abc")` is NaN and NaN
+    is silent everywhere it goes. Measured: `--workers abc` made `for (let i = 0; i < NaN; i++)`
+    run zero times, so the daemon started, printed a healthy banner and never reviewed anything;
+    `--poll-interval abc` became `setInterval(fn, NaN)`, which the spec coerces to 1ms — a tight
+    loop against the GitHub API. Both are worse than a crash because both look like they are
+    working. Every numeric flag is now parsed and range-checked before anything starts.
+61. **`serve` printed an admin URL of 127.0.0.1 regardless of where it bound**, so a deployment
+    using `--admin-host 0.0.0.0` was handed a URL that works from the host and not from where the
+    operator needed it. Seen in this project's own Compose logs and read past.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

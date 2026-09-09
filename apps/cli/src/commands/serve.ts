@@ -1,6 +1,6 @@
 import { openStore } from "@maestro/core";
 import { startDaemon } from "@maestro/server";
-import { arg } from "../args.js";
+import { arg, numberArg } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 export async function serve(argv: string[]): Promise<number> {
@@ -24,19 +24,31 @@ ${color.bold("maestro serve")} [options]
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const webhookPort = arg(argv, "--webhook-port");
+  // Every numeric flag is validated before anything starts. NaN passes silently into
+  // everything downstream and produces a daemon that looks healthy and does nothing.
+  let webhookPort: number | undefined;
+  let adminPort: number;
+  let pollIntervalSec: number;
+  let workers: number;
+  try {
+    webhookPort = numberArg(argv, "--webhook-port", { min: 0, max: 65535 });
+    adminPort = numberArg(argv, "--admin-port", { min: 0, max: 65535, fallback: 7777 }) as number;
+    pollIntervalSec = numberArg(argv, "--poll-interval", { min: 1, fallback: 60 }) as number;
+    workers = numberArg(argv, "--workers", { min: 1, max: 64, fallback: 3 }) as number;
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
 
   const daemon = await startDaemon({
     db,
-    webhookPort: webhookPort ? Number(webhookPort) : undefined,
+    webhookPort,
     webhookSecret: arg(argv, "--webhook-secret") ?? process.env.GITHUB_WEBHOOK_SECRET,
-    adminPort: Number(arg(argv, "--admin-port") ?? 7777),
+    adminPort,
     adminHost: arg(argv, "--admin-host"),
     adminToken: process.env.MAESTRO_ADMIN_TOKEN,
-    poll: pollRepos.length
-      ? { repos: pollRepos, intervalMs: Number(arg(argv, "--poll-interval") ?? 60) * 1000 }
-      : undefined,
-    concurrentReviews: Number(arg(argv, "--workers") ?? 3),
+    poll: pollRepos.length ? { repos: pollRepos, intervalMs: pollIntervalSec * 1000 } : undefined,
+    concurrentReviews: workers,
   });
 
   console.log(color.bold("\nmaestro serve\n"));
@@ -55,8 +67,17 @@ ${color.bold("maestro serve")} [options]
       ),
     );
   }
+  // Print the address it is actually bound to. Saying 127.0.0.1 while bound to 0.0.0.0
+  // hands someone a URL that works from their machine and not from where they need it.
+  const adminHost = arg(argv, "--admin-host");
+  const shown = !adminHost || adminHost === "0.0.0.0" ? "127.0.0.1" : adminHost;
   console.log(
-    checkLine("ok", "admin", `http://127.0.0.1:${daemon.adminPort}/?token=${daemon.adminToken}`),
+    checkLine(
+      "ok",
+      "admin",
+      `http://${shown}:${daemon.adminPort}/?token=${daemon.adminToken}` +
+        (adminHost && adminHost !== "127.0.0.1" ? `  (bound to ${adminHost})` : ""),
+    ),
   );
   console.log(color.dim("\nctrl-c to stop\n"));
 
