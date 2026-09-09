@@ -357,3 +357,47 @@ describe("the endpoints the Studio and Quality views need", () => {
     expect((await fetch(`${base}/api/providers/test`, { method: "POST" })).status).toBe(401);
   });
 });
+
+describe("serving the embedded UI", () => {
+  // These headers are invisible to a unit test of the asset map and to `doctor`, and wrong
+  // ones are the kind of thing that breaks a UI for a year rather than immediately. Found
+  // by serving the compiled binary and asking it for a route.
+  it("never marks a client-side route immutable", async () => {
+    // The test used to be `assetPath === "/index.html"`, so `/quality` — which IS
+    // index.html, served for a route the SPA owns — took the immutable branch and was
+    // cached for a year. After an upgrade a browser sitting there would keep serving the
+    // old index, pointing at asset hashes that no longer exist, until somebody thought to
+    // hard-reload.
+    const res = await fetch(`${base}/quality`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not mark the index immutable either", async () => {
+    const res = await fetch(`${base}/`);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("404s a hashed asset that does not exist rather than answering with HTML", async () => {
+    // A browser asked for a script. Answering 200 with index.html gives it a MIME error
+    // instead of a plain miss, and pins that answer for a year.
+    const res = await fetch(`${base}/assets/index-STALEHASH.js`);
+    expect(res.status).toBe(404);
+  });
+
+  it("serves a real hashed asset immutable, which is the point of hashing it", async () => {
+    const index = await (await fetch(`${base}/`)).text();
+    const href = /\/assets\/[^"']+\.js/.exec(index)?.[0];
+    expect(href, "index.html should reference a hashed asset").toBeTruthy();
+
+    const res = await fetch(`${base}${href}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    expect(res.headers.get("content-type")).toContain("javascript");
+  });
+
+  it("does not require the token, since the UI has to load before it can send one", async () => {
+    expect((await fetch(`${base}/`)).status).toBe(200);
+  });
+});

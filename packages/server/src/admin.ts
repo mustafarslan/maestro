@@ -78,16 +78,34 @@ export async function startAdminServer(opts: AdminServerOptions): Promise<Runnin
 
       // Static UI. Unknown paths fall through to index.html so client-side routing works.
       const assetPath = url.pathname === "/" ? "/index.html" : url.pathname;
-      const asset = UI_ASSETS[assetPath] ?? UI_ASSETS["/index.html"];
+      const exact = UI_ASSETS[assetPath];
+
+      // A missing file under /assets/ is a stale URL, not a route. Falling it through to
+      // index.html answered 200 with HTML for a request the browser made for a script,
+      // which surfaces as a confusing MIME error instead of a plain 404 — and, with the
+      // caching below, pinned that answer for a year.
+      if (!exact && assetPath.startsWith("/assets/")) {
+        res.writeHead(404).end("not found");
+        return;
+      }
+
+      const asset = exact ?? UI_ASSETS["/index.html"];
       if (!asset) {
         res.writeHead(404).end("ui not embedded; run scripts/embed-ui.mjs");
         return;
       }
+
+      // Immutable ONLY for a file that exists under its content-hashed name. The test used
+      // to be `assetPath === "/index.html"`, so every client-side route — `/quality`,
+      // `/studio`, anything the SPA owns — took the immutable branch and was cached for a
+      // year while actually being index.html. After an upgrade, a browser sitting on
+      // `/quality` would keep serving the old index from cache, pointing at asset hashes
+      // that no longer exist: a UI broken until someone thought to hard-reload. Found by
+      // serving the compiled binary and asking for a route, which no unit test does.
+      const immutable = exact !== undefined && assetPath !== "/index.html";
       res.writeHead(200, {
         "content-type": asset.mime,
-        // The UI is rebuilt with the binary, so hashed assets can cache but index cannot.
-        "cache-control":
-          assetPath === "/index.html" ? "no-store" : "public, max-age=31536000, immutable",
+        "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
         "x-content-type-options": "nosniff",
       });
       res.end(Buffer.from(asset.body, "base64"));

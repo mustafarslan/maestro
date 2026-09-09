@@ -1223,6 +1223,27 @@ before a release, and either would catch the other side changing under us.
     a test that cannot fail, one layer up. Verified the other way round: breaking the driver
     deliberately now exits the gate 1.
 
+129. **Every page of the admin UI was cached immutable for a year.** The cache-control test
+    was `assetPath === "/index.html"`, so only the literal index path got `no-store`. Every
+    client-side route — `/quality`, `/studio`, anything the SPA owns — *is* index.html, served
+    under a different path, and therefore took the other branch:
+    `public, max-age=31536000, immutable`. A browser that visited `/quality` once cached that
+    HTML for a year. After an upgrade it would keep serving the old index, referring to
+    content-hashed assets that no longer exist, and the UI would stay broken until somebody
+    thought to hard-reload — with nothing anywhere reporting a problem.
+
+    Alongside it: a missing file under `/assets/` fell through to index.html and answered
+    **200** with HTML. A browser that asked for a script got a MIME error rather than a plain
+    miss, and — through the same caching bug — kept it. Those are 404s now, and immutable is
+    reserved for a file that exists under its own content-hashed name, which is the only thing
+    hashing makes safe to cache.
+
+    Found by serving the compiled binary and asking it for a route. `ui-assets.test.ts` checks
+    the asset map and the admin tests checked the API; nothing had ever looked at the response
+    headers, and `doctor` does not either. The shipped artifact's HTTP surface had never been
+    exercised at all — which is the same lesson as 128, one layer up: the tests run against the
+    pieces, and the product is the binary.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
