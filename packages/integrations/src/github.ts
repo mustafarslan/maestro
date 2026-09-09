@@ -387,6 +387,28 @@ export class GitHubClient {
     return mine.length ? (mine.at(-1)?.id ?? null) : null;
   }
 
+  /**
+   * Reactions on one comment, with who left them.
+   *
+   * Polled, not received: GitHub has no `reaction` webhook event — its event catalogue
+   * lists none, and this project's own App manifest requests `pull_request`,
+   * `issue_comment` and `pull_request_review_comment` because those are the ones that
+   * exist. The daemon had a handler for a `reaction` event that could therefore never
+   * fire, so the reaction half of the quality signal was built and unreachable.
+   */
+  async listCommentReactions(
+    pr: PullRequestRef,
+    commentId: number,
+  ): Promise<{ content: string; login?: string }[]> {
+    const data = await this.octokit.paginate(this.octokit.rest.reactions.listForIssueComment, {
+      owner: pr.owner,
+      repo: pr.repo,
+      comment_id: commentId,
+      per_page: 100,
+    });
+    return data.map((r) => ({ content: r.content, login: r.user?.login ?? undefined }));
+  }
+
   async updateComment(pr: PullRequestRef, commentId: number, body: string): Promise<void> {
     await this.octokit.rest.issues.updateComment({
       owner: pr.owner,

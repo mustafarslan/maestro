@@ -1055,6 +1055,27 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     attacker-controlled and the orchestrator is meant to be the only writer — and it had
     survived every reading pass because the filter looked obviously right.
 
+122. **The reaction half of the quality signal could never fire.** `interpretEvent` handled an
+    event named `reaction` and `ingestReaction` settled every finding on the comment it named —
+    and GitHub delivers no such event. Its published webhook catalogue has none, which is why
+    this project's own App manifest requests `pull_request`, `issue_comment` and
+    `pull_request_review_comment` and nothing else. So the human half of the post-hoc quality
+    loop, the half Phase 9 names first, was built, unit-tested and unreachable, and the whole
+    acceptance signal in the Quality view has only ever come from the line-change heuristic.
+
+    I had recorded this the previous commit as "ungated, and its delivery is unproven" and
+    declined to guess. Checking the documentation rather than a live App answered it in one
+    request, which was the cheaper move available all along. Reactions are polled now, from the
+    comments Maestro posted, on a ten-minute timer in every mode — whether reactions are visible
+    has nothing to do with whether webhooks are reachable. `recordFeedback` already refused a
+    duplicate `(finding, signal, actor)`, so a comment can be swept for a fortnight and each
+    person still counts once; removing that guard fails the test. The gating question dissolved
+    with it: the reactions endpoint returns each reacting user, so who left a verdict is now
+    something Maestro has rather than something it has to be told.
+
+    The endpoint's response shape was confirmed live against the real comment on PR #1 — add a
+    reaction, list it, delete it — rather than assumed from documentation.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
@@ -1072,22 +1093,16 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
 - **`repos.config_json`, `repos.installation_id` and the whole `installations` table are unused**,
   since no GitHub App exists yet.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
-- **Reaction feedback is ungated, and its delivery is unproven.** `interpretEvent` handles an
-  event named `reaction` and `ingestReaction` settles every finding on the comment it names, with
-  no check on who reacted — while the *comment* trigger beside it is gated on
-  `author_association`, because that one spends money. Reactions spend nothing and steer
-  something arguably more important: they are the signal noise tuning is meant to be driven by,
-  so on a public repository a stranger's 👎 moves the precision numbers for a whole review.
-
-  Recorded rather than fixed, deliberately, because the obvious fix rests on two things not
-  established here. First, whether GitHub delivers a `reaction` webhook at all — the App manifest
-  this project generates requests `pull_request`, `issue_comment` and
-  `pull_request_review_comment`, and no reaction event, which suggests the branch may never fire
-  in production. Second, whether a reaction payload even carries `author_association`; if it does
-  not, reusing the existing gate would fail closed and silently switch the entire feedback signal
-  off, which is worse than the hole. Both are answerable in minutes against a live App, and that
-  is the same live GitHub run the rest of the unverified list is waiting on. Settling it by
-  guessing is how a check that looks right and does nothing gets written.
+- ~~**Reaction feedback is ungated, and its delivery is unproven.**~~ **Answered, and fixed
+  properly.** GitHub's webhook catalogue has no `reaction` event — checked against the published
+  documentation rather than guessed at — so the daemon's handler for one could never fire. The
+  reaction half of the quality signal, the half the plan names first, was built, tested and
+  unreachable, and its gating was moot because nothing reached it. It is polled now:
+  `pollCommentReactions` reads reactions from the comments Maestro posted, on a ten-minute timer,
+  in every mode. `recordFeedback` already refused a duplicate `(finding, signal, actor)`, so a
+  comment can be swept for a fortnight and each person still counts once — verified by removing
+  that guard and watching the test fail. The reactions endpoint's shape was confirmed live
+  against the real comment on PR #1.
 
 Findings 75-87 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are

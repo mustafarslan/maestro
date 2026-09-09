@@ -1,6 +1,12 @@
 import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { agentQuality, ingestLineChanges, ingestReaction, signalFromReaction } from "./feedback.js";
+import {
+  agentQuality,
+  ingestLineChanges,
+  ingestReaction,
+  pollCommentReactions,
+  signalFromReaction,
+} from "./feedback.js";
 
 let db: SqlDatabase;
 let reviewId: string;
@@ -26,6 +32,7 @@ function seedFinding(agent = "security", commentId = 111, status = "open"): stri
     status,
     new Date().toISOString(),
   );
+  db.prepare("UPDATE findings SET posted_comment_id=? WHERE id=?").run(String(commentId), id);
   return id;
 }
 
@@ -258,5 +265,90 @@ describe("the line-change signal compares the right two things", () => {
     const settled = await ingestLineChanges(db, client(null, ["src/fixed.ts"]), pr, reviewId);
     expect(settled).toBe(0);
     expect(statusOf(id)).toBe("posted");
+  });
+});
+
+describe("reactions are polled, because no webhook delivers them", () => {
+  // GitHub's event catalogue has no `reaction` event — this project's own App manifest
+  // requests pull_request, issue_comment and pull_request_review_comment because those
+  // are the ones that exist — so the daemon's handler for one could never fire and the
+  // reaction half of the quality signal was built, tested and unreachable.
+  const client = (reactions: { content: string; login?: string }[]) => ({
+    calls: 0,
+    async listCommentReactions() {
+      this.calls++;
+      return reactions;
+    },
+  });
+
+  it("records a verdict left on a comment Maestro posted", async () => {
+    seedFinding("security", 701);
+    const c = client([{ content: "+1", login: "alice" }]);
+    const result = await pollCommentReactions(db, c);
+    expect(result).toMatchObject({ comments: 1, recorded: 1 });
+    expect(agentQuality(db).find((q) => q.agentId === "security")?.accepted).toBe(1);
+  });
+
+  it("counts each person once however often it sweeps", async () => {
+    // The sweep runs every ten minutes for a fortnight. Without idempotency one 👍 would
+    // become two thousand, and the acceptance rate would be whatever the polling interval
+    // happened to be.
+    seedFinding("security", 702);
+    const c = client([{ content: "+1", login: "alice" }]);
+    await pollCommentReactions(db, c);
+    await pollCommentReactions(db, c);
+    await pollCommentReactions(db, c);
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM feedback").get<{ n: number }>() as {
+      n: number;
+    };
+    expect(n).toBe(1);
+  });
+
+  it("counts two people separately", async () => {
+    seedFinding("security", 703);
+    const c = client([
+      { content: "+1", login: "alice" },
+      { content: "-1", login: "bob" },
+    ]);
+    await pollCommentReactions(db, c);
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM feedback").get<{ n: number }>() as {
+      n: number;
+    };
+    expect(n).toBe(2);
+  });
+
+  it("ignores reactions that carry no verdict", async () => {
+    // 👀 means somebody is looking, not that the finding was right or wrong. (`rocket`
+    // is not this case — `signalFromReaction` deliberately counts it as approval, which
+    // I had to read rather than assume.)
+    seedFinding("security", 704);
+    await pollCommentReactions(db, client([{ content: "eyes", login: "alice" }]));
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM feedback").get<{ n: number }>() as {
+      n: number;
+    };
+    expect(n).toBe(0);
+  });
+
+  it("keeps sweeping when one comment cannot be read", async () => {
+    // A deleted comment, or a repository the credential lost access to, is ordinary and
+    // must not stop the other comments being swept.
+    seedFinding("security", 705);
+    const failing = {
+      async listCommentReactions() {
+        throw new Error("410 Gone");
+      },
+    };
+    await expect(pollCommentReactions(db, failing)).resolves.toMatchObject({ recorded: 0 });
+  });
+
+  it("does not ask about comments from reviews older than the window", async () => {
+    seedFinding("security", 706);
+    db.prepare("UPDATE reviews SET created_at=?, finished_at=?").run(
+      new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString(),
+      new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString(),
+    );
+    const c = client([{ content: "+1", login: "alice" }]);
+    expect(await pollCommentReactions(db, c)).toMatchObject({ comments: 0 });
+    expect(c.calls).toBe(0);
   });
 });

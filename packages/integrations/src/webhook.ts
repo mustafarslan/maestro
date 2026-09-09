@@ -172,6 +172,13 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
 
   // Reactions on Maestro's own comment are the feedback signal precision is measured
   // from; they are not review triggers.
+  //
+  // GitHub does not actually deliver this event — its webhook catalogue has none named
+  // `reaction`, which is why this project's App manifest requests `pull_request`,
+  // `issue_comment` and `pull_request_review_comment` and no more. The branch is kept
+  // because a delivery shaped like this is unambiguous and handling it costs nothing, but
+  // it is not how reactions reach Maestro: `pollCommentReactions` fetches them from the
+  // comments Maestro posted, on a timer, which is the only way GitHub offers.
   if (event === "reaction" && body.action === "created") {
     const reaction = (payload as { reaction?: { content?: string; user?: { login?: string } } })
       .reaction;

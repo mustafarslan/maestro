@@ -139,6 +139,62 @@ export function signalFromReaction(content: string): FeedbackSignal | null {
   return null;
 }
 
+/**
+ * Pulls reactions from every comment Maestro has posted recently and ingests them.
+ *
+ * The webhook this replaces does not exist: GitHub delivers no `reaction` event, so the
+ * daemon's handler for one could never fire and the reaction half of the quality signal —
+ * the half the plan names first — was built, tested and unreachable. Polling is the only
+ * way to see them, and it is cheap: one request per posted comment, and `recordFeedback`
+ * already refuses a duplicate `(finding, signal, actor)`, so re-polling the same comment
+ * for weeks records each person's verdict exactly once.
+ *
+ * Scoped to comments from reviews finished recently, because a reaction arriving a month
+ * later is not worth a request per daemon tick for ever.
+ */
+export async function pollCommentReactions(
+  db: SqlDatabase,
+  client: {
+    listCommentReactions(
+      pr: { owner: string; repo: string; number: number },
+      commentId: number,
+    ): Promise<{ content: string; login?: string }[]>;
+  },
+  opts: { sinceMs?: number } = {},
+): Promise<{ comments: number; recorded: number }> {
+  const since = new Date(Date.now() - (opts.sinceMs ?? 14 * 24 * 60 * 60_000)).toISOString();
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT f.posted_comment_id AS commentId, r.pr_number AS number,
+              repos.owner AS owner, repos.name AS repo
+         FROM findings f
+         JOIN reviews r ON r.id = f.review_id
+         JOIN repos ON repos.id = r.repo_id
+        WHERE f.posted_comment_id IS NOT NULL
+          AND COALESCE(r.finished_at, r.created_at) >= ?`,
+    )
+    .all<{ commentId: string; number: number; owner: string; repo: string }>(since);
+
+  let recorded = 0;
+  for (const row of rows) {
+    try {
+      const reactions = await client.listCommentReactions(
+        { owner: row.owner, repo: row.repo, number: row.number },
+        Number(row.commentId),
+      );
+      for (const reaction of reactions) {
+        const result = ingestReaction(db, Number(row.commentId), reaction.content, reaction.login);
+        if (result) recorded += result.recorded;
+      }
+    } catch (err) {
+      // One unreachable comment must not stop the sweep: a deleted comment, or a
+      // repository the credential lost access to, is ordinary.
+      logger.warn({ commentId: row.commentId, err }, "could not read reactions");
+    }
+  }
+  return { comments: rows.length, recorded };
+}
+
 export function ingestReaction(
   db: SqlDatabase,
   commentId: number,

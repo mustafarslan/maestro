@@ -22,6 +22,7 @@ import {
   LinearClient,
   newPollState,
   type PullRequestRef,
+  pollCommentReactions,
   type ReviewTrigger,
   reviewPullRequest,
   verifySignature,
@@ -463,6 +464,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     webhookPort = (webhookServer.address() as AddressInfo).port;
   }
 
+  // ── reaction sweep ──────────────────────────────────────────────────────
+  // Reactions are the human half of the quality signal, and GitHub delivers no webhook
+  // for them — its event catalogue has no `reaction` event, which is why the handler for
+  // one could never fire. Polling is the only way to see them. Cheap and idempotent: one
+  // request per recently-posted comment, and a repeated verdict from the same person is
+  // refused by `recordFeedback`, so a comment can be swept for a fortnight and each
+  // person still counts once.
+  //
+  // Runs in every mode, not just `--poll`: whether reactions are visible has nothing to
+  // do with whether webhooks are reachable.
+  const REACTION_SWEEP_MS = 10 * 60_000;
+  const sweepReactions = async () => {
+    const client = GitHubClient.fromEnv();
+    if (!client) return;
+    const result = await pollCommentReactions(db, client);
+    if (result.recorded) {
+      logger.info(result, "reactions ingested");
+      notify("feedback", result);
+    }
+  };
+  const reactionTimer = setInterval(() => {
+    // `.catch`, not `void`: an unhandled rejection from a timer callback ends the process.
+    sweepReactions().catch((err) => logger.warn({ err }, "reaction sweep failed"));
+  }, REACTION_SWEEP_MS);
+  reactionTimer.unref();
+
   // ── poller ──────────────────────────────────────────────────────────────
   let pollTimer: NodeJS.Timeout | undefined;
   if (opts.poll?.repos.length) {
@@ -526,6 +553,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     async stop() {
       stopping = true;
       clearInterval(reaperTimer);
+      clearInterval(reactionTimer);
       if (pollTimer) clearInterval(pollTimer);
       for (const c of inFlight.values()) c.abort();
       await new Promise<void>((r) => (webhookServer ? webhookServer.close(() => r()) : r()));
