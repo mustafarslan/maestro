@@ -563,6 +563,55 @@ async function imageLabels(imageId: string): Promise<{ reviewId?: string; create
 }
 
 /** The review a container belongs to and when it was created, from its own labels. */
+/**
+ * Every managed container, with the review it belongs to and whether it is running.
+ *
+ * Exported because `doctor` was answering the same question with its own two `docker ps`
+ * calls and a different definition of "stray": it called a stopped container a stray and
+ * a running one "in flight". A container left running by a killed daemon belongs to no
+ * live review, and doctor reported it as healthy activity — the one tool somebody runs to
+ * find leaks, blind to the commonest way they happen.
+ *
+ * Whether a container is a stray is a question about its REVIEW, not about its process
+ * state, and the answer lives in the store. This returns what is needed to ask it, so the
+ * reaper and the doctor cannot drift into different answers.
+ */
+export interface ManagedContainer {
+  id: string;
+  reviewId?: string;
+  createdAt?: number;
+  running: boolean;
+}
+
+export async function listManagedContainers(): Promise<ManagedContainer[]> {
+  const filterArgs = ["--filter", `label=${LABEL_MANAGED}=true`];
+  const all = await listIds(["ps", "-aq", ...filterArgs]);
+  const running = new Set(await listIds(["ps", "-q", ...filterArgs]));
+  const out: ManagedContainer[] = [];
+  for (const id of all) {
+    out.push({ id, ...(await containerLabels(id)), running: running.has(id) });
+  }
+  return out;
+}
+
+/**
+ * Splits managed containers into the ones a live review owns and the ones nothing does.
+ *
+ * One function rather than a rule spelled out at each call site: `doctor` recommends
+ * `maestro reap`, and the reaper decides what to destroy. If those two ever disagree
+ * about what a stray is, `doctor` starts recommending a command that destroys what it
+ * has just called safe — which is a failure this project has already had, in both
+ * directions.
+ */
+export function classifyContainers(
+  managed: ManagedContainer[],
+  liveReviewIds: Iterable<string>,
+): { inFlight: ManagedContainer[]; strays: ManagedContainer[] } {
+  const live = new Set(liveReviewIds);
+  const owned = (c: ManagedContainer) => Boolean(c.reviewId && live.has(c.reviewId));
+  return { inFlight: managed.filter(owned), strays: managed.filter((c) => !owned(c)) };
+}
+
 async function containerLabels(
   containerId: string,
 ): Promise<{ reviewId?: string; createdAt?: number }> {

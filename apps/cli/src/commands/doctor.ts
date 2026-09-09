@@ -6,6 +6,7 @@ import {
   dayAgo,
   dbPath,
   detectRuntime,
+  IN_FLIGHT_STATES,
   maestroHome,
   migrationState,
   openStore,
@@ -14,6 +15,7 @@ import {
 import { GitHubClient, LinearClient, storedGitHubApp } from "@maestro/integrations";
 import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
+import { classifyContainers, listManagedContainers } from "@maestro/sandbox";
 import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
@@ -108,29 +110,6 @@ export async function doctor(): Promise<number> {
       : "not running or not installed - sandboxes unavailable (https://docs.docker.com/get-docker/)",
   });
 
-  if (docker) {
-    // Running containers are not strays. Counting them as leaked told an operator to run
-    // `maestro reap` while a review was in flight, and reaping is what destroys it —
-    // advice that damages the very thing it claims to diagnose.
-    const count = async (args: string[]) =>
-      (await probeLines("docker", args))?.filter(Boolean).length ?? 0;
-    const all = await count(["ps", "-aq", "--filter", "label=maestro.managed=true"]);
-    const live = await count(["ps", "-q", "--filter", "label=maestro.managed=true"]);
-    const strays = Math.max(0, all - live);
-
-    checks.push({
-      status: strays === 0 ? "ok" : "warn",
-      label: "sandboxes",
-      detail:
-        strays === 0
-          ? live === 0
-            ? "no strays"
-            : `no strays (${live} container(s) in flight)`
-          : `${strays} stopped container(s) left behind - run 'maestro reap'` +
-            (live ? `; ${live} in flight will be left alone` : ""),
-    });
-  }
-
   try {
     const db = await openStore({ migrate: false });
     const state = migrationState(db);
@@ -142,6 +121,48 @@ export async function doctor(): Promise<number> {
           ? `schema v${state.current} at ${dbPath()}${databaseSize()}`
           : `schema v${state.current}, ${state.pending.length} migration(s) pending - run 'maestro init'`,
     });
+
+    if (docker) {
+      // Whether a container is a stray is a question about its REVIEW, not its process
+      // state.
+      //
+      // This counted stopped containers as strays and running ones as "in flight". The
+      // first version of the check had it the other way round — every managed container was
+      // a stray, so `doctor` told an operator to reap while a review was running, and
+      // reaping is what destroys it. The correction over-shot: a container left RUNNING by a
+      // killed daemon belongs to no live review, holds its memory and its snapshot image,
+      // and was reported here as healthy activity. Verified by hand, with a labelled
+      // container naming a review that does not exist: "no strays (1 container in flight)".
+      //
+      // The reaper has always asked the right question — `protectReviewIds` comes from the
+      // store — so this now asks the same one through the same listing.
+      const managed = await listManagedContainers().catch(() => []);
+      const live = new Set(
+        db
+          .prepare(
+            `SELECT id FROM reviews WHERE state IN (${IN_FLIGHT_STATES.map(() => "?").join(",")})`,
+          )
+          .all<{ id: string }>(...IN_FLIGHT_STATES)
+          .map((r) => r.id),
+      );
+      const { inFlight, strays: strayList } = classifyContainers(managed, live);
+      const stillRunning = strayList.filter((c) => c.running).length;
+      const strays = strayList.length;
+
+      checks.push({
+        status: strays === 0 ? "ok" : "warn",
+        label: "sandboxes",
+        detail:
+          strays === 0
+            ? inFlight.length === 0
+              ? "no strays"
+              : `no strays (${inFlight.length} container(s) in flight)`
+            : `${strays} container(s) belong to no running review` +
+              (stillRunning ? `, ${stillRunning} of them still running` : "") +
+              ` - run 'maestro reap'` +
+              (inFlight.length ? `; ${inFlight.length} in flight will be left alone` : ""),
+      });
+    }
 
     if (state.current > 0) {
       const active = new PlaybookStore(db).getActive("default");

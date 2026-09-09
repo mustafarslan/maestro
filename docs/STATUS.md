@@ -2400,6 +2400,30 @@ the server never sends fails it, and removing `live` from the server's response 
     on its own, and an orphan protected for ever is a container that can never be
     collected.
 
+188. **`doctor` called a leaked container healthy activity, because it asked the wrong
+    question.** It classified by process state: a stopped managed container was a stray, a
+    running one was "in flight". A killed daemon leaves its containers **running**, owned
+    by no live review, holding their memory and their snapshot image — and `doctor`
+    reported that as `no strays (1 container(s) in flight)`.
+
+    Verified by hand, which is the only reason it was found: a labelled container naming a
+    review that does not exist, and the one tool an operator runs to find leaks said there
+    were none.
+
+    This is the second time this check has been wrong, in opposite directions. The first
+    version called every managed container a stray, so `doctor` told an operator to reap
+    while a review was running and reaping is what destroys it. The correction moved to
+    process state and over-shot.
+
+    Neither direction is the question. A container is a stray when its **review** is not in
+    flight, which is what the reaper has always asked — `protectReviewIds` is read from the
+    store. `doctor` was spelling its own rule with two `docker ps` calls. There is now one
+    `classifyContainers`, in the sandbox package beside the listing, used by the doctor and
+    tested directly rather than copied into a test. Both real cases were checked against
+    Docker before and after: a running container of a dead review is now reported and
+    reaped; a running container of a live review is still reported as in flight and left
+    alone.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
