@@ -195,3 +195,111 @@ describe("cancellation", () => {
     expect(scheduler.stats().running).toBe(0);
   });
 });
+
+describe("the plan's load scenario: 10 pull requests across 3 repos", () => {
+  const AGENTS = ["product", "security", "architecture", "ui-ux"];
+
+  /** Runs every agent of every review through the scheduler, recording concurrency. */
+  async function runScenario(scheduler: Scheduler, reviews: { id: string; repo: string }[]) {
+    let live = 0;
+    let peak = 0;
+    const peakByAgent: Record<string, number> = {};
+    const liveByAgent: Record<string, number> = {};
+    const liveByRepo: Record<string, number> = {};
+    const peakByRepo: Record<string, number> = {};
+    const admissionOrder: string[] = [];
+
+    const tasks = reviews.flatMap((review) =>
+      AGENTS.map(async (agentId) => {
+        const release = await scheduler.acquire({
+          reviewId: review.id,
+          agentId,
+          repoId: review.repo,
+          providerId: "ollama",
+        });
+        admissionOrder.push(review.id);
+        live++;
+        const nowAgent = (liveByAgent[agentId] ?? 0) + 1;
+        const nowRepo = (liveByRepo[review.repo] ?? 0) + 1;
+        liveByAgent[agentId] = nowAgent;
+        liveByRepo[review.repo] = nowRepo;
+        peak = Math.max(peak, live);
+        peakByAgent[agentId] = Math.max(peakByAgent[agentId] ?? 0, nowAgent);
+        peakByRepo[review.repo] = Math.max(peakByRepo[review.repo] ?? 0, nowRepo);
+
+        // Yield so other admitted work overlaps; without this nothing is concurrent.
+        await new Promise((r) => setTimeout(r, 1));
+
+        live--;
+        liveByAgent[agentId] = (liveByAgent[agentId] ?? 1) - 1;
+        liveByRepo[review.repo] = (liveByRepo[review.repo] ?? 1) - 1;
+        release();
+      }),
+    );
+
+    await Promise.all(tasks);
+    return { peak, peakByAgent, peakByRepo, admissionOrder };
+  }
+
+  const scenario = () =>
+    Array.from({ length: 10 }, (_, i) => ({
+      id: `rv-${i}`,
+      repo: `repo-${i % 3}`,
+    }));
+
+  it("completes every task without exceeding any limit", async () => {
+    const limits = { global: 6, perAgent: 2, perRepo: 3, perProvider: 4 };
+    const scheduler = new Scheduler(limits);
+
+    const { peak, peakByAgent, peakByRepo } = await runScenario(scheduler, scenario());
+
+    // 40 tasks all completed - nothing deadlocked or was dropped.
+    expect(scheduler.stats()).toMatchObject({ running: 0, waiting: 0 });
+    expect(peak).toBeLessThanOrEqual(limits.global);
+    for (const agent of AGENTS) {
+      expect(peakByAgent[agent] ?? 0).toBeLessThanOrEqual(limits.perAgent);
+    }
+    for (const repo of ["repo-0", "repo-1", "repo-2"]) {
+      expect(peakByRepo[repo] ?? 0).toBeLessThanOrEqual(limits.perRepo);
+    }
+    // The provider cap binds below the global one here, so it is what actually limits.
+    expect(peak).toBeLessThanOrEqual(limits.perProvider);
+  });
+
+  it("does not starve the last review behind the first", async () => {
+    // This is the requirement in the user's own words: while the product agent is busy on
+    // PR #1, the other agents must flow to PR #2 rather than queueing behind it. FIFO
+    // admission would run reviews to completion in order, so the last review's first
+    // admission would come after almost every other task.
+    const scheduler = new Scheduler({ global: 6, perAgent: 2, perRepo: 3, perProvider: 4 });
+    const { admissionOrder } = await runScenario(scheduler, scenario());
+
+    const firstAdmissionOfLast = admissionOrder.indexOf("rv-9");
+    expect(firstAdmissionOfLast).toBeGreaterThanOrEqual(0);
+    // Measured: 32 of 40 with the old fixed-size recency window (FIFO in all but name),
+    // 11 once fairness became an admission count. Three early admissions are unavoidable
+    // — pump runs as each waiter is pushed, before the later ones exist — so the floor is
+    // roughly one pass over the ten reviews.
+    expect(firstAdmissionOfLast).toBeLessThanOrEqual(15);
+
+    // And every review got its turn before any review finished all four of its agents.
+    const distinctInFirstTen = new Set(admissionOrder.slice(0, 10)).size;
+    expect(distinctInFirstTen).toBeGreaterThan(2);
+  });
+
+  it("keeps one saturated repo from blocking the other two", async () => {
+    // 8 of 10 reviews on one repo: the per-repo cap must leave room for the others.
+    const scheduler = new Scheduler({ global: 6, perAgent: 3, perRepo: 2, perProvider: 6 });
+    const skewed = Array.from({ length: 10 }, (_, i) => ({
+      id: `rv-${i}`,
+      repo: i < 8 ? "busy" : `quiet-${i}`,
+    }));
+
+    const { peakByRepo, admissionOrder } = await runScenario(scheduler, skewed);
+
+    expect(scheduler.stats()).toMatchObject({ running: 0, waiting: 0 });
+    expect(peakByRepo.busy ?? 0).toBeLessThanOrEqual(2);
+    // The quiet repos are not stuck at the back of a 32-task queue.
+    expect(admissionOrder.indexOf("rv-9")).toBeLessThan(30);
+  });
+});

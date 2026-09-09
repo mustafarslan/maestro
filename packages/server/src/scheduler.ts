@@ -41,8 +41,17 @@ export class Scheduler {
     seq: number;
   }[] = [];
   private seq = 0;
-  /** Reviews that most recently got a slot, so admission can rotate past them. */
-  private recentReviews: string[] = [];
+  /**
+   * How many slots each review has been granted, ever.
+   *
+   * The first attempt at fairness kept a list of the N most recently admitted reviews
+   * and preferred anything absent from it. With more reviews in flight than N, a review
+   * fell out of that window and took a SECOND slot before reviews that had never run
+   * took a first — measurably so: with ten reviews and a window of six, the tenth waited
+   * until the 32nd of 40 admissions, which is FIFO wearing a rosette. A count has no
+   * window to fall out of.
+   */
+  private readonly admissions = new Map<string, number>();
 
   constructor(private readonly limits: SchedulerLimits = DEFAULT_LIMITS) {}
 
@@ -116,20 +125,21 @@ export class Scheduler {
       const candidates = this.waiters.filter((w) => this.admissible(w.req));
       if (!candidates.length) return;
 
-      // Fairness: prefer a review that has not recently been admitted. FIFO alone lets
-      // a 40-file pull request occupy every slot while a 2-file one waits behind it.
-      const fresh = candidates.filter((c) => !this.recentReviews.includes(c.req.reviewId));
-      const chosen = (fresh.length ? fresh : candidates).sort((a, b) => a.seq - b.seq)[0];
-      if (!chosen) return;
+      // Fairness: the review that has had the fewest slots so far goes next, arrival
+      // order breaking ties. FIFO alone lets a 40-file pull request occupy every slot
+      // while a 2-file one waits behind it.
+      const chosen = candidates.reduce((best, c) => {
+        const a = this.admissions.get(c.req.reviewId) ?? 0;
+        const b = this.admissions.get(best.req.reviewId) ?? 0;
+        if (a !== b) return a < b ? c : best;
+        return c.seq < best.seq ? c : best;
+      });
 
       this.waiters.splice(this.waiters.indexOf(chosen), 1);
       const key = `${chosen.req.reviewId}:${chosen.req.agentId}:${chosen.seq}`;
       this.running.set(key, chosen.req);
 
-      this.recentReviews = [
-        chosen.req.reviewId,
-        ...this.recentReviews.filter((r) => r !== chosen.req.reviewId),
-      ].slice(0, Math.max(1, this.limits.global));
+      this.admissions.set(chosen.req.reviewId, (this.admissions.get(chosen.req.reviewId) ?? 0) + 1);
 
       let released = false;
       chosen.resolve(() => {
