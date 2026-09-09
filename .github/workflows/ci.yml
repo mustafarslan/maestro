@@ -26,6 +26,10 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
 
+      # A link, script, subcommand or task a document refers to and that no longer exists.
+      # The prose half of honest documentation cannot be automated; this half can.
+      - run: node scripts/docs-check.mjs
+
       # The Docker integration suite asserts the sandbox security posture against real
       # containers. It runs here because a typo in a `docker run` flag is otherwise
       # completely silent, and that posture is what makes it safe to review a

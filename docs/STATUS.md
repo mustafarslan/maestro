@@ -1241,6 +1241,22 @@ Every one of them fails the suite when broken. Seven did not when the sweep star
     so a step running a script from `scripts/` would have failed on a file that was not there.
     Every new step was run locally, verbatim, before being written into the workflow.
 
+### The documents, checked mechanically
+
+This project's central claim is that its documents are honest, and this session found several
+places where they were not: a README whose install command 404ed for everybody, a README and a
+TODO contradicting each other about the same two features, a configuration reference listing an
+environment variable nothing read. All found by hand, one at a time.
+
+`scripts/docs-check.mjs` catches the mechanical half — a link, a `scripts/` path, a `maestro`
+subcommand or a `pnpm` task that a document refers to and that no longer exists — which is how
+most of the rest begin. It runs in the gate and in CI, and it fails the gate on a broken
+reference, verified by adding one.
+
+Its first version reported two failures that were not real: it matched `pnpm` in prose ("which
+pnpm then refuses to remove"), not just in commands. Scoped to fenced code blocks now. A checker
+that cries wolf gets ignored, which is the same end state as not having one.
+
 ### Compose, checked and correct
 
 Two things worth stating because they were suspected and turned out fine.

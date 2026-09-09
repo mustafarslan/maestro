@@ -30,6 +30,12 @@ node --experimental-strip-types scripts/store-contract-check.ts >/dev/null 2>&1
 echo "=== store contract (bun) ==="
 bun scripts/store-contract-check.ts 2>/dev/null | grep -E "passed on|FAIL"
 bun scripts/store-contract-check.ts >/dev/null 2>&1
+# Cheap, and the class it catches is this project's own subject matter: a document that
+# refers to something no longer there.
+echo "=== docs ==="
+node scripts/docs-check.mjs | tail -1
+node scripts/docs-check.mjs >/dev/null 2>&1
+
 echo "=== build ==="    && pnpm run build:binary >/dev/null 2>&1
 # The binary's own surfaces, which no unit test reaches: the MCP server only exists as a
 # subprocess with stdout as a pipe, and the admin server only serves the embedded UI once
