@@ -244,6 +244,16 @@ GITHUB_TOKEN=$(gh auth token) node scripts/live-github-check.mjs owner/repo#1
 The GitHub one takes `--write` to also exercise posting, finding and updating a comment; it
 deletes what it creates, including when a step fails.
 
+When touching a security control or a guard, check the tests actually hold it:
+
+```
+scripts/mutation-check.sh
+```
+
+Breaks each guard on purpose and reports any the suite does not notice. It refuses to run on a
+dirty tree, because it reverts with `git checkout --`. Not in the gate: it runs the suite once
+per mutation.
+
 Before cutting a release:
 
 ```

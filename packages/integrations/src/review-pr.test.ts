@@ -4,7 +4,7 @@ import { openStore } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { describe, expect, it } from "vitest";
 import type { GitHubClient } from "./github.js";
-import { narrowEnvSpec, reviewPullRequest } from "./review-pr.js";
+import { narrowEnvSpec, resolveEnvSpec, reviewPullRequest } from "./review-pr.js";
 
 /**
  * Enough of a client to reach the point where the review row exists. Checkout fails
@@ -160,5 +160,65 @@ describe("a cancelled review", () => {
     // re-reviewable, and nothing anywhere ever wrote it.
     const source = readFileSync(join(import.meta.dirname, "review-pr.ts"), "utf8");
     expect(source).toContain('setState(reviewId, "cancelled")');
+  });
+});
+
+describe("fork pull requests are downgraded before anything runs", () => {
+  // The plan calls this a blocking security rule, and the function's own comment states
+  // the stakes: "a reviewer reading code is useful; a reviewer running a stranger's build
+  // script is a supply-chain incident."
+  //
+  // It had no test whatsoever, which `scripts/mutation-check.sh` established rather than
+  // inferred: removing the downgrade, or un-stripping the setup steps, the allowed
+  // commands or the egress allowlist, each left all 603 tests green. Four separate ways to
+  // turn a fork pull request into arbitrary code execution with network access, none of
+  // them noticed by anything.
+  const base = {
+    image: "auto",
+    cpus: 2,
+    memoryMb: 4096,
+    pids: 512,
+    tmpfsMb: 1024,
+    trust: "trusted",
+    setup: ["npm ci"],
+    allowedCommands: ["npm test", "npm run build"],
+    egressAllowlist: ["registry.npmjs.org"],
+    timeouts: { prepareSec: 600, analyzeSec: 900, commandSec: 300 },
+    writableWorkdir: false,
+  } as unknown as Parameters<typeof resolveEnvSpec>[0];
+
+  const pr = (isFork: boolean) => ({ isFork }) as unknown as Parameters<typeof resolveEnvSpec>[1];
+
+  it("leaves a same-repo pull request exactly as configured", () => {
+    expect(resolveEnvSpec(base, pr(false))).toBe(base);
+  });
+
+  it("marks a fork untrusted", () => {
+    expect(resolveEnvSpec(base, pr(true)).trust).toBe("untrusted");
+  });
+
+  it("runs none of the repository's setup steps for a fork", () => {
+    // `npm ci` against a fork's lockfile is arbitrary code execution by design: the
+    // lifecycle scripts come from whatever that pull request put in its dependency tree.
+    expect(resolveEnvSpec(base, pr(true)).setup).toEqual([]);
+  });
+
+  it("allows a fork no commands at all", () => {
+    // Not a narrower list — none. An agent may read the code and must not run it.
+    expect(resolveEnvSpec(base, pr(true)).allowedCommands).toEqual([]);
+  });
+
+  it("gives a fork no egress, not even the allowlisted hosts", () => {
+    // With no setup to run there is nothing legitimate to fetch, so the proxy refuses
+    // everything rather than trusting that there is nothing to ask for.
+    expect(resolveEnvSpec(base, pr(true)).egressAllowlist).toEqual([]);
+  });
+
+  it("keeps the resource limits, which are not what makes a fork dangerous", () => {
+    // The downgrade must not quietly reset cpu, memory or timeouts: a fork review should
+    // still be a useful review, just one that reads rather than runs.
+    const spec = resolveEnvSpec(base, pr(true));
+    expect(spec).toMatchObject({ cpus: 2, memoryMb: 4096, pids: 512, image: "auto" });
+    expect(spec.timeouts).toEqual(base.timeouts);
   });
 });

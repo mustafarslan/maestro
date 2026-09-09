@@ -1116,6 +1116,39 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
     matched. `issue.pull_request` was the one that did not.
 
+### Which guards the tests actually hold
+
+The fence work ended with seven of my own tests passing for the wrong reason. That is a
+measurable property, not a feeling, so `scripts/mutation-check.sh` measures it: break a guard on
+purpose, run the suite, and see whether anything notices. Fifteen controls, one mutation each.
+
+Fourteen were load-bearing — the webhook signature, the association gate, the command allowlist,
+path traversal, the egress suffix match, triage's confidence floor, the spend cap, the review
+idempotency conflict clause, the docker id dedupe, and the fork cache-write rule all fail the
+suite when broken.
+
+133. **The fork trust downgrade had no test at all.** The plan calls it a blocking security rule
+    and the function's own comment states the stakes — "a reviewer reading code is useful; a
+    reviewer running a stranger's build script is a supply-chain incident". Four separate
+    mutations each left all 603 tests green: removing the downgrade entirely, un-stripping the
+    setup steps, un-stripping the allowed commands, and un-stripping the egress allowlist. Any
+    one of them turns a fork pull request into arbitrary code execution, the last two with
+    network access, and nothing anywhere would have said so. `resolveEnvSpec` had also been
+    flagged earlier by the exported-with-no-external-callers sweep; it is called once and was
+    tested never. Six tests now cover it, and the four mutations are caught.
+
+134. **The first version of the harness truncated a source file.** It kept one backup at a fixed
+    `/tmp` path, so two overlapping runs restored the wrong file over another and left
+    `daemon.ts` as a 267-line fragment of itself. Caught within a minute by `git status` before
+    anything was committed, and the working tree was restored from git — which also discarded
+    the fork tests written moments earlier, so they had to be written twice.
+
+    The rewritten harness reverts with `git checkout --` rather than a copy, because git already
+    knows what every file should contain and nothing else here does, and it refuses to start
+    when `packages/` or `apps/` is dirty, because that revert would otherwise throw away
+    uncommitted work. A tool that edits source in place needs the same care as the code it is
+    checking, and the first version had none.
+
 ### The prompt fence, attacked rather than read
 
 Prompt injection is named as this project's dominant threat: pull request titles,
