@@ -401,6 +401,17 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
 
           totalCost += result.loop.costCents;
           modelSteps += result.loop.steps.length;
+
+          // One decision, used for both the task row and the outcome below. It was written
+          // out twice, so the database and the metrics block each decided separately
+          // whether the same agent run had finished, and a change to one would have left
+          // them disagreeing about it. Mutation is what surfaced the duplication: patching
+          // one copy left the whole suite green, because the test read the other.
+          //
+          // A run the context window cut short produced partial work at best; recording it
+          // as "done" hides that from whoever reads the metrics block.
+          const agentState = result.loop.stopKind === "context-limit" ? "failed" : "done";
+
           if (deps.db) {
             const { ReviewRecorder } = await import("./recorder.js");
             const recorder = new ReviewRecorder(deps.db);
@@ -408,7 +419,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
               nodeId: node.id,
               kind: node.kind,
               agentId: agent.id,
-              state: result.loop.stopKind === "context-limit" ? "failed" : "done",
+              state: agentState,
               durationMs: Date.now() - started,
               costCents: result.loop.costCents,
               findings: result.findings.length,
@@ -428,9 +439,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             nodeId: node.id,
             kind: node.kind,
             agentId: agent.id,
-            // A run the context window cut short produced partial work at best;
-            // recording it as "done" hides that from whoever reads the metrics block.
-            state: result.loop.stopKind === "context-limit" ? "failed" : "done",
+            state: agentState,
             durationMs: Date.now() - started,
             costCents: result.loop.costCents,
             findings: result.findings.length,

@@ -30,6 +30,15 @@ fi
 survivors=0
 trap 'git checkout -- packages apps 2>/dev/null' EXIT INT TERM
 
+# A mutation result means nothing unless the baseline is green. A tree that does not
+# compile fails the suite for every mutation, so every guard reports "caught" and the run
+# looks perfect — which is exactly what happened once here, on a tree with a scoping error.
+echo "checking the baseline before mutating anything"
+if ! pnpm -s exec vitest run >/dev/null 2>&1; then
+  echo "the suite does not pass unmutated; fix that first, or every result here is noise."
+  exit 2
+fi
+
 mutate() {
   python3 -c '
 import sys, pathlib
@@ -134,6 +143,32 @@ run "analyze drops all capabilities" packages/sandbox/src/docker.ts \
   '      "--cap-drop",\n      "ALL",' '      "--cap-drop",\n      "NET_RAW",'
 run "analyze forbids new privileges" packages/sandbox/src/docker.ts \
   '      "--security-opt",\n      "no-new-privileges",' '      "--label",\n      "posture=weakened",'
+
+echo
+echo "a repository's own config may only narrow"
+run "repo config cannot widen cpus" packages/integrations/src/review-pr.ts \
+  'cpus: spec.cpus !== undefined ? Math.min(base.cpus, spec.cpus) : base.cpus,' 'cpus: spec.cpus ?? base.cpus,'
+run "repo config cannot add a command" packages/integrations/src/review-pr.ts \
+  'base.allowedCommands.filter((c) => spec.allowedCommands?.includes(c))' 'spec.allowedCommands'
+run "repo config cannot add an egress host" packages/integrations/src/review-pr.ts \
+  'base.egressAllowlist.filter((h) => spec.egressAllowlist?.includes(h))' 'spec.egressAllowlist'
+run "unsafe allowedCommands rejected" packages/playbook/src/validate.ts \
+  'if (denied.test(cmd)) {' 'if (false) {'
+run "graph cycles rejected" packages/playbook/src/validate.ts \
+  'code: "cycle",' 'code: "not-a-cycle",'
+
+echo
+echo "failure policy and budgets"
+run "fail-review actually fails the review" packages/engine/src/engine.ts \
+  'if (node.failurePolicy === "fail-review") throw err;' 'if (false) throw err;'
+run "the cost cap stops the loop" packages/llm/src/loop.ts \
+  'if (totalCost >= budget.costCapCents) return stop("cost-cap");' ''
+run "the deadline stops the loop" packages/llm/src/loop.ts \
+  'if (budget.deadlineMs && Date.now() - startedAt > budget.deadlineMs) return stop("deadline");' ''
+run "the finalizer destroys sandboxes" packages/engine/src/engine.ts \
+  'const outcomes = await Promise.allSettled(sandboxes.map((s) => s.destroy()));' 'const outcomes: PromiseSettledResult<void>[] = [];'
+run "a context-limit run is not reported done" packages/engine/src/engine.ts \
+  'result.loop.stopKind === "context-limit" ? "failed" : "done"' '"done"'
 
 echo
 if [ "$survivors" -gt 0 ]; then

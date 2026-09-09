@@ -1,4 +1,4 @@
-import { anthropicTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
+import { anthropicTransport, failingTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
 import type { PlaybookDocument } from "@maestro/playbook";
 import { defaultPlaybook } from "@maestro/playbook";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
@@ -427,5 +427,39 @@ describe("failure policy on non-agent nodes", () => {
     );
     expect(outcome.state).toBe("done");
     expect(outcome.nodes.some((n) => n.kind === "agent" && n.state === "done")).toBe(true);
+  });
+});
+
+describe("a run cut short by the context window", () => {
+  // Reporting it as "done" hides that the agent produced partial work at best: the metrics
+  // block says the agent completed, the reviewer reads a short finding list as a clean
+  // bill of health, and nothing anywhere says the run was truncated. The fix has been in
+  // place since that was found — and mutation showed it could be reverted with the whole
+  // suite green, so it could have regressed without a trace.
+  function contextLimitRegistry(): ProviderRegistry {
+    const registry = new ProviderRegistry();
+    // The wording providers use varies; the loop matches on the family of phrasings, and
+    // this is one of the real ones.
+    registry.register(
+      fakeConfig(failingTransport(400, "prompt is too long: 250000 tokens > 200000 maximum"), {
+        id: "anthropic",
+      }),
+    );
+    return registry;
+  }
+
+  it("is reported as failed, not as done", async () => {
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: contextLimitRegistry() },
+      request(),
+    );
+
+    const agents = outcome.nodes.filter((n) => n.kind === "agent" && n.state !== "skipped");
+    expect(agents.length).toBeGreaterThan(0);
+    expect(agents.every((n) => n.state === "failed")).toBe(true);
+    // Through the context-limit branch specifically, not through some other failure: the
+    // first version of this test asserted only the state, and a run that failed for any
+    // other reason would have satisfied it.
+    expect(agents.every((n) => n.stopKind === "context-limit")).toBe(true);
   });
 });

@@ -422,3 +422,45 @@ describe("trimHistory", () => {
     expect(JSON.stringify(messages)).toBe(before);
   });
 });
+
+describe("the wall-clock deadline", () => {
+  // A stuck agent holds a container and a scheduler slot for as long as it runs. The step
+  // and cost caps do not bound that: a model answering slowly, or a tool call that blocks,
+  // burns wall-clock without burning either. This is the only guard that does, and
+  // mutation showed deleting it failed nothing.
+  it("stops a run that has outlived its deadline", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "echo", input: { value: "b" } }] },
+      { toolCalls: [{ id: "3", name: "submit", input: { answer: "never reached" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      // Each dispatch takes longer than the whole budget allows.
+      dispatch: async (c) => {
+        await new Promise((r) => setTimeout(r, 25));
+        return { output: JSON.stringify(c.input) };
+      },
+      budget: { maxSteps: 50, costCapCents: 1e9, deadlineMs: 10 },
+    });
+
+    expect(result.stopKind).toBe("deadline");
+  });
+
+  it("does not stop a run that finishes inside it", async () => {
+    // The guard must not be a timer that fires regardless: a fast run reaches its terminal
+    // tool, and reporting "deadline" there would mark good reviews as degraded.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "submit", input: { answer: "quick" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async (c) => ({ output: JSON.stringify(c.input) }),
+      budget: { maxSteps: 50, costCapCents: 1e9, deadlineMs: 60_000 },
+    });
+
+    expect(result.stopKind).toBe("terminal-tool");
+  });
+});

@@ -1122,10 +1122,10 @@ The fence work ended with seven of my own tests passing for the wrong reason. Th
 measurable property, not a feeling, so `scripts/mutation-check.sh` measures it: break a guard on
 purpose, run the suite, and see whether anything notices. Fifteen controls, one mutation each.
 
-Twenty-nine controls are covered now, across the security guards, the fork downgrade, the
-correctness guards, the admin surface, trigger routing, the sandbox and reaper, and the analyze
-container's own posture. Every one of them fails the suite when broken. Four did not when the
-sweep started.
+Thirty-eight controls are covered now: the security guards, the fork downgrade, the correctness
+guards, the admin surface, trigger routing, the sandbox and reaper, the analyze container's own
+posture, a repository's `.maestro.yaml` narrowing rules, and the failure policies and budgets.
+Every one of them fails the suite when broken. Seven did not when the sweep started.
 
 133. **The fork trust downgrade had no test at all.** The plan calls it a blocking security rule
     and the function's own comment states the stakes — "a reviewer reading code is useful; a
@@ -1176,6 +1176,31 @@ sweep started.
     `NoNewPrivs` from `/proc/self/status`, which is the state of the process rather than the
     flag we believe we passed — the same reason the network test dials an IP instead of
     inspecting the network mode.
+
+137. **The wall-clock deadline held nothing.** `budget.deadlineMs` is the only guard that bounds
+    how long an agent may hold a container and a scheduler slot: the step and cost caps do not,
+    since a model answering slowly or a tool call that blocks burns neither. Deleting it failed
+    no test. Covered now in both directions — a run that outlives its deadline stops, and a fast
+    one still reaches its terminal tool, because a guard that fires regardless would mark good
+    reviews as degraded.
+
+138. **One decision about a truncated run was written out twice.** Mutating "a context-limit run
+    is not reported done" left the suite green even though a test covered the behaviour — because
+    the engine contained *two* copies of that ternary, one deciding the task row written to the
+    database and one deciding the outcome that drives the metrics block and the posted comment.
+    The mutation patched the first; the test read the second. Two copies of one decision about
+    the same agent run, free to disagree the moment either was edited. Collapsed to a single
+    value computed once.
+
+    The test needed fixing too: it asserted only that the agents had failed, which a failure for
+    any other reason would have satisfied. It asserts the `stopKind` now, so it goes through the
+    branch it names.
+
+139. **A mutation run on a broken baseline reports perfect results.** While collapsing 138 I
+    committed a tree with a scoping error, and the sweep dutifully reported every guard as
+    "caught" — because a tree that does not compile fails the suite for every mutation, mutated
+    or not. The harness checks the baseline is green before it changes anything now. It is the
+    same failure as a vacuous test, applied to the tool built to find vacuous tests.
 
 ### The prompt fence, attacked rather than read
 
