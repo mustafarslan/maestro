@@ -163,10 +163,20 @@ export function Reviews({ reviews }: { reviews: ReviewRow[] }) {
           <table>
             <tbody>
               {reviews.map((r) => (
+                // A row that only responds to a click is unreachable by keyboard, which
+                // is most of the point of a list you navigate to read errors from.
                 <tr
                   key={r.id}
                   className={`clickable ${selected === r.id ? "selected" : ""}`}
+                  tabIndex={0}
+                  aria-selected={selected === r.id}
                   onClick={() => setSelected(r.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelected(r.id);
+                    }
+                  }}
                 >
                   <td>
                     <div style={{ fontWeight: 550 }}>{r.title ?? `${r.repo}#${r.pr_number}`}</div>

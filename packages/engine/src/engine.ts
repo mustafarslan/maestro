@@ -22,12 +22,10 @@ export interface EngineDeps {
    *
    * Resolves with a release function once a slot is free.
    */
-  acquireSlot?: (req: {
-    reviewId: string;
-    agentId: string;
-    repoId: string;
-    providerId: string;
-  }) => Promise<() => void>;
+  acquireSlot?: (
+    req: { reviewId: string; agentId: string; repoId: string; providerId: string },
+    signal?: AbortSignal,
+  ) => Promise<() => void>;
 }
 
 export interface ReviewRequest {
@@ -193,21 +191,40 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       agentNodes.map(async (node) => {
         const agent = req.playbook.agents.find((a) => a.id === node.agentId);
         if (!agent) return null;
-        const binding = deps.registry.resolve(agent.model);
 
-        // Wait for a slot BEFORE creating the container: admitting first and queueing
-        // second would hold a container, its memory and its disk for the whole wait.
-        const release = await deps.acquireSlot?.({
-          reviewId: req.reviewId,
-          agentId: agent.id,
-          repoId: req.repoId ?? req.reviewId,
-          providerId: binding.provider.id,
-        });
-        // The clock starts after admission, so queueing time is not reported as the
-        // agent being slow.
-        const started = Date.now();
+        // Everything that can fail belongs inside the try, including resolving the
+        // model binding: an agent pointed at a provider with no key is exactly the
+        // per-agent failure `skip-with-note` exists for, and outside the try it would
+        // reject Promise.all and take the whole review down instead.
+        let release: (() => void) | undefined;
+        let started = Date.now();
 
         try {
+          const binding = deps.registry.resolve(agent.model);
+
+          // Wait for a slot BEFORE creating the container: admitting first and queueing
+          // second would hold a container, its memory and its disk for the whole wait.
+          release = await deps.acquireSlot?.(
+            {
+              reviewId: req.reviewId,
+              agentId: agent.id,
+              repoId: req.repoId ?? req.reviewId,
+              providerId: binding.provider.id,
+            },
+            // Abort removes this from the queue instead of leaving it to displace live
+            // work until it is admitted and immediately abandoned.
+            req.signal,
+          );
+
+          // A review superseded while this task queued must not start a container it is
+          // about to abandon. Under cancel-on-push and load that is one container start
+          // per agent, for nothing.
+          if (req.signal?.aborted) return null;
+
+          // The clock starts after admission, so queueing time is not reported as the
+          // agent being slow.
+          started = Date.now();
+
           // Each agent gets its OWN container off the shared snapshot: concurrent agents
           // running builds would otherwise clobber one another's working directory.
           const sandbox = await deps.driver.analyze(readyEnv, { agentId: agent.id, spec });
@@ -280,6 +297,20 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           return { agentId: agent.id, findings: result.findings, summary: result.summary };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
+          // A cancelled review did not fail; reporting it as failed would put a red row
+          // in the metrics for work that was correctly abandoned.
+          if (req.signal?.aborted) {
+            nodes.push({
+              nodeId: node.id,
+              kind: node.kind,
+              agentId: node.agentId,
+              state: "skipped",
+              durationMs: Date.now() - started,
+              costCents: 0,
+              error: "review cancelled",
+            });
+            return null;
+          }
           // A per-node failure policy is what stops one flaky agent from killing a review.
           const fatal = node.failurePolicy === "fail-review";
           log.warn(

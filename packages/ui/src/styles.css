@@ -168,6 +168,10 @@ td {
 tr.clickable {
   cursor: pointer;
 }
+tr.clickable:focus-visible {
+  outline: 2px solid var(--accent, #4c8dff);
+  outline-offset: -2px;
+}
 /* Selection is stated before hover so the hover rule does not silently lose to it, and
    both resolve to the same colour regardless of which applies. */
 tr.selected td {
@@ -285,6 +289,9 @@ tr.clickable:hover td {
 }
 
 .field {
+  /* Explicit, because .field is a <label> so its control is associated with it, and a
+     label is inline by default — the margin below would not apply. */
+  display: block;
   margin-bottom: 12px;
 }
 .field-label {

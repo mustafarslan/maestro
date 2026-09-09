@@ -139,6 +139,64 @@ describe("triage", () => {
     expect(result.posted).toHaveLength(2);
   });
 
+  it("keeps whole-PR findings apart, because they carry no location to merge on", () => {
+    // Reported by Maestro against this very change: dropping category from the key made
+    // every line-less finding hash to "repo:none". Unrelated observations merged into
+    // one, disagreement was scored as corroboration, and all but the longest body was
+    // demoted to a footnote — over-merging, the same failure as duplication wearing the
+    // other mask.
+    const result = triage(doc, [
+      {
+        agentId: "product",
+        findings: [
+          f({
+            file: undefined,
+            lineStart: undefined,
+            lineEnd: undefined,
+            category: "missing-acceptance-criteria",
+            title: "No acceptance criteria referenced",
+            body: "The PR description does not link the Linear issue.",
+          }),
+          f({
+            file: undefined,
+            lineStart: undefined,
+            lineEnd: undefined,
+            category: "missing-tests",
+            title: "No tests accompany the change",
+            body: "None of the new behaviour is covered by a test.",
+          }),
+        ],
+      },
+    ]);
+
+    expect(result.posted.length + result.suppressed.length).toBe(2);
+    expect(result.posted.every((p) => p.agreementCount === 1)).toBe(true);
+  });
+
+  it("merges across a bucket boundary, which means nothing to a reader", () => {
+    // Two agents reporting lines 78 and 80 are reporting one defect; 7 and 8 being
+    // different buckets is an artefact of the grouping, not a fact about the code.
+    const result = triage(doc, [
+      { agentId: "security", findings: [f({ lineStart: 78 })] },
+      { agentId: "architecture", findings: [f({ lineStart: 80, title: "Same defect" })] },
+    ]);
+    expect(result.posted).toHaveLength(1);
+    expect(result.posted[0]?.agreementCount).toBe(2);
+  });
+
+  it("does not treat one agent reporting twice as agreement with itself", () => {
+    const result = triage(doc, [
+      {
+        agentId: "security",
+        findings: [
+          f({ lineStart: 78 }),
+          f({ lineStart: 80, category: "other", title: "A second defect nearby" }),
+        ],
+      },
+    ]);
+    expect(result.posted.every((p) => p.agreementCount === 1)).toBe(true);
+  });
+
   it("suppresses findings below the confidence threshold", () => {
     const result = triage(doc, [{ agentId: "security", findings: [f({ confidence: 0.3 })] }]);
     expect(result.posted).toHaveLength(0);

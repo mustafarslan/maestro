@@ -1,5 +1,5 @@
 import { anthropicTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
-import type { EnvSpec, PlaybookDocument } from "@maestro/playbook";
+import type { PlaybookDocument } from "@maestro/playbook";
 import { defaultPlaybook } from "@maestro/playbook";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
 import { describe, expect, it } from "vitest";
@@ -159,6 +159,65 @@ describe("engine admission control", () => {
 
     expect(peak).toBeGreaterThan(0);
     expect(held).toBe(0);
+  });
+
+  it("honours skip-with-note when an agent's provider cannot be resolved", async () => {
+    // Resolving the model binding has to happen inside the per-agent try. Outside it, an
+    // agent pointed at a provider with no key configured rejects the Promise.all and
+    // takes the entire review down — regardless of its failure policy, which exists
+    // precisely so one misconfigured agent cannot do that.
+    const doc = twoAgentPlaybook();
+    const broken: PlaybookDocument = {
+      ...doc,
+      agents: doc.agents.map((a) =>
+        a.id === "security"
+          ? { ...a, model: { ...a.model, providerId: "not-configured", fallback: [] } }
+          : a,
+      ),
+      graph: {
+        ...doc.graph,
+        nodes: doc.graph.nodes.map((n) =>
+          n.kind === "agent" && n.agentId === "security"
+            ? { ...n, failurePolicy: "skip-with-note" as const }
+            : n,
+        ),
+      },
+    };
+
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: broken }),
+    );
+
+    expect(outcome.state).toBe("done");
+    const security = outcome.nodes.find((n) => n.agentId === "security");
+    expect(security?.state).toBe("failed");
+    // The other agent must still have done its work.
+    expect(outcome.nodes.some((n) => n.agentId === "architecture" && n.state === "done")).toBe(
+      true,
+    );
+  });
+
+  it("does not start a container for a review cancelled while it queued", async () => {
+    // Cancel-on-push plus a full queue would otherwise pay a container start per agent
+    // for a review whose comment can never be posted.
+    const controller = new AbortController();
+    const driver = fakeDriver();
+
+    const outcome = await runReview(
+      {
+        driver,
+        registry: fakeRegistry(),
+        acquireSlot: async () => {
+          controller.abort();
+          return () => {};
+        },
+      },
+      request({ signal: controller.signal }),
+    );
+
+    expect(driver.destroyed).toHaveLength(0);
+    expect(outcome.nodes.filter((n) => n.kind === "agent" && n.state === "done")).toHaveLength(0);
   });
 
   it("runs without a scheduler, because a single CLI review has nothing to schedule", async () => {

@@ -39,12 +39,16 @@ insecure neighbour, so it was not pattern-matching on "API route".
 ## Not yet verified
 
 - **Hosted providers have never made a live call.** The Anthropic, OpenAI and Google adapters pass
-  the conformance suite against recorded fixtures only. All live testing used Ollama
-  (`glm-5.3:cloud`). The shipped default playbook binds every agent to Anthropic, so a fresh
-  install needs an `ANTHROPIC_API_KEY` before it will run.
-- **`ui-ux` has never run against a model.** `product`, `security` and `architecture` have all
-  executed live; the router correctly skips `ui-ux` on backend-only diffs, and no test review has
-  yet touched a file its path rules match.
+  the conformance suite against recorded fixtures only. All live testing used Ollama. The shipped
+  default playbook binds every agent to Anthropic, so a fresh install needs an `ANTHROPIC_API_KEY`
+  before it will run.
+- **The prompt-size guard falls back to a constant on models it has no window for.** It is sized
+  from `capabilities.contextWindow` where that is known, and every model tested live is an Ollama
+  one with no entry, so those used the 400k-character default. That was enough for a 131k-token
+  window once reads were capped; a 32k-window model has not been tried.
+- **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
+  Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
+  admin UI on its first run.
 - **Nothing has ever been posted to a real pull request.** Every GitHub run was `--dry-run`. The
   posting path, comment updating, and reaction ingestion are unit-tested but not exercised against
   live GitHub.
@@ -146,7 +150,26 @@ These are recorded because each was invisible to the test suite that existed at 
     with their controls, buttons carry an explicit type, and a CSS rule that lost to a
     higher-specificity hover was reordered.
 
-Findings 11-18 and 20 were reported by **Maestro reviewing its own commits**. It also produced one
+23. **The dedupe fix in 17 over-corrected.** With category gone from the key, every finding
+    *without* a line number hashed to the same key — `repo:none` for whole-PR observations, which
+    the Finding schema explicitly invites. Unrelated points merged into one, disagreement was
+    scored as corroboration by the agreement boost, and all but the longest body was demoted to a
+    footnote: the same failure as duplication, wearing the other mask. Location is now the key
+    where a location exists, category returns exactly where it does not, and neighbouring buckets
+    merge so that lines 78 and 80 are not split by an artefact of the grouping.
+24. **Moving `registry.resolve` out of the per-agent `try`** — done while wiring the scheduler, to
+    read the provider id for the slot request — meant one mistyped model name in a user-authored
+    playbook rejected the `Promise.all` and destroyed the whole review, discarding the work every
+    other agent had finished, regardless of the node's `skip-with-note` policy.
+25. **A queued agent for a cancelled review kept its place in the scheduler.** Superseded and
+    shutdown reviews were admitted anyway, each starting a container only to abandon it, displacing
+    live work until the queue drained. Aborting now removes the waiter, and the engine re-checks
+    the signal after admission.
+26. **`read_file` clamped its range silently.** After the cap in 18, an agent asking for lines
+    1-600 got 1-300 with nothing said — which is how an agent comes to report that a function is
+    never closed, having been shown only its first half.
+
+Findings 11-20 and 23-25 were reported by **Maestro reviewing its own commits**. It also produced one
 false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
 could not run Bun to check — both spellings are in fact valid), which is roughly the calibration
 you want. Findings 19 and 20 are the sharpest evidence so far: it read a fix that had just been
@@ -160,10 +183,12 @@ Current bindings, from live runs against Ollama Cloud:
 
 | Agent | Model | Observed |
 | --- | --- | --- |
-| security | `glm-5.3:cloud` | 18 tool calls, found the IDOR in `notabase` |
-| architecture | `glm-5.3:cloud` | 18 tool calls, found 19 and 20 above |
-| product | `gpt-oss:120b-cloud` | 4 tool calls, 0 findings — noticeably less thorough on the same diff |
-| ui-ux | `gpt-oss:20b-cloud` | never routed to yet |
+| security | `glm-5.3:cloud` | found the IDOR in `notabase`; 2 findings on the self-review below |
+| architecture | `glm-5.3:cloud` | 4 findings on the self-review below, including 19, 20 and 23 |
+| product | `gpt-oss:120b-cloud` | 0 findings on both self-reviews, and it stops earlier than the others |
+| ui-ux | `gpt-oss:20b-cloud` | 1 finding on its first run: rows clickable but not keyboard-reachable |
+
+Numbers above are from the self-review of commit `86212d9` (22 files, ~825 lines) unless stated.
 
 The `product` row is the honest one: the smaller model stops early and submits an empty list rather
 than digging. That is a model-quality difference, not a bug, and it is the kind of thing the eval

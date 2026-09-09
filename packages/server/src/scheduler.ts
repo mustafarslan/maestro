@@ -66,15 +66,41 @@ export class Scheduler {
     return true;
   }
 
-  /** Resolves with a release function once a slot is free. */
-  acquire(req: SlotRequest): Promise<() => void> {
-    return new Promise((resolve) => {
+  /**
+   * Resolves with a release function once a slot is free.
+   *
+   * An `AbortSignal` removes the waiter from the queue outright. A review superseded by
+   * a newer push, or one caught by shutdown, otherwise keeps its place in the fairness
+   * order and is eventually admitted just to start a container and immediately abandon
+   * it — so a dead review goes on displacing live work until the queue drains.
+   */
+  acquire(req: SlotRequest, signal?: AbortSignal): Promise<() => void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error("aborted before admission"));
+        return;
+      }
       const before = this.running.size;
-      this.waiters.push({ req, resolve, seq: this.seq++ });
+      const waiter = { req, resolve, seq: this.seq++ };
+      this.waiters.push(waiter);
+
+      signal?.addEventListener(
+        "abort",
+        () => {
+          const at = this.waiters.indexOf(waiter);
+          // Only cancel while still waiting; once admitted the caller owns the release.
+          if (at !== -1) {
+            this.waiters.splice(at, 1);
+            reject(new Error("aborted while waiting for a scheduler slot"));
+          }
+        },
+        { once: true },
+      );
+
       this.pump();
       // Queueing is the interesting event: it is the difference between "the review is
       // slow" and "the review is waiting", and only the scheduler can tell them apart.
-      if (this.waiters.some((w) => w.req === req)) {
+      if (this.waiters.includes(waiter)) {
         logger.debug(
           { ...req, running: before, waiting: this.waiters.length },
           "agent task queued for a scheduler slot",

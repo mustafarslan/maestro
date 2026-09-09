@@ -137,3 +137,61 @@ describe("Scheduler", () => {
     expect(s.stats().running).toBe(0);
   });
 });
+
+describe("cancellation", () => {
+  it("removes a waiter for an aborted review instead of admitting it later", async () => {
+    // A superseded review otherwise keeps its place in the fairness order and is
+    // eventually admitted just to start a container it immediately abandons — so a dead
+    // review goes on displacing live work until the queue drains.
+    const scheduler = new Scheduler({ global: 1, perAgent: 1, perRepo: 1, perProvider: 1 });
+    const held = await scheduler.acquire({
+      reviewId: "rv-1",
+      agentId: "security",
+      repoId: "repo-1",
+      providerId: "anthropic",
+    });
+
+    const controller = new AbortController();
+    const queued = scheduler.acquire(
+      { reviewId: "rv-2", agentId: "security", repoId: "repo-1", providerId: "anthropic" },
+      controller.signal,
+    );
+    expect(scheduler.stats().waiting).toBe(1);
+
+    controller.abort();
+    await expect(queued).rejects.toThrow(/aborted/);
+    expect(scheduler.stats().waiting).toBe(0);
+
+    // The live slot is untouched, and releasing it admits nothing that was cancelled.
+    held();
+    expect(scheduler.stats().running).toBe(0);
+  });
+
+  it("refuses immediately when the signal is already aborted", async () => {
+    const scheduler = new Scheduler();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      scheduler.acquire(
+        { reviewId: "rv-1", agentId: "security", repoId: "repo-1", providerId: "anthropic" },
+        controller.signal,
+      ),
+    ).rejects.toThrow(/aborted/);
+    expect(scheduler.stats().waiting).toBe(0);
+  });
+
+  it("does not cancel a request that has already been admitted", async () => {
+    // Once admitted the caller owns the release; yanking it from under them would double
+    // count the slot.
+    const scheduler = new Scheduler();
+    const controller = new AbortController();
+    const release = await scheduler.acquire(
+      { reviewId: "rv-1", agentId: "security", repoId: "repo-1", providerId: "anthropic" },
+      controller.signal,
+    );
+    controller.abort();
+    expect(scheduler.stats().running).toBe(1);
+    release();
+    expect(scheduler.stats().running).toBe(0);
+  });
+});

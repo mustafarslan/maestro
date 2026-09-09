@@ -52,15 +52,32 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
   const { minConfidence, maxInlineComments, agreementBoost } = doc.triage;
 
   const groups = new Map<string, TriagedFinding>();
+  /** Who wrote the description currently leading each group — not who reported first. */
+  const leadAgent = new Map<string, string>();
 
   for (const { agentId, findings } of inputs) {
     for (const finding of findings) {
-      const key = dedupeKey(finding);
+      const candidates = dedupeKeys(finding);
+      // The first candidate is this finding's own key; the rest are neighbours it may
+      // join. Only join a neighbour that already exists — never create one.
+      const key = candidates.find((k) => groups.has(k)) ?? candidates[0] ?? "repo:none";
       const existing = groups.get(key);
 
       if (!existing) {
         groups.set(key, { ...finding, agentIds: [agentId], agreementCount: 1 });
+        leadAgent.set(key, agentId);
         continue;
+      }
+
+      // One agent reporting two defects in the same window is not agreement with
+      // itself; keep them separate rather than inflating the agreement count.
+      if (existing.agentIds.includes(agentId)) {
+        const own = candidates[0] ?? key;
+        if (!groups.has(own)) {
+          groups.set(own, { ...finding, agentIds: [agentId], agreementCount: 1 });
+          leadAgent.set(own, agentId);
+          continue;
+        }
       }
 
       // Two agents describing the same defect is corroboration, not a reason to say it
@@ -79,13 +96,14 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
       // is telling a different story rather than restating the same one.
       const incomingLeads = finding.body.length > existing.body.length;
       const other = incomingLeads
-        ? { agentId: existing.agentIds[0] ?? "unknown", ...existing }
+        ? { agentId: leadAgent.get(key) ?? agentId, ...existing }
         : { agentId, ...finding };
 
       if (incomingLeads) {
         existing.title = finding.title;
         existing.body = finding.body;
         existing.category = finding.category;
+        leadAgent.set(key, agentId);
       }
       if (other.category !== existing.category) {
         const also = existing.alsoReported ?? [];
@@ -128,18 +146,31 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
   return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed) };
 }
 
+const BUCKET_LINES = 10;
+
 /**
- * Findings in the same place are treated as the same defect.
+ * Candidate group keys for a finding, best match first.
  *
- * Category is deliberately NOT part of the key. Agents invent their own slugs, so one
- * defect arrives as `dead-conditional` from one agent and `no-op-ternary` from another,
- * and keying on category shipped both — the duplication that makes people stop reading
- * an automated reviewer. Same file, same ten-line window, same defect; triage keeps the
- * fuller explanation and records the agreement.
+ * A shared LOCATION is the evidence that two agents found the same defect. Category is
+ * not: agents invent their own slugs, so one defect arrives as `dead-conditional` from
+ * one and `no-op-ternary` from another, and keying on category posted both — the
+ * duplication that makes people stop reading an automated reviewer.
+ *
+ * But a finding with no line number carries no location evidence at all. Keying those on
+ * file alone collapses every whole-PR observation into one group, scoring disagreement as
+ * corroboration and demoting all but the longest to a footnote — over-merging, which is
+ * the same failure wearing the other mask. So category comes back exactly where location
+ * is missing, and nowhere else.
+ *
+ * Neighbouring buckets are candidates too: agents rarely anchor to the identical line,
+ * and lines 78 and 80 straddle a bucket boundary that means nothing to a reader.
  */
-function dedupeKey(f: Finding): string {
-  const bucket = f.lineStart ? Math.floor(f.lineStart / 10) : "none";
-  return `${f.file ?? "repo"}:${bucket}`;
+function dedupeKeys(f: Finding): string[] {
+  const file = f.file ?? "repo";
+  if (!f.lineStart) return [`${file}:none:${f.category.toLowerCase()}`];
+
+  const bucket = Math.floor(f.lineStart / BUCKET_LINES);
+  return [`${file}:${bucket}`, `${file}:${bucket - 1}`, `${file}:${bucket + 1}`];
 }
 
 function buildSummary(

@@ -154,17 +154,20 @@ export function buildDispatch(ctx: ToolContext) {
         const path = safePath(input.path);
         if (typeof path !== "string") return { output: path.error, isError: true };
         const start = Number(input.startLine ?? 1);
-        const end = Math.min(
-          Number(input.endLine ?? start + MAX_READ_LINES),
-          start + MAX_READ_LINES,
-        );
+        const requestedEnd = Number(input.endLine ?? start + MAX_READ_LINES);
+        const end = Math.min(requestedEnd, start + MAX_READ_LINES);
         // Numbered lines, so a finding can cite a location the reviewer can click.
         const res = await ctx.sandbox.exec(
           `sed -n ${shellQuote(`${start},${end}p`)} ${shellQuote(path)} | cat -n | sed ${shellQuote(`s/^/${start === 1 ? "" : ""}/`)}`,
         );
         if (res.exitCode !== 0)
           return { output: res.stderr.trim() || `cannot read ${path}`, isError: true };
-        const text = renumber(res.stdout, start);
+        let text = renumber(res.stdout, start);
+        // Say so when the range was cut short. A silent clamp is how an agent comes to
+        // report that a function is never closed, having been shown only its first half.
+        if (requestedEnd > end && text) {
+          text += `\n… [clamped to ${MAX_READ_LINES} lines — the file continues; read from line ${end + 1}]`;
+        }
         if (text.length > MAX_READ_CHARS) {
           return {
             output: `${text.slice(0, MAX_READ_CHARS)}\n… [truncated at ${MAX_READ_CHARS} characters — read a narrower line range]`,

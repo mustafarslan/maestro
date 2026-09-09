@@ -128,7 +128,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           // Admission control across every concurrent review. Without this the daemon
           // starts every agent of every review at once and the per-agent, per-repo and
           // per-provider limits are decoration.
-          acquireSlot: (slot) => scheduler.acquire(slot),
+          acquireSlot: (slot, signal) => scheduler.acquire(slot, signal),
         },
         playbook: record.doc,
         playbookVersionId: record.id,
