@@ -1257,6 +1257,32 @@ Its first version reported two failures that were not real: it matched `pnpm` in
 pnpm then refuses to remove"), not just in commands. Scoped to fenced code blocks now. A checker
 that cries wolf gets ignored, which is the same end state as not having one.
 
+### The Compose healthcheck, and proving it catches a hang
+
+142. **A running daemon and a wedged one looked identical.** Compose had no healthcheck, so
+    `docker ps` could not tell them apart, and `restart: unless-stopped` acts on exit rather
+    than on a hang.
+
+    The cheap version would have been a bash `/dev/tcp` probe, needing no new package — and it
+    would have been worse than nothing. The kernel accepts a connection whether or not the event
+    loop is alive, so a frozen process reports healthy. A check that passes when the thing it
+    checks is dead is the exact shape this session spent its time removing, so the image carries
+    `curl` and the check makes a request that requires a real response. `/` is the UI, served
+    without a token by design, so it needs no credential.
+
+    Proven rather than asserted, by freezing the event loop with `SIGSTOP` — a container still
+    `running`, its socket still listening, its process in state `T`:
+
+    | | |
+    | --- | --- |
+    | after start | `healthy` |
+    | after `SIGSTOP` | `unhealthy` within one interval, probe `exit=-1` |
+    | after `SIGCONT` | `healthy` again |
+
+    That last row matters as much as the middle one: a check that latches unhealthy and never
+    recovers would be a different kind of useless. The probe image and container were removed
+    afterwards, so this cost no disk.
+
 ### Compose, checked and correct
 
 Two things worth stating because they were suspected and turned out fine.
@@ -1504,15 +1530,6 @@ before a release, and either would catch the other side changing under us.
     exited 0 on failure; that was my own measurement error — `sh install.sh | tail` reports
     `tail`'s status, the identical trap that had just been fixed in the gate script.
 
-- **The Compose deployment has no healthcheck**, so `docker ps` cannot distinguish a running
-  daemon from a wedged one, and `restart: unless-stopped` only acts on exit — not on a hang.
-  Deliberately not added blind. The runtime image carries no `curl` or `wget`, and the obvious
-  substitute is worse than nothing: a bash `/dev/tcp` probe succeeds against a hung process,
-  because the kernel accepts the connection whether or not the event loop is alive. That is a
-  check that reports healthy when the thing it checks is dead — the exact shape this session
-  spent its time removing. Doing it honestly means `curl` in the runtime image and a request
-  that requires an actual response, which needs an image build to verify, and building one was
-  out of scope for a machine whose owner had asked for CPU restraint.
 
 ### Found by mechanical sweep, still open
 

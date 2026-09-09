@@ -57,6 +57,21 @@ services:
       # Admin UI: bound to loopback on the host, because it is not authenticated by
       # anything other than the token and has no business on a public interface.
       - "127.0.0.1:7777:7777"
+    # Requires an actual HTTP response, so it fails if the event loop is blocked rather
+    # than only if the process has exited. `/` is the UI, which is deliberately served
+    # without a token — the browser has to load it before it can send one — so the check
+    # needs no credential.
+    #
+    # `restart: unless-stopped` acts on exit, not on a hang; this is what makes a hang
+    # visible in `docker ps` and to anything watching health.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:7777/"]
+      interval: 30s
+      timeout: 5s
+      # Generous: the first start runs migrations and seeds the default playbook.
+      start_period: 30s
+      retries: 3
+
     command:
       - serve
       - --webhook-port=8080

@@ -24,8 +24,13 @@ RUN pnpm run build:ui && pnpm exec tsc -b
 RUN bun build --compile --outfile /out/maestro apps/cli/dist/index.js
 
 FROM debian:bookworm-slim
+# curl is here for the Compose healthcheck, and only for that. The alternative was a bash
+# /dev/tcp probe with no new package, which would have been worse than nothing: the kernel
+# accepts a connection whether or not the event loop is alive, so a wedged daemon would
+# have reported healthy. A check that passes when the thing it checks is dead is the shape
+# this project spent a long session removing.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git docker.io \
+      ca-certificates git docker.io curl \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/maestro /usr/local/bin/maestro
 ENV MAESTRO_HOME=/data
