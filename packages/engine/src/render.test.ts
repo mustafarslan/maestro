@@ -112,3 +112,31 @@ describe("what the metrics block says about the environment", () => {
     expect(md).not.toContain("exit -1");
   });
 });
+
+describe("what the metrics block claims about the network", () => {
+  it("does not present the egress log as the whole story", () => {
+    // The proxy sees what the installing tools chose to send through it. Reporting "N
+    // egress attempts blocked" and stopping there invites the reader to conclude the
+    // prepare phase was sealed, and it is not — the allowlist is advisory, honoured by
+    // convention through HTTP_PROXY. The comment must not claim more than it can support.
+    const md = renderReview(
+      {
+        ...outcome([{ agentId: "security", state: "done" }]),
+        egressLog: [
+          { host: "evil.example", allowed: false },
+          { host: "registry.npmjs.org", allowed: true },
+        ],
+      } as ReviewOutcome,
+      { title: "t" },
+    );
+    expect(md).toContain("1 egress attempt(s) blocked");
+    expect(md).toContain("proxy-routed traffic only");
+  });
+
+  it("still states the analyze isolation plainly, because that one is enforced", () => {
+    // `--network none`, asserted in the integration suite by dialling an address. Hedging
+    // a claim that IS true would be its own kind of dishonesty.
+    const md = renderReview(outcome([{ agentId: "security", state: "done" }]), { title: "t" });
+    expect(md).toContain("analyzed with no network access");
+  });
+});

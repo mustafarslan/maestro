@@ -1574,6 +1574,22 @@ before a release, and either would catch the other side changing under us.
   Left as it is, deliberately and with the evidence recorded, so whoever picks it up starts from
   measurements rather than from the same three experiments.
 
+144. **The pull request comment implied the prepare phase was sealed.** The metrics block said
+    "N egress attempt(s) blocked during dependency install", which is true and reads as complete.
+    The proxy sees what the installing tools chose to send through it — they are pointed at it
+    with `HTTP_PROXY` and honour it by convention — so traffic that ignores those variables never
+    appears in that log at all, and a reader counting blocked attempts would conclude something
+    the evidence does not support.
+
+    It now says "blocked by the allowlist proxy … (proxy-routed traffic only)". The sentence
+    beside it, "analyzed with no network access", is deliberately left unhedged: that one is
+    `--network none` and is asserted in the integration suite by dialling an address rather than
+    by reading a flag. Hedging a claim that is true would be its own kind of dishonesty, and the
+    two phases now read as differently as they actually behave.
+
+    This is the part of 143 that was fixable without the redesign: the hole stays open, and the
+    review stops overstating what it means.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

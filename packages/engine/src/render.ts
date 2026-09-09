@@ -144,6 +144,10 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
         ]
       : []),
     `**Environment** — toolchain \`${outcome.toolchain ?? "unknown"}\`, ` +
+      // "analyzed with no network access" is the strong, enforced claim — `--network none`
+      // on the analyze container, asserted in the integration suite by dialling an address
+      // rather than by reading a flag. It is deliberately stated separately from anything
+      // about the prepare phase, whose allowlist is advisory.
       `${outcome.allowedCommands.length} allowlisted command(s), analyzed with no network access.` +
       // Whether the dependency layer was reused. It is the difference between a review
       // that starts in seconds and one that reinstalls the world, and it was measured
@@ -155,7 +159,13 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
           ? " Dependency cache hit."
           : " Dependency cache miss — dependencies were installed from scratch.") +
       (blocked.length
-        ? ` ${blocked.length} egress attempt(s) blocked during dependency install.`
+        ? // "blocked" is true; "the only attempts" would not be. The proxy sees what the
+          // installing tools chose to send through it — they are pointed at it with
+          // HTTP_PROXY and honour it by convention — and traffic that ignores those
+          // variables never appears in this log at all. Saying "blocked N attempts" and
+          // stopping there invites the reader to conclude the phase was sealed, which is a
+          // stronger claim than the evidence supports.
+          ` ${blocked.length} egress attempt(s) blocked by the allowlist proxy during dependency install (proxy-routed traffic only).`
         : ""),
     "",
     `**Total** — ${outcome.costKnown === false ? "cost unpriced for this provider" : `${outcome.costCents.toFixed(2)}¢`}` +
