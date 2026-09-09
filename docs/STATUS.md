@@ -1241,6 +1241,22 @@ Every one of them fails the suite when broken. Seven did not when the sweep star
     so a step running a script from `scripts/` would have failed on a file that was not there.
     Every new step was run locally, verbatim, before being written into the workflow.
 
+### Compose, checked and correct
+
+Two things worth stating because they were suspected and turned out fine.
+
+`MAESTRO_SANDBOX_NETWORK: ${COMPOSE_PROJECT_NAME:-maestro}_default` looked like it would only
+work in a directory called `maestro`, since Compose derives an unset project name from the
+directory. Checked from a directory called `maestro-review`: Compose sets
+`COMPOSE_PROJECT_NAME` during interpolation, so the value resolved to `maestro-review_default`,
+exactly matching the network it creates. The `:-maestro` fallback essentially never fires. No
+change made — and this is the third time in this session that testing a hypothesis stopped a fix
+being applied to code that was already right, after the installer's exit code and the private
+repository's 404.
+
+`MAESTRO_ADMIN_TOKEN` is read by `serve.ts`, so the token an operator sets in Compose is the one
+the admin API enforces, rather than being silently replaced by a generated one.
+
 ### The prompt fence, attacked rather than read
 
 Prompt injection is named as this project's dominant threat: pull request titles,
@@ -1471,6 +1487,16 @@ before a release, and either would catch the other side changing under us.
     One thing checked and found already correct: the exit code. An early reading suggested it
     exited 0 on failure; that was my own measurement error — `sh install.sh | tail` reports
     `tail`'s status, the identical trap that had just been fixed in the gate script.
+
+- **The Compose deployment has no healthcheck**, so `docker ps` cannot distinguish a running
+  daemon from a wedged one, and `restart: unless-stopped` only acts on exit — not on a hang.
+  Deliberately not added blind. The runtime image carries no `curl` or `wget`, and the obvious
+  substitute is worse than nothing: a bash `/dev/tcp` probe succeeds against a hung process,
+  because the kernel accepts the connection whether or not the event loop is alive. That is a
+  check that reports healthy when the thing it checks is dead — the exact shape this session
+  spent its time removing. Doing it honestly means `curl` in the runtime image and a request
+  that requires an actual response, which needs an image build to verify, and building one was
+  out of scope for a machine whose owner had asked for CPU restraint.
 
 ### Found by mechanical sweep, still open
 
