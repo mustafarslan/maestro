@@ -1,3 +1,4 @@
+import { APICallError, InvalidPromptError, LoadAPIKeyError, TypeValidationError } from "ai";
 import { describe, expect, it } from "vitest";
 import { runConformance } from "./conformance.js";
 import { Provider } from "./provider.js";
@@ -258,5 +259,75 @@ describe("extended thinking", () => {
     });
     await provider.chat({ model: "claude-opus-5", messages: [{ role: "user", content: "hi" }] });
     expect(cap.get()?.thinking).toBeUndefined();
+  });
+});
+
+describe("which failures are worth another attempt", () => {
+  // Retrying is not free: each attempt costs wall-clock, and one that reached the model
+  // has already cost tokens. The HTTP half was right — verified against the SDK itself,
+  // which marks 401 and 403 non-retryable and 408, 409, 429 and 5xx retryable — but
+  // everything that was not an HTTP failure fell into a fallback that retried it.
+  const wrap = (err: unknown) => {
+    const provider = new Provider({ id: "p", kind: "anthropic", apiKey: "k" });
+    // wrapError is private on purpose; this reaches it deliberately rather than driving a
+    // real call, because the point is the classification, not the transport.
+    //  lives on ProviderError.opts, which is what the loop reads.
+    return (
+      provider as unknown as { wrapError(e: unknown): { opts: { retryable: boolean } } }
+    ).wrapError(err).opts;
+  };
+
+  it("retries a transport failure, which is what the fallback is for", () => {
+    expect(wrap(new TypeError("fetch failed")).retryable).toBe(true);
+  });
+
+  it("does not retry an abort", () => {
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    expect(wrap(abort).retryable).toBe(false);
+  });
+
+  it("does not retry a key it could not load", () => {
+    // Three attempts at reading the same absent environment variable.
+    expect(wrap(new LoadAPIKeyError({ message: "no key" })).retryable).toBe(false);
+  });
+
+  it("does not retry a response that failed schema validation", () => {
+    // Already paid for in tokens, and the same prompt produces the same shape.
+    expect(wrap(new TypeValidationError({ value: {}, cause: "bad" })).retryable).toBe(false);
+  });
+
+  it("does not retry a prompt the SDK refused to build", () => {
+    expect(wrap(new InvalidPromptError({ prompt: {}, message: "bad" })).retryable).toBe(false);
+  });
+
+  it("still retries a rate limit", () => {
+    expect(
+      wrap(
+        new APICallError({
+          message: "429",
+          url: "u",
+          requestBodyValues: {},
+          statusCode: 429,
+          responseBody: "",
+        }),
+      ).retryable,
+    ).toBe(true);
+  });
+
+  it("does not retry a rejected credential", () => {
+    // The sharpest case: a wrong key would otherwise burn every retry on every step of
+    // every agent before the review failed.
+    expect(
+      wrap(
+        new APICallError({
+          message: "401",
+          url: "u",
+          requestBodyValues: {},
+          statusCode: 401,
+          responseBody: "",
+        }),
+      ).retryable,
+    ).toBe(false);
   });
 });

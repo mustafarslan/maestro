@@ -6,10 +6,19 @@ import { logger } from "@maestro/core";
 import {
   APICallError,
   generateText,
+  InvalidArgumentError,
+  InvalidMessageRoleError,
+  InvalidPromptError,
+  InvalidToolInputError,
+  JSONParseError,
   jsonSchema,
   type LanguageModel,
+  LoadAPIKeyError,
+  LoadSettingError,
   type ModelMessage,
   tool as makeTool,
+  TypeValidationError,
+  UnsupportedFunctionalityError,
 } from "ai";
 import { staticCapabilities } from "./pricing.js";
 import {
@@ -174,7 +183,34 @@ export class Provider {
     }
     const message = err instanceof Error ? err.message : String(err);
     const isAbort = err instanceof Error && err.name === "AbortError";
-    return new ProviderError(message, { providerId: this.id, retryable: !isAbort, cause: err });
+
+    // Anything that is not an HTTP failure used to be retried, on the theory that it was
+    // probably the network. Most of it is not. The reasoning already written above — "a
+    // 400 means the request itself is wrong and retrying just burns budget" — applies
+    // just as much to a prompt the SDK refused to build, an API key it could not load, or
+    // a response that failed schema validation: none of those become true on the second
+    // attempt, and a validation failure has already been paid for in tokens.
+    //
+    // Named rather than pattern-matched on the message, because the SDK exports these as
+    // classes and matching on wording is a trap for whoever next reads a changelog.
+    const permanent =
+      InvalidPromptError.isInstance(err) ||
+      InvalidArgumentError.isInstance(err) ||
+      InvalidMessageRoleError.isInstance(err) ||
+      InvalidToolInputError.isInstance(err) ||
+      LoadAPIKeyError.isInstance(err) ||
+      LoadSettingError.isInstance(err) ||
+      TypeValidationError.isInstance(err) ||
+      JSONParseError.isInstance(err) ||
+      UnsupportedFunctionalityError.isInstance(err);
+
+    return new ProviderError(message, {
+      providerId: this.id,
+      // A transport failure — `fetch failed`, a reset socket — is the case this fallback
+      // is genuinely for, and it stays retryable.
+      retryable: !isAbort && !permanent,
+      cause: err,
+    });
   }
 }
 

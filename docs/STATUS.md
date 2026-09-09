@@ -1162,6 +1162,24 @@ before a release, and either would catch the other side changing under us.
     union, so the shape the code sends is one the installed SDK accepts. That is the fourth
     external contract checked, and the first that was already right.
 
+126. **Everything that was not an HTTP error was retried.** The HTTP half of the error mapping
+    was right, and verified against the SDK itself rather than assumed: constructing an
+    `APICallError` at each status shows 401 and 403 non-retryable and 408, 409, 429 and 5xx
+    retryable, so a rejected credential fails fast instead of burning every retry of every step
+    of every agent. But anything that was *not* an `APICallError` fell into a fallback that
+    retried it unless it was an abort — a prompt the SDK refused to build, an API key it could
+    not load, a response that failed schema validation. None of those become true on a second
+    attempt, and a validation failure has already been paid for in tokens. The reasoning was
+    already written three lines above, on the HTTP branch: "a 400 means the request itself is
+    wrong and retrying just burns budget."
+
+    Classified by the SDK's exported error classes rather than by matching on message text,
+    which would be a trap for whoever next reads a changelog. A transport failure — `fetch
+    failed`, a reset socket — is what the fallback is genuinely for, and stays retryable.
+
+    This is the "auth handling and error shapes" half of the hosted-provider gap, and it turned
+    out to need no key: the SDK's own error classes answer it, and they are on disk.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
