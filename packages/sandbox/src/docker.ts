@@ -167,21 +167,41 @@ export class DockerSandboxDriver implements SandboxDriver {
     const containerId = `maestro-prep-${id}`;
 
     try {
-      // Sandboxes must dial an address they can actually reach. On a normal host that
-      // is host.docker.internal; in the Compose deployment Maestro is itself a
-      // container, so MAESTRO_PROXY_HOST must name an address sibling containers can
-      // resolve. Getting this wrong fails every dependency install, so say so loudly.
-      const proxyHost = process.env.MAESTRO_PROXY_HOST ?? "host.docker.internal";
-      if (!process.env.MAESTRO_PROXY_HOST && runningInContainer()) {
+      // Sandboxes must dial an address they can actually reach, and how depends on
+      // whether Maestro is a process on the host or a container beside them.
+      //
+      // On a host, host.docker.internal works. In a container it does not: it resolves to
+      // the host, not to us. The first attempt at fixing that published the proxy on the
+      // docker bridge gateway, which is wrong twice over — it is a real interface only on
+      // Linux, so `docker run -p 172.17.0.1:...` fails outright on Docker Desktop with
+      // "can't assign requested address" and the container never starts; and it routes
+      // container-to-container traffic out to the host and back for no reason.
+      //
+      // Joining the sandbox to Maestro's own network removes the problem rather than
+      // working around it: Docker's embedded DNS resolves the service name, the traffic
+      // never leaves the daemon, nothing is published to any host interface, and it
+      // behaves identically on every platform. Only the PREPARE phase joins — analyze
+      // still runs with `--network none`, so the isolation posture is untouched.
+      const sandboxNetwork = process.env.MAESTRO_SANDBOX_NETWORK?.trim();
+      const proxyHost =
+        process.env.MAESTRO_PROXY_HOST?.trim() ||
+        (sandboxNetwork ? await ownContainerName() : undefined) ||
+        "host.docker.internal";
+
+      if (!sandboxNetwork && !process.env.MAESTRO_PROXY_HOST && runningInContainer()) {
         log.warn(
-          "Maestro is running inside a container but MAESTRO_PROXY_HOST is unset; " +
-            "sandboxes will dial host.docker.internal, which does not resolve to this " +
-            "container, so dependency installs will fail. Set MAESTRO_PROXY_HOST to an " +
-            "address sibling containers can reach.",
+          "Maestro is running inside a container but neither MAESTRO_SANDBOX_NETWORK nor " +
+            "MAESTRO_PROXY_HOST is set; sandboxes will dial host.docker.internal, which " +
+            "does not resolve to this container, so every dependency install will fail. " +
+            "Set MAESTRO_SANDBOX_NETWORK to the network this container is on.",
         );
       }
+
+      const networkArgs = sandboxNetwork ? ["--network", sandboxNetwork] : [];
       const hostGateway =
-        process.platform === "linux" ? ["--add-host", "host.docker.internal:host-gateway"] : [];
+        !sandboxNetwork && process.platform === "linux"
+          ? ["--add-host", "host.docker.internal:host-gateway"]
+          : [];
       const proxyUrl = `http://${proxyHost}:${proxy.port}`;
 
       const create = await docker(
@@ -195,6 +215,7 @@ export class DockerSandboxDriver implements SandboxDriver {
           `${LABEL_REVIEW}=${reviewId}`,
           "--label",
           `${LABEL_CREATED}=${new Date().toISOString()}`,
+          ...networkArgs,
           ...hostGateway,
           "--memory",
           parseMemory(spec.memory),
@@ -532,3 +553,20 @@ async function snapshotOfDirectory(path: string) {
 }
 
 export { docker as dockerCommand };
+
+/**
+ * This container's own name on the Docker network, for siblings to dial.
+ *
+ * The hostname of a container is its short id, which Docker's embedded DNS resolves on
+ * any user-defined network. Reading it is more reliable than asking the caller to keep a
+ * service name in sync with the compose file.
+ */
+async function ownContainerName(): Promise<string | undefined> {
+  if (!runningInContainer()) return undefined;
+  try {
+    const { hostname } = await import("node:os");
+    return hostname();
+  } catch {
+    return undefined;
+  }
+}

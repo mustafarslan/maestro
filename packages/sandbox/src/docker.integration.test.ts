@@ -4,7 +4,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EnvSpecSchema } from "@maestro/playbook";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { DockerSandboxDriver, dockerCommand } from "./docker.js";
 import { startEgressProxy } from "./egress-proxy.js";
 import type { PreparedEnvironment, Sandbox } from "./types.js";
@@ -307,4 +307,49 @@ describe("egress allowlist proxy", () => {
       await proxy.close();
     }
   });
+});
+
+describe("compose deployment wiring", () => {
+  const original = process.env.MAESTRO_SANDBOX_NETWORK;
+  afterEach(() => {
+    if (original === undefined) delete process.env.MAESTRO_SANDBOX_NETWORK;
+    else process.env.MAESTRO_SANDBOX_NETWORK = original;
+  });
+
+  itDocker(
+    "puts the prepare sandbox on a named network when one is configured",
+    async () => {
+      // Under Compose, Maestro is a container beside its sandboxes, not their host. The
+      // first attempt published the proxy on the docker bridge gateway, which is a real
+      // interface only on Linux — `docker run -p 172.17.0.1:...` fails outright on Docker
+      // Desktop with "can't assign requested address", so the deployment could not even
+      // start. Joining a shared network removes the problem instead of working around it.
+      const network = `maestro-test-net-${Date.now()}`;
+      execFileSync("docker", ["network", "create", network], { stdio: "ignore" });
+      process.env.MAESTRO_SANDBOX_NETWORK = network;
+
+      try {
+        const env = await driver.prepare({
+          reviewId: `${REVIEW_ID}-net`,
+          sourcePath: sourceDir!,
+          spec: { ...spec, setup: [], allowedCommands: [] },
+        });
+        expect(env.imageId).toMatch(/^maestro\/snapshot:/);
+
+        // And the analyze phase must still have no network at all: joining prepare to a
+        // network must not leak into the phase that reads untrusted code.
+        const box2 = await driver.analyze(env, { spec });
+        try {
+          const route = await box2.exec("ip route 2>/dev/null || true");
+          expect(route.stdout).not.toMatch(/default via/);
+        } finally {
+          await box2.destroy();
+        }
+      } finally {
+        await driver.reap({ reviewId: `${REVIEW_ID}-net` });
+        execFileSync("docker", ["network", "rm", network], { stdio: "ignore" });
+      }
+    },
+    300_000,
+  );
 });

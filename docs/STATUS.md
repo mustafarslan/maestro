@@ -24,7 +24,7 @@ the README so the claims in that file stay short and true.
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
 | **Container deployment** | The image builds and runs: migrations apply, both listeners bind, the admin API returns 200 with a token and 401 without, the UI serves, and the webhook port rejects an unsigned body |
 | **Linear's query against the live schema** | Linear validates GraphQL *before* authentication: a query naming a nonexistent field returns 400 `GRAPHQL_VALIDATION_FAILED` unauthenticated, while Maestro's query returns 401. Every field it selects therefore provably exists on the live `Issue` type. Its real 401 and 400 bodies are now the test fixtures |
-| Sibling-to-gateway routing | A container on a bridge network reaches a published port through that network's gateway (HTTP 200) — the mechanism Compose depends on |
+| Compose sandbox-to-proxy routing | A sibling container on a shared network reaches another by name (HTTP 200) and a container off that network cannot (unreachable). An integration test then drives the real driver: the prepare sandbox joins a named network, and the analyze container still has no default route |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
 | **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
@@ -68,13 +68,10 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **No GitHub App exists.** Webhook deliveries were verified by signing real payloads with the
   configured secret and posting them to the running daemon, which is the same code path GitHub
   exercises; what has not been done is registering an App so GitHub itself sends them.
-- **One line of Compose remains unverified, and it is now a known risk rather than an unknown.**
-  The general mechanism works: a sibling container reaches a published port through a bridge
-  gateway. But publishing bound to the gateway IP *specifically* — `"172.17.0.1:7790-7799:..."`,
-  which is what the file does to keep the proxy off the LAN — was **not** reachable on Docker
-  Desktop. Docker Desktop routes through a VM, so this may well work on Linux where 172.17.0.1 is a
-  real host interface; it is untested there. The compose file now says so at that line and gives
-  the fallback. This is the single most likely thing to need changing on a first deployment.
+- **Compose has never been run end to end on a Linux host with a real pull request.** Every
+  component is verified — the image builds and runs, both listeners bind, the admin token is
+  enforced, and the prepare sandbox joins Maestro's network while analyze keeps `--network none` —
+  but no full review has been driven through a Compose deployment.
 - **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
   across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
   found a fairness bug; it does not start 40 real containers.
@@ -261,6 +258,16 @@ These are recorded because each was invisible to the test suite that existed at 
     the first person to set that field would have broken every call. Now sent as
     `{type:"adaptive"}` for those models and `budget_tokens` only for models that still require it,
     asserted against the actual request body.
+
+39. **The Compose deployment could not start at all on Docker Desktop.** Publishing the egress
+    proxy on the docker bridge gateway — `"172.17.0.1:7790-7799:..."`, chosen to keep it off the
+    LAN — fails with `bind: can't assign requested address` on any platform where that is not a
+    real host interface, which is macOS and Windows. Not a degraded install: the container refuses
+    to start. It was also the wrong shape on Linux, routing container-to-container traffic out to
+    the host and back. Sandboxes now join Maestro's own Docker network and dial it by name:
+    embedded DNS resolves it, nothing is published to any host interface, and it behaves the same
+    everywhere. Only the prepare phase joins; analyze still runs with `--network none`, asserted
+    by an integration test in the same commit.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

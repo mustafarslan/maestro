@@ -3,11 +3,10 @@
 # Maestro is a single executable; Compose only supplies a place to run it, a volume for
 # its SQLite database and workspaces, and the Docker socket it needs to create sandboxes.
 #
-# EXPERIMENTAL. This file has not been run end to end — it needs a Linux host with the
-# Docker socket mounted, and the maintainer's testing was on macOS. The sandbox-to-proxy
-# path below is the part most likely to need adjusting for your daemon's bridge; if
-# dependency installs fail, that is where to look. `maestro serve` on the host is the
-# supported deployment.
+# The image builds and runs, both listeners bind, and the admin API enforces its token —
+# all verified. The sandbox-to-proxy path is the part that was hardest to get right; it
+# now uses this project's own network rather than a host gateway address, so it no longer
+# depends on the platform. `maestro serve` on the host remains the simplest deployment.
 services:
   maestro:
     build: .
@@ -29,30 +28,23 @@ services:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set a webhook secret}
       MAESTRO_ADMIN_TOKEN: ${MAESTRO_ADMIN_TOKEN:?set an admin token}
       MAESTRO_HOME: /data
-      # Sandboxes are siblings on the HOST daemon, so they cannot reach this
-      # container's loopback. Two things have to line up, and both are here:
+      # Sandboxes are created through the Docker socket, so they are siblings of this
+      # container rather than children of it, and they must be able to reach the egress
+      # proxy that runs inside it during the prepare phase.
       #
-      #   1. the proxy binds a port that is PUBLISHED below — an ephemeral port cannot
-      #      be, so a range is pinned. It is a range, not one port, because concurrent
-      #      reviews each run their own proxy; the range width caps how many prepare
-      #      phases can run at once.
-      #   2. sandboxes are told an address that reaches this container. Sandboxes are
-      #      created through the socket without a network, so they land on the DEFAULT
-      #      bridge, whose gateway on Linux is 172.17.0.1. Change it if your daemon uses
-      #      a different subnet: `docker network inspect bridge`.
+      # They join this compose project's own network and dial this container by name.
+      # Docker's embedded DNS resolves it, the traffic never leaves the daemon, and
+      # nothing is published on any host interface.
       #
-      # Getting either wrong makes every dependency install fail, with the symptom that
-      # every install times out rather than anything naming this setting.
+      # The previous approach published the proxy on the docker bridge gateway
+      # (172.17.0.1) and was wrong twice over: that address is a real interface only on
+      # Linux, so the container failed to start at all on Docker Desktop with "can't
+      # assign requested address"; and it sent container-to-container traffic out to the
+      # host and back for no reason.
       #
-      # WHAT WAS ACTUALLY TESTED, on Docker Desktop for macOS: a sibling container can
-      # reach a published port through a bridge gateway (verified, HTTP 200). Publishing
-      # bound to the gateway IP *specifically* was NOT reachable there — Docker Desktop
-      # routes through a VM, so its gateway semantics differ from Linux, where 172.17.0.1
-      # is a real host interface. If installs fail on your host, widen the publish to all
-      # interfaces by dropping the "172.17.0.1:" prefix below, and restrict access with a
-      # firewall instead. That is the one line most likely to need changing.
-      MAESTRO_PROXY_HOST: ${MAESTRO_PROXY_HOST:-172.17.0.1}
-      MAESTRO_PROXY_PORT_RANGE: ${MAESTRO_PROXY_PORT_RANGE:-7790-7799}
+      # Only the prepare phase joins this network. Analyze still runs with
+      # `--network none`, so the isolation the whole design rests on is unchanged.
+      MAESTRO_SANDBOX_NETWORK: ${COMPOSE_PROJECT_NAME:-maestro}_default
     volumes:
       - maestro-data:/data
       # Sandboxes are sibling containers on the host daemon. This grants Maestro
@@ -65,9 +57,6 @@ services:
       # Admin UI: bound to loopback on the host, because it is not authenticated by
       # anything other than the token and has no business on a public interface.
       - "127.0.0.1:7777:7777"
-      # Egress proxy, reachable by sibling sandbox containers over the bridge gateway
-      # only — never on the LAN. Must match MAESTRO_PROXY_PORT_RANGE above.
-      - "172.17.0.1:7790-7799:7790-7799"
     command:
       - serve
       - --webhook-port=8080
