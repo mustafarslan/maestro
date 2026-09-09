@@ -17,11 +17,19 @@ as an automatic trigger.
 
 **Not built, and each is a real decision rather than an oversight:**
 
-- **A manual-only mode.** Today the `pull_request` events (`opened`, `reopened`,
-  `ready_for_review`, `synchronize`) always trigger a review when the daemon is listening.
-  There is no setting that says "only review when asked". This is the substance of the
-  request and needs a home — most naturally a per-repo field on `repos`, editable from the
-  Studio, with the global default in the playbook.
+- ~~**A manual-only mode.**~~ **Done.** `router.automaticTriggers: false` in the playbook
+  stops the `pull_request` lifecycle events (`opened`, `reopened`, `ready_for_review`,
+  `synchronize`) from starting anything; a `@maestro review` comment still does. It lives
+  in the playbook rather than on `repos` because playbooks are already assignable per
+  repository, so per-repo settings come for free and travel with export/import. Toggled
+  from the Studio's settings panel ("Review every pull request automatically").
+
+  Two things had to change with it. A trigger now says whether it came from the pull
+  request's lifecycle or from a person, because telling them apart by their reason string
+  is a trap for whoever next rewords it. And a requested review deduplicates on the
+  comment's id rather than the pull request: `dedupe_key` is unique across the whole
+  table and rows are never pruned, so the old key silently dropped every `@maestro review`
+  after the first — for ever, including after the first review had finished.
 - ~~**Who may trigger one.**~~ **Done.** A comment trigger is refused unless the delivery's
   `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` — the repository's own statement
   about the commenter, checked before the job is enqueued. Everyone else can still comment; they

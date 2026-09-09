@@ -197,6 +197,35 @@ export function validateGraph(doc: PlaybookDocument): ValidationIssue[] {
     }
   }
 
+  // ── Routing mode: refuse the setting that does nothing ───────────────────
+  // `mode: "llm"` and `router.model` describe optional LLM refinement of the routing
+  // decision. The router is deterministic and reads neither, so selecting "llm" changed
+  // nothing at all and the playbook looked like it was doing something it was not. A
+  // knob nobody implemented has to fail loudly rather than silently behave as its
+  // opposite; the field stays so an existing playbook still parses and the message says
+  // what to do.
+  if (doc.router.mode !== "deterministic") {
+    issues.push({
+      code: "unimplemented-router-mode",
+      message:
+        `router.mode '${doc.router.mode}' is not implemented: routing is deterministic ` +
+        "(path globs, diff size, skip rules). Set mode to 'deterministic'.",
+      target: "router.mode",
+    });
+  }
+  if (doc.router.model) {
+    // Binding a model here reads as "the router will call it", and it never does. Worse,
+    // it is the one binding that would cost money on every pull request, so leaving it
+    // accepted-and-ignored is the least honest of the possible behaviours.
+    issues.push({
+      code: "unimplemented-router-mode",
+      message:
+        "router.model is only used by LLM routing refinement, which is not implemented. " +
+        "Remove it; the deterministic router calls no model.",
+      target: "router.model",
+    });
+  }
+
   // ── Command allowlist deny-patterns: config is an attack surface too ──────
   const denied = /(?:^|[\s;|&])(curl|wget|nc|ncat|ssh|scp)\b|[|&;`$(){}<>]|\.\.\//;
   for (const cmd of doc.envSpec.allowedCommands) {

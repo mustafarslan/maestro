@@ -258,6 +258,10 @@ Be specific about which element and which state. "Improve accessibility" is not 
           exclude: ["**/*.test.*", "**/*.spec.*"],
         },
       ],
+      // Automatic by default, because that is what most people expect from a reviewer
+      // and what the plan describes. Set false to make reviews opt-in per pull request:
+      // nothing runs until somebody with write access comments `@maestro review`.
+      automaticTriggers: true,
       skipAuthors: ["dependabot[bot]", "renovate[bot]"],
       skipIfOnlyPaths: ["**/*.md", "docs/**", "**/*.txt", ".github/**"],
       budgetTiers: [

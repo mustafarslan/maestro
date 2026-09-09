@@ -63,6 +63,25 @@ export interface RunningDaemon {
 /** How long a claimed job stays claimed without renewal. Renewed at a third of this. */
 const LEASE_MS = 15 * 60_000;
 
+/**
+ * Whether a trigger makes an in-flight review of the same pull request pointless.
+ *
+ * Only a push does. A comment carries no head SHA, so the previous inline test
+ * (`review.head_sha === t.headSha`) was never true for one, and every `@maestro review`
+ * aborted whatever was already running on that pull request — asking for a review
+ * destroyed the review in progress, and asking twice destroyed the one you had just
+ * asked for. A person asking supersedes nothing; their request queues behind the work.
+ */
+export function supersedes(
+  t: Extract<ReviewTrigger, { kind: "review" }>,
+  reviewHeadSha: string | undefined,
+): boolean {
+  if (t.source !== "lifecycle") return false;
+  // An unknown SHA on either side is not evidence of staleness.
+  if (!reviewHeadSha || !t.headSha) return false;
+  return reviewHeadSha !== t.headSha;
+}
+
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Validated before ANY resource exists. Throwing later — as the missing-secret check
   // first did — leaves the worker pool, the timers and the admin server running with no
@@ -183,9 +202,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.debug({ reason: t.reason }, "trigger ignored");
       return;
     }
+
+    // Opt-in mode: the pull request's own lifecycle starts nothing, and a review happens
+    // when somebody with write access asks for one. Read from the repo's active playbook
+    // rather than a flag, so it travels with the rest of the configuration and can differ
+    // between repositories.
+    if (t.source === "lifecycle") {
+      const repoId = reviews.ensureRepo(t.pr.owner, t.pr.repo);
+      const active = playbooks.resolveForRepo(repoId);
+      if (active && active.doc.router.automaticTriggers === false) {
+        logger.info(
+          { pr: t.pr.number, reason: t.reason },
+          "automatic reviews are off for this repository; comment '@maestro review' to ask for one",
+        );
+        return;
+      }
+    }
     // The dedupe key is the idempotency key: webhook redelivery and the poller racing
     // the webhook both collapse to one job.
-    const key = `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@${t.headSha || "latest"}`;
+    //
+    // A requested review keys on the comment rather than the SHA. `dedupe_key` is unique
+    // across the whole table and rows are never pruned, so keying every request on the
+    // pull request would drop the second `@maestro review` on it — for ever, including
+    // after the first review finished. Redelivery repeats the comment id, so idempotency
+    // is unchanged; a person asking again gets the review they asked for.
+    const key =
+      t.source === "comment"
+        ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@comment-${t.commentId}`
+        : `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@${t.headSha || "latest"}`;
     const id = queue.enqueue({ kind: "review-pr", payload: t.pr, dedupeKey: key });
     logger.info({ key, reason: t.reason, enqueued: Boolean(id) }, "review trigger");
 
@@ -199,7 +243,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // A new head SHA makes any in-flight review of this PR unpostable; cancel it so it
     // stops holding a container and a scheduler slot.
     for (const reviewId of inFlightFor(t.pr)) {
-      if (reviews.get(reviewId)?.head_sha === t.headSha) continue;
+      if (!supersedes(t, reviews.get(reviewId)?.head_sha)) continue;
       logger.info({ reviewId }, "cancelling superseded in-flight review");
       inFlight.get(reviewId)?.abort();
     }

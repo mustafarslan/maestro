@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ModelBindingSchema } from "./schema.js";
+import { ModelBindingSchema, RouterSchema } from "./schema.js";
 
 /**
  * Guards against the bug this codebase has now produced five times: configuration that
@@ -19,6 +19,20 @@ import { ModelBindingSchema } from "./schema.js";
 const ROOT = join(import.meta.dirname, "../../..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
 
+/**
+ * Source with comments removed.
+ *
+ * These guards search for `router.model` and friends in source text, and a comment
+ * mentioning the field satisfied that search — including the comment written to explain
+ * why the field has no consumer. A guard that its own explanation satisfies is not a
+ * guard, which is the second time a check in this repository passed for the wrong
+ * reason. Crude on purpose; a `//` inside a string literal is the known cost.
+ */
+const code = (rel: string) =>
+  read(rel)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
 describe("model settings are wired end to end", () => {
   /** Identity of the binding, not a tunable knob: these reach the provider by other means. */
   const NOT_A_TUNABLE = new Set(["providerId", "model", "fallback"]);
@@ -32,8 +46,8 @@ describe("model settings are wired end to end", () => {
     // engine turns maxSteps and costCapCents into the budget. Checking only the runner
     // would report the budget fields as dead when they are simply read elsewhere.
     const consumers = [
-      read("packages/agents/src/run-agent.ts"),
-      read("packages/engine/src/engine.ts"),
+      code("packages/agents/src/run-agent.ts"),
+      code("packages/engine/src/engine.ts"),
     ].join("\n");
     const missing = Object.keys(ModelBindingSchema.shape)
       .filter((field) => !NOT_A_TUNABLE.has(field))
@@ -99,5 +113,26 @@ describe("environment variables are discoverable", () => {
     ]) {
       expect(docs, `${v} is not documented`).toContain(v);
     }
+  });
+});
+
+describe("router settings are wired end to end", () => {
+  // `automaticTriggers` was added to this schema, set in the default playbook, given a
+  // `source` discriminator on the trigger — and for a while nothing read it, so a
+  // repository configured for manual-only reviews was still reviewed on every push.
+  // That is the sixth instance of the same bug, and it is exactly what this file exists
+  // to catch. Same crude method: a knob is real when something reads it.
+  it("has a consumer for every field", () => {
+    const consumers = [
+      code("packages/engine/src/router.ts"),
+      code("packages/server/src/daemon.ts"),
+      // The validator counts: rejecting a setting is a way of honouring it, and is the
+      // whole treatment `mode` gets until LLM refinement exists.
+      code("packages/playbook/src/validate.ts"),
+    ].join("\n");
+    const missing = Object.keys(RouterSchema.shape).filter(
+      (field) => !consumers.includes(`router.${field}`),
+    );
+    expect(missing, "declared in RouterSchema and read by nothing").toEqual([]);
   });
 });

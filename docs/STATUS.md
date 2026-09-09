@@ -111,17 +111,21 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## The one recurring bug class, and what now stops it
 
-Five separate defects in this project shared a single shape: configuration declared at one end and
+Six separate defects in this project shared a single shape: configuration declared at one end and
 read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
 loop and no caller could reach it. Linear context was rendered into the prompt and never populated.
 `thinkingBudget` was dead — then still dead after the fix that was supposed to revive it, because
 the provider learned the right shape while nothing passed the value in.
 
+The sixth was `router.automaticTriggers` (finding 88), added in this session and caught before it
+shipped — and alongside it `router.mode: "llm"`, which had been accepted and ignored since the
+router was written (finding 91).
+
 None produced a type error. Every field is optional, so a consumer that simply never mentions one
-compiles perfectly. Every one of the five was caught by a person noticing, which is not a control.
+compiles perfectly. Every one of them was caught by a person noticing, which is not a control.
 
 `packages/playbook/src/wiring.test.ts` now asserts the property directly: every tunable in the
-model schema is read by something that runs, every `MAESTRO_` variable the code reads appears in
+model schema and every field of the router schema is read by something that runs, every `MAESTRO_` variable the code reads appears in
 the configuration reference, and the loop carries each setting through to the provider. It is crude
 — it reads source text — because the property is about the repository rather than any one module.
 Both historical bugs were reintroduced to confirm it fails on them, and it does.
@@ -694,6 +698,43 @@ These are recorded because each was invisible to the test suite that existed at 
     checked before the job is enqueued; an unrecognised or absent association is refused rather
     than treated as authorised. Automatic triggers are unaffected, since those come from the pull
     request's lifecycle. Recorded as an open decision in TODO.md this morning and closed here.
+
+88. **Manual-only reviews were configurable and unimplemented.** `router.automaticTriggers`
+    was added to the schema, set in the default playbook, and given a `source` discriminator on
+    the trigger union — and nothing read it, so a repository configured for opt-in reviews was
+    still reviewed on every push. Caught before it shipped, by looking for its consumer rather
+    than by trusting that adding a field does something. The daemon now ignores lifecycle
+    triggers when it is off, and `wiring.test.ts` asserts every `RouterSchema` field has a
+    consumer, which is the same guard the model bindings already had.
+
+89. **Every `@maestro review` after the first was silently dropped, for ever.** `dedupe_key`
+    is `UNIQUE` across the whole `jobs` table and rows are never pruned, and a comment trigger
+    has no head SHA, so every request on a pull request collapsed onto `owner/repo#N@latest`.
+    The first request ran; the second, minutes or weeks later, inserted nothing and returned
+    202. A requested review now keys on the id of the comment that asked — redelivery repeats
+    the id and stays idempotent, a person asking again gets what they asked for. This also
+    makes `@maestro review` the recovery path for an automatic review whose job exhausted its
+    attempts, since that failed job holds its SHA's key permanently.
+
+90. **Asking for a review destroyed the review in progress.** The supersede loop ran on every
+    trigger and skipped only reviews whose `head_sha` equalled the trigger's. A comment carries
+    no SHA, so the test was never true for one and every `@maestro review` aborted every
+    in-flight review of that pull request — killing containers mid-run. With 89 fixed it would
+    have got worse: two comments in a row would abort the review the first had just queued.
+    The decision is now one tested function, `supersedes`, and only a push supersedes anything.
+
+91. **A routing mode nothing implements was accepted in silence.** `router.mode: "llm"` and
+    `router.model` describe optional LLM refinement of the routing decision. The router reads
+    neither, so selecting them changed nothing while looking like configuration that applied —
+    and `router.model` is the one binding that would have cost money on every pull request.
+    Both are now rejected at validation with a message saying what to use instead. Found by
+    making the wiring guard honest (below), not by reading.
+
+92. **A wiring guard that its own explanation satisfied.** The new `RouterSchema` check
+    searched source text for `router.<field>`, and the comment written to explain why `model`
+    had no consumer contained the string `router.model` — so the guard passed on the very field
+    it was added to catch. Both guards now strip comments before searching. Second time in this
+    session that a check passed for the wrong reason; the first was `severity-copies.test.ts`.
 
 Findings 75-87 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are

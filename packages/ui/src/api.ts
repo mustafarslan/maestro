@@ -125,6 +125,8 @@ export interface PlaybookDoc {
     mode: string;
     rules: { agentId: string; include: string[]; exclude: string[] }[];
     skipAuthors: string[];
+    /** False means reviews only happen when somebody comments `@maestro review`. */
+    automaticTriggers: boolean;
   };
   triage: {
     minConfidence: number;

@@ -94,6 +94,16 @@ export const RouterSchema = z.object({
   mode: z.enum(["deterministic", "llm"]).default("deterministic"),
   model: ModelBindingSchema.optional(),
   rules: z.array(RouterRuleSchema).default([]),
+  /**
+   * Whether a pull request's own lifecycle starts a review.
+   *
+   * True keeps the default behaviour: opened, reopened, ready_for_review and every push
+   * trigger one. False makes reviews opt-in per pull request — nothing runs until
+   * somebody with write access comments `@maestro review`. That is the right setting for
+   * a busy repository where most changes do not want a machine opinion, and for anyone
+   * who would rather pay per review than per push.
+   */
+  automaticTriggers: z.boolean().default(true),
   skipAuthors: z.array(z.string()).default(["dependabot[bot]", "renovate[bot]"]),
   skipIfOnlyPaths: z.array(z.string()).default([]),
   budgetTiers: z

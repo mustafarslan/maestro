@@ -66,6 +66,7 @@ describe("event interpretation", () => {
       // money. This test is about the command being recognised, so it comes from someone
       // allowed to ask.
       comment: {
+        id: 900_001,
         body: "please take another look\n/maestro review",
         author_association: "COLLABORATOR",
       },
@@ -130,7 +131,7 @@ describe("triggering a review from a comment", () => {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
       issue: { number: 41 },
-      comment: { body: bodyText, author_association: association },
+      comment: { id: 900_002, body: bodyText, author_association: association },
     });
 
   it("accepts the mention form, which is what @claude taught people to expect", () => {
@@ -202,7 +203,7 @@ describe("who may spend money asking for a review", () => {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
       issue: { number: 41 },
-      comment: { body: "@maestro review", author_association: association },
+      comment: { id: 900_003, body: "@maestro review", author_association: association },
     });
 
   it("accepts people with write access to the repository", () => {
@@ -244,5 +245,30 @@ describe("who may spend money asking for a review", () => {
       pull_request: { number: 7, head: { sha: "a".repeat(40) } },
     });
     expect(t.kind).toBe("review");
+  });
+});
+
+describe("a requested review carries the comment that asked for it", () => {
+  // The daemon deduplicates on this. Without an id every request on a pull request
+  // collapses onto one key that is never released, so the second `@maestro review`
+  // silently does nothing — including after the first review has finished.
+  const comment = (id: unknown) =>
+    interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      issue: { number: 41 },
+      comment: { id, body: "@maestro review", author_association: "OWNER" },
+    });
+
+  it("reports the id", () => {
+    expect(comment(778_899)).toMatchObject({
+      kind: "review",
+      source: "comment",
+      commentId: 778_899,
+    });
+  });
+
+  it("ignores a delivery with no id rather than reviewing undeduplicated", () => {
+    expect(comment(undefined)).toMatchObject({ kind: "ignore" });
   });
 });

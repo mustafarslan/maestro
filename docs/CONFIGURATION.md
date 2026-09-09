@@ -45,6 +45,29 @@ calls, and on a public repository a comment is anyone's to write.
 Agents never see any of these. They run offline in a container with no credentials, and the
 orchestrator is the only writer.
 
+#### Reviewing only when asked
+
+By default every opened, reopened, ready-for-review and pushed-to pull request is reviewed.
+To make reviews opt-in instead, set `router.automaticTriggers: false`:
+
+```
+maestro playbook export > playbook.yaml
+# router:
+#   automaticTriggers: false
+maestro playbook import playbook.yaml
+```
+
+or flip "Review every pull request automatically" in the Studio's settings panel. Playbooks
+are assignable per repository, so one repository can be manual-only while another is not.
+Lifecycle events are then ignored and `@maestro review` is the only way in — still subject
+to the association check above.
+
+A requested review deduplicates on the comment that asked, not on the pull request, so
+asking twice runs twice while GitHub redelivering the same comment does not. That also makes
+`@maestro review` the recovery path for an automatic review whose job exhausted its
+attempts: the failed job holds that head SHA's dedupe key for ever, and a comment carries
+its own.
+
 ### Linear (optional)
 
 | Variable | Purpose |

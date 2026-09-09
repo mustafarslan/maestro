@@ -23,8 +23,27 @@ import type { PullRequestRef } from "./github.js";
  */
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
+/**
+ * What asked for a review.
+ *
+ * `lifecycle` is the pull request itself — opened, pushed to, marked ready; `comment` is
+ * a person saying so. They are gated differently, and matching on the reason string to
+ * tell them apart would be a trap for whoever next reworded it.
+ *
+ * A comment carries the id of the comment that asked. Redelivery of the same comment
+ * repeats the id, so it stays idempotent; a second, genuinely new request gets a new one
+ * and runs. Without it every request after the first on a given pull request collides on
+ * the same dedupe key and is dropped for ever.
+ */
+export type ReviewSource = { source: "lifecycle" } | { source: "comment"; commentId: number };
+
 export type ReviewTrigger =
-  | { kind: "review"; pr: PullRequestRef; headSha: string; reason: string }
+  | ({
+      kind: "review";
+      pr: PullRequestRef;
+      headSha: string;
+      reason: string;
+    } & ReviewSource)
   | { kind: "cancel"; pr: PullRequestRef; staleSha: string; reason: string }
   | { kind: "feedback"; commentId: number; reaction: string; actor?: string; reason: string }
   | { kind: "ignore"; reason: string };
@@ -41,7 +60,7 @@ interface PullRequestEvent {
   };
   before?: string;
   repository?: { name?: string; owner?: { login?: string } };
-  comment?: { body?: string };
+  comment?: { body?: string; id?: number };
 }
 
 export async function verifySignature(
@@ -78,11 +97,23 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
       case "reopened":
       case "ready_for_review":
         if (pr?.draft) return { kind: "ignore", reason: "pull request is a draft" };
-        return { kind: "review", pr: ref, headSha, reason: `pull_request.${body.action}` };
+        return {
+          kind: "review",
+          pr: ref,
+          headSha,
+          reason: `pull_request.${body.action}`,
+          source: "lifecycle",
+        };
       case "synchronize":
         // A new push invalidates the in-flight review for the previous SHA. Both the
         // cancel and the new review are needed: the stale one is holding a container.
-        return { kind: "review", pr: ref, headSha, reason: "pull_request.synchronize" };
+        return {
+          kind: "review",
+          pr: ref,
+          headSha,
+          reason: "pull_request.synchronize",
+          source: "lifecycle",
+        };
       // Closing a pull request, or sending it back to draft, means the review in flight
       // is producing a comment nobody will read while holding three containers for
       // several more minutes. `cancel` was declared in this union for exactly that and
@@ -122,11 +153,18 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
         };
       }
 
+      const commentId = (payload as { comment?: { id?: number } }).comment?.id;
+      if (!commentId) return { kind: "ignore", reason: "comment has no id to deduplicate on" };
+
       return {
         kind: "review",
         pr: { owner, repo, number },
+        // Unknown here, and deliberately not guessed: the worker resolves the current
+        // head when it runs, which is what the requester meant by "review it".
         headSha: "",
         reason: "requested by a maestro review comment",
+        source: "comment",
+        commentId,
       };
     }
     return { kind: "ignore", reason: "comment is not a maestro command" };
@@ -192,6 +230,10 @@ export function diffPoll(
       pr,
       headSha,
       reason: previous ? "poll: new head sha" : "poll: new pull request",
+      // The poller observes the pull request's own state, so it is a lifecycle trigger
+      // and is gated with the rest of them. Someone who turns automatic reviews off
+      // would be surprised to find polling still starting them.
+      source: "lifecycle",
     });
   }
 

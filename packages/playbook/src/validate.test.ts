@@ -150,7 +150,7 @@ describe("at-most-one nodes", () => {
     // The engine reads byKind("triage")[0]. A second one was drawable, passed
     // validation, and then never ran — the canvas letting you build something the
     // engine quietly discards is worse than refusing it.
-    const doc = defaultPlaybook();
+    const doc = clone();
     const triage = doc.graph.nodes.find((n) => n.kind === "triage")!;
     const issues = validateGraph({
       ...doc,
@@ -160,7 +160,7 @@ describe("at-most-one nodes", () => {
   });
 
   it("rejects a second router for the same reason", () => {
-    const doc = defaultPlaybook();
+    const doc = clone();
     const router = doc.graph.nodes.find((n) => n.kind === "router")!;
     const issues = validateGraph({
       ...doc,
@@ -171,7 +171,7 @@ describe("at-most-one nodes", () => {
 
   it("still accepts a graph with no router at all, which is a valid choice", () => {
     // Without a router every agent runs; that is a coarser review, not a broken one.
-    const doc = defaultPlaybook();
+    const doc = clone();
     const router = doc.graph.nodes.find((n) => n.kind === "router")!;
     const issues = validateGraph({
       ...doc,
@@ -184,12 +184,33 @@ describe("at-most-one nodes", () => {
   });
 
   it("still allows any number of agents and gates", () => {
-    const doc = defaultPlaybook();
+    const doc = clone();
     const agent = doc.graph.nodes.find((n) => n.kind === "agent")!;
     const issues = validateGraph({
       ...doc,
       graph: { ...doc.graph, nodes: [...doc.graph.nodes, { ...agent, id: "agent-extra" }] },
     });
     expect(issues.filter((i) => i.code === "cardinality")).toEqual([]);
+  });
+});
+
+describe("settings that are not implemented", () => {
+  // A playbook that selects LLM routing refinement was accepted and then routed
+  // deterministically anyway, so the setting looked applied and did nothing. Rejecting
+  // it is the honest behaviour until the refinement exists.
+  it("rejects a router mode nothing implements", () => {
+    const doc = clone();
+    doc.router.mode = "llm";
+    expect(validateGraph(doc).map((i) => i.code)).toContain("unimplemented-router-mode");
+  });
+
+  it("rejects a router model binding, which would only ever be a cost", () => {
+    const doc = clone();
+    doc.router.model = structuredClone(doc.agents[0]?.model as never);
+    expect(validateGraph(doc).map((i) => i.code)).toContain("unimplemented-router-mode");
+  });
+
+  it("accepts the deterministic default", () => {
+    expect(validateGraph(defaultPlaybook())).toEqual([]);
   });
 });

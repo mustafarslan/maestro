@@ -477,6 +477,21 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
               />
             </label>
             <label className="field">
+              <span className="field-label">Review every pull request automatically</span>
+              <select
+                value={doc.router.automaticTriggers === false ? "no" : "yes"}
+                onChange={(e) =>
+                  setDoc({
+                    ...doc,
+                    router: { ...doc.router, automaticTriggers: e.target.value === "yes" },
+                  })
+                }
+              >
+                <option value="yes">Yes — on open, push and ready-for-review</option>
+                <option value="no">No — only when someone comments @maestro review</option>
+              </select>
+            </label>
+            <label className="field">
               <span className="field-label">Min confidence to post</span>
               <input
                 type="number"

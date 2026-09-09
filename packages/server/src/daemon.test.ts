@@ -1,9 +1,10 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openStore, type SqlDatabase } from "@maestro/core";
-import { PlaybookStore } from "@maestro/playbook";
+import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type RunningDaemon, startDaemon } from "./daemon.js";
+import { type RunningDaemon, startDaemon, supersedes } from "./daemon.js";
 
 let db: SqlDatabase;
 let running: RunningDaemon | undefined;
@@ -66,5 +67,130 @@ describe("cancellation is scoped to one repository", () => {
     const source = readFileSync(join(import.meta.dirname, "daemon.ts"), "utf8");
     expect(source).toContain("reviewsForPullRequest(db, inFlight.keys()");
     expect(source.match(/inFlightFor\(t\.pr\)/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("manual-only reviews", () => {
+  // The point of the setting, stated as behaviour: with `automaticTriggers: false` a
+  // pull request opening starts nothing, and a `@maestro review` comment still does.
+  // Asserted through the real webhook listener with a real signature, because the gate
+  // has to hold on the path GitHub actually uses — not on a directly-called function.
+  const secret = "s3cret";
+
+  const deliver = async (port: number, event: string, payload: unknown): Promise<number> => {
+    const raw = JSON.stringify(payload);
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": event,
+        // What GitHub sends. Computed here rather than pulled from a signing library,
+        // so the test does not share an implementation with the code it checks.
+        "x-hub-signature-256": `sha256=${createHmac("sha256", secret).update(raw).digest("hex")}`,
+      },
+      body: raw,
+    });
+    return res.status;
+  };
+
+  const queuedReviews = (): number =>
+    db.prepare("SELECT COUNT(*) as n FROM jobs WHERE kind='review-pr'").get<{ n: number }>()?.n ??
+    -1;
+
+  const opened = {
+    action: "opened",
+    repository: { name: "maestro", owner: { login: "acme" } },
+    pull_request: { number: 7, head: { sha: "abc123" } },
+  };
+  const requested = (id: number) => ({
+    action: "created",
+    repository: { name: "maestro", owner: { login: "acme" } },
+    issue: { number: 7 },
+    comment: { id, body: "@maestro review", author_association: "OWNER" },
+  });
+
+  const start = async (automaticTriggers: boolean): Promise<number> => {
+    new PlaybookStore(db).publish(
+      { ...defaultPlaybook(), router: { ...defaultPlaybook().router, automaticTriggers } },
+      { activate: true },
+    );
+    // No workers: this test is about what gets queued, and a worker would try to run the
+    // review — which means Docker and model calls for an assertion about a queue.
+    running = await startDaemon({
+      db,
+      webhookPort: 0,
+      webhookSecret: secret,
+      concurrentReviews: 0,
+    });
+    return running.webhookPort as number;
+  };
+
+  it("ignores a pull request opening when automatic triggers are off", async () => {
+    const port = await start(false);
+    expect(await deliver(port, "pull_request", opened)).toBe(202);
+    expect(queuedReviews()).toBe(0);
+  });
+
+  it("still reviews when somebody asks for one", async () => {
+    const port = await start(false);
+    expect(await deliver(port, "issue_comment", requested(11))).toBe(202);
+    expect(queuedReviews()).toBe(1);
+  });
+
+  it("runs a second request rather than swallowing it", async () => {
+    // `dedupe_key` is unique across the whole table and rows are never pruned, so keying
+    // a request on the pull request alone dropped every later `@maestro review` on it
+    // for ever — including after the first review had finished and the person was asking
+    // about new commits. The key is the comment, which is what actually asked.
+    const port = await start(false);
+    await deliver(port, "issue_comment", requested(11));
+    await deliver(port, "issue_comment", requested(12));
+    expect(queuedReviews()).toBe(2);
+  });
+
+  it("does not re-run a redelivered request", async () => {
+    // GitHub redelivers; the same comment must not queue twice.
+    const port = await start(false);
+    await deliver(port, "issue_comment", requested(11));
+    await deliver(port, "issue_comment", requested(11));
+    expect(queuedReviews()).toBe(1);
+  });
+
+  it("reviews on the pull request's own lifecycle by default", async () => {
+    // The default has to stay automatic: an installation that changed nothing must keep
+    // behaving as it did.
+    const port = await start(true);
+    expect(await deliver(port, "pull_request", opened)).toBe(202);
+    expect(queuedReviews()).toBe(1);
+  });
+});
+
+describe("what cancels a review already running", () => {
+  const pr = { owner: "acme", repo: "maestro", number: 7 };
+
+  it("a push, because the running review can no longer be posted", () => {
+    const t = { kind: "review", pr, headSha: "new", reason: "synchronize", source: "lifecycle" };
+    expect(supersedes(t as never, "old")).toBe(true);
+  });
+
+  it("not the same push arriving twice", () => {
+    const t = { kind: "review", pr, headSha: "same", reason: "synchronize", source: "lifecycle" };
+    expect(supersedes(t as never, "same")).toBe(false);
+  });
+
+  it("never a person asking for a review", () => {
+    // This is the bug the helper exists for. A comment has no head SHA, so the old
+    // inline comparison was false for every running review and aborted all of them:
+    // asking for a review killed the review in progress, and asking twice killed the
+    // one you had just asked for.
+    const t = {
+      kind: "review",
+      pr,
+      headSha: "",
+      reason: "requested by a maestro review comment",
+      source: "comment",
+      commentId: 11,
+    };
+    expect(supersedes(t as never, "old")).toBe(false);
   });
 });
