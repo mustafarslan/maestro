@@ -35,7 +35,7 @@ export interface PreparedEnvironment {
   /** Commands agents are permitted to run, after `auto` expansion. */
   allowedCommands: string[];
   setupResults: ExecResult[];
-  egressLog: { host: string; allowed: boolean }[];
+  egressLog: { host: string; allowed: boolean; count: number }[];
   /** True when the dependency layer was reused instead of reinstalled. */
   cacheHit?: boolean;
 }

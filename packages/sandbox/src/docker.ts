@@ -356,7 +356,7 @@ export class DockerSandboxDriver implements SandboxDriver {
         toolchain,
         allowedCommands,
         setupResults,
-        egressLog: proxy.log.map((e) => ({ host: e.host, allowed: e.allowed })),
+        egressLog: proxy.log.map((e) => ({ host: e.host, allowed: e.allowed, count: e.count })),
         cacheHit: false,
       };
     } finally {

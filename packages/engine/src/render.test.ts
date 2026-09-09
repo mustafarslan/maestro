@@ -123,13 +123,14 @@ describe("what the metrics block claims about the network", () => {
       {
         ...outcome([{ agentId: "security", state: "done" }]),
         egressLog: [
-          { host: "evil.example", allowed: false },
-          { host: "registry.npmjs.org", allowed: true },
+          { host: "evil.example", allowed: false, count: 3 },
+          { host: "registry.npmjs.org", allowed: true, count: 900 },
         ],
       } as ReviewOutcome,
       { title: "t" },
     );
-    expect(md).toContain("1 egress attempt(s) blocked");
+    // Three attempts to one host: the sentence must report attempts, not entries.
+    expect(md).toContain("3 egress attempt(s) to 1 host(s) blocked");
     expect(md).toContain("proxy-routed traffic only");
   });
 

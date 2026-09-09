@@ -165,7 +165,10 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
           // variables never appears in this log at all. Saying "blocked N attempts" and
           // stopping there invites the reader to conclude the phase was sealed, which is a
           // stronger claim than the evidence supports.
-          ` ${blocked.length} egress attempt(s) blocked by the allowlist proxy during dependency install (proxy-routed traffic only).`
+          // Attempts, not distinct hosts. The log is aggregated per host now, so counting
+          // entries would have quietly turned "3000 blocked attempts" into "1" the moment
+          // aggregation landed — a number that got smaller because the storage changed.
+          ` ${blocked.reduce((n, e) => n + e.count, 0)} egress attempt(s) to ${blocked.length} host(s) blocked by the allowlist proxy during dependency install (proxy-routed traffic only).`
         : ""),
     "",
     `**Total** — ${outcome.costKnown === false ? "cost unpriced for this provider" : `${outcome.costCents.toFixed(2)}¢`}` +

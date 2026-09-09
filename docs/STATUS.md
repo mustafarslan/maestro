@@ -1672,6 +1672,25 @@ to answer.
     and `prune` says plainly that SQLite reuses freed pages rather than shrinking — otherwise
     "removed 40,000 rows" beside an unchanged file size reads as a failure.
 
+148. **The egress log grew one entry per package fetched.** Fourth instance of the same
+    question, asked of memory this time. The proxy appended a row per request, and a dependency
+    install makes one request per package: 1500 dependencies left roughly 3000 near-identical
+    rows, about 600KB at 5000 dependencies, held for the whole review and multiplied by every
+    concurrent review.
+
+    None of it was information. `npm` fetches nearly everything from one host, so the log was
+    "registry.npmjs.org, allowed" three thousand times — which says exactly what a count says —
+    and nothing downstream read the per-request timestamps. Aggregated per host now, bounded by
+    distinct hosts rather than by requests, keeping a count and the first and last time each was
+    asked for, which is the only thing the timestamps were good for.
+
+    The interesting part is what aggregation nearly broke. The pull request comment said
+    "N egress attempt(s) blocked", computed as the number of log entries — correct while every
+    entry was one attempt, and silently wrong the moment they were counted instead. Three
+    thousand blocked attempts would have become "1", a number that got smaller because the
+    storage changed. It sums the counts now and reports both: attempts and distinct hosts. Both
+    halves mutation-checked, including that one.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

@@ -103,3 +103,40 @@ describe("what it permits", () => {
     expect(proxy.log.at(-1)).toMatchObject({ host: "example.com", allowed: false });
   });
 });
+
+describe("the egress log is bounded by hosts, not by requests", () => {
+  // One entry per request meant a dependency install produced thousands: npm fetches
+  // nearly everything from one host, so 1500 dependencies left ~3000 near-identical rows
+  // held for the whole review and multiplied by every concurrent review. None of it was
+  // information — "registry.npmjs.org, allowed" three thousand times says what a count
+  // says — and nothing downstream ever read the timestamps.
+  it("counts repeats instead of appending them", async () => {
+    for (let i = 0; i < 25; i++) await get("example.com");
+
+    expect(proxy.log).toHaveLength(1);
+    expect(proxy.log[0]).toMatchObject({ host: "example.com", allowed: false, count: 25 });
+  });
+
+  it("keeps allowed and refused separate, since they mean different things", async () => {
+    await get("example.com");
+    await get("nonexistent-sub.pypi.org");
+
+    expect(proxy.log.map((e) => [e.host, e.allowed])).toEqual([
+      ["example.com", false],
+      ["nonexistent-sub.pypi.org", true],
+    ]);
+  });
+
+  it("records when a host was first and last asked for", async () => {
+    // The aggregate has to keep enough to answer "when did this start", or it has thrown
+    // away the only thing the per-request timestamps were good for.
+    await get("example.com");
+    await get("example.com");
+    const entry = proxy.log[0];
+    expect(entry?.firstAt).toBeTruthy();
+    expect(entry?.lastAt).toBeTruthy();
+    expect(Date.parse(entry?.lastAt ?? "")).toBeGreaterThanOrEqual(
+      Date.parse(entry?.firstAt ?? ""),
+    );
+  });
+});

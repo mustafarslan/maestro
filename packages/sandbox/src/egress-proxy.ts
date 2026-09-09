@@ -22,8 +22,23 @@ export interface EgressProxy {
   port: number;
   /** Address the proxy is bound to; containers must reach it at this host. */
   host: string;
-  /** Every host asked for, allowed or not — attached to the review for auditing. */
-  readonly log: { host: string; allowed: boolean; at: string }[];
+  /**
+   *每 host asked for, allowed or not, with how many times — attached to the review.
+   *
+   * Aggregated rather than appended. One entry per request meant a dependency install
+   * produced thousands: `npm ci` fetches nearly everything from one host, so a project
+   * with 1500 dependencies left ~3000 near-identical rows, around 600KB at 5000
+   * dependencies, held for the whole review and multiplied by every concurrent review.
+   * None of it was information — "registry.npmjs.org, allowed" three thousand times says
+   * exactly what a count says — and nothing downstream read the timestamps.
+   */
+  readonly log: {
+    host: string;
+    allowed: boolean;
+    count: number;
+    firstAt: string;
+    lastAt: string;
+  }[];
   close(): Promise<void>;
 }
 
@@ -80,7 +95,18 @@ export function runningInContainer(): boolean {
 export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy> {
   const log: EgressProxy["log"] = [];
   const record = (host: string, allowed: boolean) => {
-    log.push({ host, allowed, at: new Date().toISOString() });
+    const at = new Date().toISOString();
+    // Bounded by the number of distinct hosts, which is small, rather than by the number
+    // of requests, which is one per package.
+    const seen = log.find((e) => e.host === host && e.allowed === allowed);
+    if (seen) {
+      seen.count++;
+      seen.lastAt = at;
+    } else {
+      log.push({ host, allowed, count: 1, firstAt: at, lastAt: at });
+    }
+    // Still one line per blocked ATTEMPT: a refusal is worth seeing every time it happens,
+    // and there are few of them by construction.
     if (!allowed) logger.warn({ host }, "egress blocked");
   };
 

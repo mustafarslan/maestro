@@ -171,7 +171,7 @@ export interface ReviewOutcome {
    */
   cacheHit?: boolean;
   allowedCommands: string[];
-  egressLog: { host: string; allowed: boolean }[];
+  egressLog: { host: string; allowed: boolean; count: number }[];
   error?: string;
 }
 
