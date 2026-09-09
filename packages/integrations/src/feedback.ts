@@ -1,4 +1,4 @@
-import { logger, newId, type SqlDatabase } from "@maestro/core";
+import { inClause, logger, newId, type SqlDatabase, STANDING_STATUSES } from "@maestro/core";
 import type { GitHubClient, PullRequestRef } from "./github.js";
 
 /**
@@ -112,9 +112,10 @@ export async function ingestLineChanges(
     .prepare(
       // 'posted' as well as 'open': posting stamps every reported finding 'posted',
       // so matching only 'open' made this a silent no-op on every real review.
-      "SELECT id, file FROM findings WHERE review_id=? AND file IS NOT NULL AND status IN ('open','posted')",
+      `SELECT id, file FROM findings WHERE review_id=? AND file IS NOT NULL
+         AND status IN (${inClause(STANDING_STATUSES).sql})`,
     )
-    .all<{ id: string; file: string }>(reviewId);
+    .all<{ id: string; file: string }>(reviewId, ...inClause(STANDING_STATUSES).params);
 
   let changed = 0;
   for (const finding of findings) {

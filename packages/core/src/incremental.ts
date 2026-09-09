@@ -1,3 +1,4 @@
+import { inClause, STANDING_STATUSES } from "./finding-status.js";
 import { bySeverity } from "./severity.js";
 import type { SqlDatabase } from "./store/driver.js";
 
@@ -68,9 +69,9 @@ export function unresolvedFindings(db: SqlDatabase, reviewId: string): CarriedFi
       .prepare(
         `SELECT file, line_start AS lineStart, category, severity, confidence, title, agent_id AS agentIds
        FROM findings
-       WHERE review_id=? AND status IN ('open','posted')`,
+       WHERE review_id=? AND status IN (${inClause(STANDING_STATUSES).sql})`,
       )
-      .all<CarriedFinding>(reviewId)
+      .all<CarriedFinding>(reviewId, ...inClause(STANDING_STATUSES).params)
       // Sorted here, not in SQL. `ORDER BY severity` orders a TEXT column alphabetically —
       // critical, high, info, low, medium — so `medium` came back *below* `info`, which is
       // exactly backwards for the two levels most easily confused. The canonical ordering

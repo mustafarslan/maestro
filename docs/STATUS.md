@@ -1731,6 +1731,32 @@ to answer.
     wrote one, because the canonical list was in a file I was not looking at while I was thinking
     about pruning. Knowing the failure mode does not prevent it; only the derived value does.
 
+152. **Five finding statuses, spelled out in four files, defined nowhere.** `open`, `posted`,
+    `accepted`, `dismissed`, `suppressed` appeared as bare strings across `incremental.ts`,
+    `feedback.ts`, the MCP server and the admin API, with no canonical list to compare them
+    against. That scattering has already caused a defect in this project:
+    `unresolvedFindings` matched only `'open'` while posting stamps every reported finding
+    `'posted'`, so the carried set was empty on every real review and a finding raised in one
+    round silently vanished from the next. Two files' notions of one concept, one of them wrong,
+    and nothing that could have noticed.
+
+    `FINDING_STATUSES` now lives in `core` with `STANDING_STATUSES` and `SETTLED_STATUSES`
+    beside it, and the SQL sites build their `IN (…)` clauses from those. Same treatment as the
+    review states in 151, applied to the vocabulary that had already failed once.
+
+    Three things about the process are worth more than the change. The suite caught me adding
+    placeholders to a query without binding the values — the tests doing exactly their job.
+    The comment I wrote claimed the derived third bucket "forces that choice" for a new status,
+    and it does not: a sixth status falls silently into "never shown", which is a decision made
+    by default. The mutation that should have proved the claim passed, so the claim was false
+    and the guard was empty. The membership is pinned now, and a sixth status fails until
+    somebody classifies it.
+
+    And that mutation took three attempts to apply — the formatter had collapsed the list onto
+    one line, so my search string matched nothing. Twice in two findings, a mutation that failed
+    to apply looked exactly like a guard that holds. The harness prints "anchor missing" for this
+    reason; by hand I had to assert it applied, which is now what I do.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
