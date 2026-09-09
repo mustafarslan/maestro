@@ -77,14 +77,17 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
 
   if (event === "issue_comment" && body.action === "created") {
     const text = body.comment?.body ?? "";
-    if (/^\s*\/maestro\s+review\b/im.test(text)) {
+    // Both spellings. `@maestro review` is what people expect, because that is how
+    // `@claude review` works on GitHub; `/maestro review` reads as a bot command. There
+    // is no reason to make someone learn which one this tool chose.
+    if (/^\s*[/@]maestro\s+review\b/im.test(text)) {
       const number = (payload as { issue?: { number?: number } }).issue?.number;
       if (!number) return { kind: "ignore", reason: "comment is not on a pull request" };
       return {
         kind: "review",
         pr: { owner, repo, number },
         headSha: "",
-        reason: "requested by /maestro review",
+        reason: "requested by a maestro review comment",
       };
     }
     return { kind: "ignore", reason: "comment is not a maestro command" };

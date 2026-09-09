@@ -152,10 +152,23 @@ its sandboxes are siblings on the host daemon, so the egress proxy has to bind a
 fixed and published for them to reach it (`MAESTRO_PROXY_PORT_RANGE`, published on the bridge
 gateway). That is wired and unit-tested; it has never been run on a real Linux host.
 
+## Triggering a review
+
+Automatically, on `opened` / `reopened` / `ready_for_review` / `synchronize` — or on demand
+by commenting on the pull request:
+
+```
+@maestro review
+```
+
+`/maestro review` works too. Manual-only mode, and restricting who may ask, are open items
+in [docs/TODO.md](docs/TODO.md).
+
 ## Reference
 
 - [Configuration](docs/CONFIGURATION.md) — credentials, state, sandbox networking, self-hosting
 - [Status](docs/STATUS.md) — what is verified against reality, and what is not
+- [TODO](docs/TODO.md) — what is deliberately not built yet, and why
 
 ## Status
 

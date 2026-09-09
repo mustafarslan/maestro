@@ -115,3 +115,43 @@ describe("poll mode", () => {
     expect(state.seen.size).toBe(1);
   });
 });
+
+describe("triggering a review from a comment", () => {
+  const comment = (bodyText: string) =>
+    interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      issue: { number: 41 },
+      comment: { body: bodyText },
+    });
+
+  it("accepts the mention form, which is what @claude taught people to expect", () => {
+    const t = comment("@maestro review it please");
+    expect(t.kind).toBe("review");
+    if (t.kind === "review") expect(t.pr).toMatchObject({ owner: "acme", repo: "web", number: 41 });
+  });
+
+  it("still accepts the slash form", () => {
+    expect(comment("/maestro review").kind).toBe("review");
+  });
+
+  it("finds the command on a later line of a longer comment", () => {
+    // People write a sentence and then the command.
+    expect(comment("Looks good to me.\n\n@maestro review").kind).toBe("review");
+  });
+
+  it("ignores a comment that merely mentions maestro", () => {
+    // A discussion about the tool must not start a run that costs money.
+    expect(comment("we should get maestro to review this someday").kind).toBe("ignore");
+    expect(comment("@maestro is being noisy lately").kind).toBe("ignore");
+  });
+
+  it("ignores a comment on an issue that is not a pull request", () => {
+    const t = interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      comment: { body: "@maestro review" },
+    });
+    expect(t.kind).toBe("ignore");
+  });
+});
