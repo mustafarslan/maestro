@@ -43,6 +43,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # The verification step below runs a script from this repository, so the repository
+      # has to be here. The job previously only downloaded artifacts.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
       - uses: actions/download-artifact@v4
         with: { path: artifacts, merge-multiple: true }
       - name: Publish release assets
@@ -50,3 +55,13 @@ jobs:
         with:
           files: artifacts/maestro-*
           generate_release_notes: true
+
+      # Reads each published asset's executable header and checks it matches the platform
+      # its name claims. If `--target` were dropped or ignored in the matrix above, every
+      # job would still produce a binary and every upload would still succeed — and three
+      # quarters of users would download something that cannot run, while the installer
+      # told them their platform was unsupported.
+      - name: Verify every published asset is built for the platform it names
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-assets-check.mjs ${{ github.repository }}

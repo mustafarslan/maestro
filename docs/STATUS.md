@@ -1220,6 +1220,27 @@ Every one of them fails the suite when broken. Seven did not when the sweep star
     move as running the installer against a served artifact — and it is the one document nobody
     had checked, having spent the session checking everything the documents describe.
 
+141. **The checks built this session ran only when I remembered to run them.** Everything the
+    boundary sweep produced — the store-driver contract on both runtimes, the MCP protocol check
+    against the compiled binary, the Linear query-shape check, the release-asset architecture
+    check — lived in `scripts/` and was invoked by hand or by `scripts/gate.sh`. CI ran install,
+    lint, typecheck, test, build and a smoke test, and none of the rest.
+
+    So the two defect classes those checks exist for would have shipped: a divergence between
+    `bun:sqlite` and `node:sqlite` in the driver the binary actually uses, and stdout pollution
+    breaking every MCP client. A check nobody runs is a check that does not exist, which is the
+    same shape as a guard nothing tests — one layer further out again.
+
+    CI runs the store contract on both runtimes and the MCP protocol against the built binary
+    now, and the Linear shape check advisorily, since Linear's availability is not this build's
+    business. The release workflow verifies every published asset's executable header after
+    publishing, which is where a dropped `--target` would otherwise become three quarters of
+    users downloading something that cannot run.
+
+    The release job also had to learn to check out the repository: it only downloaded artifacts,
+    so a step running a script from `scripts/` would have failed on a file that was not there.
+    Every new step was run locally, verbatim, before being written into the workflow.
+
 ### The prompt fence, attacked rather than read
 
 Prompt injection is named as this project's dominant threat: pull request titles,

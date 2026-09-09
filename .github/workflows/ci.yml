@@ -31,9 +31,38 @@ jobs:
       # completely silent, and that posture is what makes it safe to review a
       # stranger's code at all.
       - run: pnpm test
+
+      # vitest runs on Node, so every test above exercises node:sqlite. The binary ships
+      # bun:sqlite — two implementations behind one interface, and only one of them was
+      # ever run until this check existed. It found `get()` returning null on bun where
+      # node returns undefined, on a driver whose declared type said undefined.
+      - name: Store driver contract, on both runtimes
+        run: |
+          pnpm run build
+          node --experimental-strip-types scripts/store-contract-check.ts
+          bun scripts/store-contract-check.ts
+
       - run: pnpm run build:binary
+
+      # `maestro mcp` speaks JSON-RPC on stdout. A stray console.log or a log line that
+      # forgot it belongs on stderr corrupts the stream and every client disconnects with
+      # a parse error naming nothing. That only exists once the server is a subprocess
+      # with stdout as a pipe, which no unit test reproduces.
+      - name: MCP protocol, against the compiled binary
+        run: |
+          MAESTRO_HOME=$(mktemp -d) ./dist/maestro init >/dev/null
+          node scripts/mcp-protocol-check.mjs ./dist/maestro
+
       - name: Smoke-test the compiled binary
         run: |
           ./dist/maestro --version
           MAESTRO_HOME=$(mktemp -d) ./dist/maestro init
           MAESTRO_HOME=$(mktemp -d) ./dist/maestro playbook nodes
+
+      # Linear owns this schema and can change it without telling us. The check needs no
+      # credential — Linear validates a query before it authenticates — so it runs here
+      # rather than waiting for somebody to notice issue lookup had quietly stopped
+      # working. Non-blocking: their availability is not our build's business.
+      - name: Linear query shape (advisory)
+        continue-on-error: true
+        run: node scripts/live-linear-check.mjs

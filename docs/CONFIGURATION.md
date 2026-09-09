@@ -244,6 +244,11 @@ GITHUB_TOKEN=$(gh auth token) node scripts/live-github-check.mjs owner/repo#1
 The GitHub one takes `--write` to also exercise posting, finding and updating a comment; it
 deletes what it creates, including when a step fails.
 
+CI runs the same checks: lint, typecheck, the suite including the Docker integration tests, the
+store-driver contract on both runtimes, the binary build, and the MCP protocol against that
+binary. `scripts/gate.sh` is the local equivalent, plus the clean-checkout property CI gets for
+free from `actions/checkout`.
+
 When touching a security control or a guard, check the tests actually hold it:
 
 ```
