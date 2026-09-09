@@ -23,6 +23,8 @@ the README so the claims in that file stay short and true.
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
 | **Container deployment** | The image builds and runs: migrations apply, both listeners bind, the admin API returns 200 with a token and 401 without, the UI serves, and the webhook port rejects an unsigned body |
+| **Linear's query against the live schema** | Linear validates GraphQL *before* authentication: a query naming a nonexistent field returns 400 `GRAPHQL_VALIDATION_FAILED` unauthenticated, while Maestro's query returns 401. Every field it selects therefore provably exists on the live `Issue` type. Its real 401 and 400 bodies are now the test fixtures |
+| Sibling-to-gateway routing | A container on a bridge network reaches a published port through that network's gateway (HTTP 200) — the mechanism Compose depends on |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
 | **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
@@ -49,10 +51,13 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Linear has never been called against a real workspace.** Key extraction, criteria parsing
   and every degradation path are unit-tested against a fake transport, but no live API key has
   been used, so the GraphQL query shape is unverified against the real endpoint.
-- **Hosted providers have never made a live call.** The Anthropic, OpenAI and Google adapters pass
-  the conformance suite against recorded fixtures only. All live testing used Ollama. The shipped
-  default playbook binds every agent to Anthropic, so a fresh install needs an `ANTHROPIC_API_KEY`
-  before it will run.
+- **Hosted providers have never made a live call, and the endpoint cannot be probed without one.**
+  The Anthropic, OpenAI and Google adapters pass the conformance suite against fixtures. An
+  unauthenticated probe of `api.anthropic.com` was attempted to at least check request shape and
+  proved nothing: authentication is checked before validation, so a well-formed request and a
+  deliberately malformed one both return the same 401. The request body *is* asserted directly in
+  the test suite. All live model calls in this project used Ollama. The shipped default playbook
+  binds every agent to Anthropic, so a fresh install needs an `ANTHROPIC_API_KEY` before it runs.
 - **The prompt-size guard falls back to a constant on models it has no window for.** It is sized
   from `capabilities.contextWindow` where that is known, and every model tested live is an Ollama
   one with no entry, so those used the 400k-character default. That was enough for a 131k-token
@@ -63,11 +68,13 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **No GitHub App exists.** Webhook deliveries were verified by signing real payloads with the
   configured secret and posting them to the running daemon, which is the same code path GitHub
   exercises; what has not been done is registering an App so GitHub itself sends them.
-- **One part of Compose remains unverified: the sandbox-to-proxy route.** The image now builds and
-  runs, both listeners work, and the compose file resolves with the proxy range published on the
-  bridge gateway only. What has *not* been exercised is a sibling sandbox container dialling
-  `172.17.0.1:7790` — that needs a Linux host, because Docker Desktop has no such gateway. The file
-  stays labelled experimental for that reason alone.
+- **One line of Compose remains unverified, and it is now a known risk rather than an unknown.**
+  The general mechanism works: a sibling container reaches a published port through a bridge
+  gateway. But publishing bound to the gateway IP *specifically* — `"172.17.0.1:7790-7799:..."`,
+  which is what the file does to keep the proxy off the LAN — was **not** reachable on Docker
+  Desktop. Docker Desktop routes through a VM, so this may well work on Linux where 172.17.0.1 is a
+  real host interface; it is untested there. The compose file now says so at that line and gives
+  the fallback. This is the single most likely thing to need changing on a first deployment.
 - **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
   across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
   found a fairness bug; it does not start 40 real containers.

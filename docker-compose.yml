@@ -36,10 +36,21 @@ services:
       #      be, so a range is pinned. It is a range, not one port, because concurrent
       #      reviews each run their own proxy; the range width caps how many prepare
       #      phases can run at once.
-      #   2. sandboxes are told an address that reaches this container. 172.17.0.1 is
-      #      the default bridge gateway; change it if your daemon uses a different one.
+      #   2. sandboxes are told an address that reaches this container. Sandboxes are
+      #      created through the socket without a network, so they land on the DEFAULT
+      #      bridge, whose gateway on Linux is 172.17.0.1. Change it if your daemon uses
+      #      a different subnet: `docker network inspect bridge`.
       #
-      # Getting either wrong makes every dependency install fail.
+      # Getting either wrong makes every dependency install fail, with the symptom that
+      # every install times out rather than anything naming this setting.
+      #
+      # WHAT WAS ACTUALLY TESTED, on Docker Desktop for macOS: a sibling container can
+      # reach a published port through a bridge gateway (verified, HTTP 200). Publishing
+      # bound to the gateway IP *specifically* was NOT reachable there — Docker Desktop
+      # routes through a VM, so its gateway semantics differ from Linux, where 172.17.0.1
+      # is a real host interface. If installs fail on your host, widen the publish to all
+      # interfaces by dropping the "172.17.0.1:" prefix below, and restrict access with a
+      # firewall instead. That is the one line most likely to need changing.
       MAESTRO_PROXY_HOST: ${MAESTRO_PROXY_HOST:-172.17.0.1}
       MAESTRO_PROXY_PORT_RANGE: ${MAESTRO_PROXY_PORT_RANGE:-7790-7799}
     volumes:

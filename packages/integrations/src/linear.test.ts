@@ -178,3 +178,82 @@ describe("issue lookup", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("against Linear's real API contract", () => {
+  // These bodies were captured from api.linear.app itself, not written by hand.
+  //
+  // Linear validates a GraphQL query BEFORE it checks authentication: a query naming a
+  // field that does not exist returns 400 GRAPHQL_VALIDATION_FAILED even unauthenticated,
+  // while our query returns 401. That difference is a live schema check — every field the
+  // client selects provably exists on the Issue type, which is the part of an integration
+  // most likely to be silently wrong.
+  const REAL_AUTH_ERROR = {
+    errors: [
+      {
+        message: "Authentication required, not authenticated",
+        extensions: {
+          type: "authentication error",
+          code: "AUTHENTICATION_ERROR",
+          statusCode: 401,
+          userError: true,
+          userPresentableMessage: "You need to authenticate to access this operation.",
+          meta: {},
+          http: {
+            status: 401,
+          },
+        },
+      },
+    ],
+  };
+
+  const REAL_VALIDATION_ERROR = {
+    errors: [
+      {
+        message: 'Cannot query field "notARealField" on type "Issue".',
+        locations: [
+          {
+            line: 1,
+            column: 57,
+          },
+        ],
+        extensions: {
+          http: {
+            status: 400,
+            headers: {},
+          },
+          code: "GRAPHQL_VALIDATION_FAILED",
+          type: "graphql error",
+          userError: true,
+        },
+      },
+    ],
+  };
+
+  const respondWith = (body: unknown, status: number) =>
+    (async () =>
+      ({
+        ok: status < 400,
+        status,
+        json: async () => body,
+      }) as unknown as Response) as typeof fetch;
+
+  it("treats a real authentication error as missing context, not a crash", async () => {
+    // A misconfigured key must degrade the review, never fail it.
+    const client = new LinearClient("bad-key", undefined, respondWith(REAL_AUTH_ERROR, 401));
+    await expect(client.getIssue("ENG-1")).resolves.toBeUndefined();
+  });
+
+  it("treats a real schema validation error as missing context too", async () => {
+    // If Linear ever changes the Issue type under us, the review still posts.
+    const client = new LinearClient("k", undefined, respondWith(REAL_VALIDATION_ERROR, 400));
+    await expect(client.getIssue("ENG-1")).resolves.toBeUndefined();
+  });
+
+  it("reads the error shape Linear actually returns", () => {
+    // Both real bodies carry `errors[].message`, which is what the client logs.
+    for (const body of [REAL_AUTH_ERROR, REAL_VALIDATION_ERROR]) {
+      expect(Array.isArray(body.errors)).toBe(true);
+      expect(typeof body.errors[0]?.message).toBe("string");
+    }
+  });
+});
