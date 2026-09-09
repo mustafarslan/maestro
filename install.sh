@@ -67,7 +67,14 @@ case ":$PATH:" in
 esac
 
 echo
-"$INSTALL_DIR/maestro" --version >/dev/null 2>&1 && dim "binary verified"
+# Under `set -e` an `&&` chain that fails would abort the script here with no message,
+# leaving a new user with a broken binary and a silent exit.
+if ! "$INSTALL_DIR/maestro" --version >/dev/null 2>&1; then
+  red "The downloaded binary does not run on this platform."
+  red "Maestro ships glibc binaries; musl hosts (Alpine) are not supported yet."
+  exit 1
+fi
+dim "binary verified"
 bold "Next steps"
 printf '  %s init      # create ~/.maestro and seed the default playbook\n' "$INSTALL_DIR/maestro"
 printf '  %s doctor    # check Docker, git, database and playbook health\n' "$INSTALL_DIR/maestro"

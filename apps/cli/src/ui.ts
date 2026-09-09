@@ -13,12 +13,18 @@ export const color = {
 
 export const symbols = { ok: "✓", warn: "!", fail: "✗", info: "·" };
 
-export function checkLine(status: "ok" | "warn" | "fail", label: string, detail?: string): string {
+export function checkLine(
+  status: "ok" | "warn" | "fail" | "info",
+  label: string,
+  detail?: string,
+): string {
   const mark =
     status === "ok"
       ? color.green(symbols.ok)
       : status === "warn"
         ? color.yellow(symbols.warn)
-        : color.red(symbols.fail);
+        : status === "info"
+          ? color.dim(symbols.info)
+          : color.red(symbols.fail);
   return `  ${mark} ${label}${detail ? color.dim(`  ${detail}`) : ""}`;
 }

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect as netConnect } from "node:net";
@@ -46,6 +47,13 @@ function hostAllowed(host: string, allowlist: string[]): boolean {
  */
 function bindAddress(): string {
   if (process.env.MAESTRO_PROXY_BIND) return process.env.MAESTRO_PROXY_BIND;
+
+  // Running inside a container (the Compose deployment), sandboxes are siblings on the
+  // HOST daemon and cannot reach this container's loopback. Binding all interfaces is
+  // the only address they can reach, and the container's own network namespace is the
+  // isolation boundary. MAESTRO_PROXY_HOST must then tell them where to dial.
+  if (runningInContainer()) return "0.0.0.0";
+
   if (process.platform === "darwin") return "127.0.0.1";
 
   // Linux: prefer the docker0 gateway; fall back to loopback and let the caller's
@@ -57,6 +65,16 @@ function bindAddress(): string {
     if (ipv4) return ipv4.address;
   }
   return "127.0.0.1";
+}
+
+/** True when this process is itself inside a container. */
+export function runningInContainer(): boolean {
+  if (existsSync("/.dockerenv")) return true;
+  try {
+    return /docker|containerd|kubepods/.test(readFileSync("/proc/1/cgroup", "utf8"));
+  } catch {
+    return false;
+  }
 }
 
 export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy> {

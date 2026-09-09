@@ -19,6 +19,13 @@ services:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set a webhook secret}
       MAESTRO_ADMIN_TOKEN: ${MAESTRO_ADMIN_TOKEN:?set an admin token}
       MAESTRO_HOME: /data
+      # Sandboxes are siblings on the HOST daemon, so they cannot reach this
+      # container's loopback. The egress proxy therefore binds all interfaces inside
+      # this container, and sandboxes must be told an address that resolves to it.
+      # 172.17.0.1 is the default bridge gateway, which is what a sibling container
+      # reaches when it dials host-gateway; change it if your daemon uses a different
+      # bridge. Getting this wrong makes every dependency install fail.
+      MAESTRO_PROXY_HOST: ${MAESTRO_PROXY_HOST:-172.17.0.1}
     volumes:
       - maestro-data:/data
       # Sandboxes are sibling containers on the host daemon. This grants Maestro

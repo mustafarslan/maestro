@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { logger, newId } from "@maestro/core";
 import type { EnvSpec } from "@maestro/playbook";
 import { dependencyCacheKey, mayWriteCache, snapshotTag } from "./cache.js";
-import { startEgressProxy } from "./egress-proxy.js";
+import { runningInContainer, startEgressProxy } from "./egress-proxy.js";
 import { detectedCommands, detectToolchain, expandAuto } from "./toolchain.js";
 import type {
   ExecResult,
@@ -156,9 +156,22 @@ export class DockerSandboxDriver implements SandboxDriver {
     const containerId = `maestro-prep-${id}`;
 
     try {
+      // Sandboxes must dial an address they can actually reach. On a normal host that
+      // is host.docker.internal; in the Compose deployment Maestro is itself a
+      // container, so MAESTRO_PROXY_HOST must name an address sibling containers can
+      // resolve. Getting this wrong fails every dependency install, so say so loudly.
+      const proxyHost = process.env.MAESTRO_PROXY_HOST ?? "host.docker.internal";
+      if (!process.env.MAESTRO_PROXY_HOST && runningInContainer()) {
+        log.warn(
+          "Maestro is running inside a container but MAESTRO_PROXY_HOST is unset; " +
+            "sandboxes will dial host.docker.internal, which does not resolve to this " +
+            "container, so dependency installs will fail. Set MAESTRO_PROXY_HOST to an " +
+            "address sibling containers can reach.",
+        );
+      }
       const hostGateway =
         process.platform === "linux" ? ["--add-host", "host.docker.internal:host-gateway"] : [];
-      const proxyUrl = `http://host.docker.internal:${proxy.port}`;
+      const proxyUrl = `http://${proxyHost}:${proxy.port}`;
 
       const create = await docker(
         [

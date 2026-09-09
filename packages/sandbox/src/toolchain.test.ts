@@ -7,6 +7,17 @@ const snap = (files: string[], contents: Record<string, string> = {}): RepoSnaps
 });
 
 describe("toolchain detection", () => {
+  it("activates a non-npm package manager before using it", () => {
+    // The Node images ship corepack but not the packaged manager itself, so every
+    // `pnpm run ...` command an agent was told it could run exited 127.
+    const pnpm = detectToolchain(snap(["package.json", "pnpm-lock.yaml"]));
+    expect(pnpm.setup[0]).toContain("corepack");
+    expect(pnpm.setup[0]).toContain("pnpm");
+
+    // npm needs no activation, so it gets no extra step.
+    expect(detectToolchain(snap(["package.json", "package-lock.json"])).setup).toHaveLength(1);
+  });
+
   it("picks the package manager from the lockfile, not from package.json", () => {
     // Running `npm ci` in a pnpm repo either fails or silently builds a different tree.
     expect(detectToolchain(snap(["package.json", "pnpm-lock.yaml"])).packageManager).toBe("pnpm");
@@ -31,7 +42,9 @@ describe("toolchain detection", () => {
     expect(detectToolchain(snap(["package.json", "package-lock.json"])).setup).toEqual([
       "npm ci --ignore-scripts",
     ]);
-    expect(detectToolchain(snap(["package.json", "pnpm-lock.yaml"])).setup[0]).toContain(
+    // pnpm/yarn setups are prefixed with a corepack activation, so assert on the whole
+    // sequence rather than the first entry.
+    expect(detectToolchain(snap(["package.json", "pnpm-lock.yaml"])).setup.join(" ")).toContain(
       "--frozen-lockfile",
     );
   });

@@ -74,6 +74,14 @@ function detectNode(snap: RepoSnapshot): Toolchain {
           ? ["npm", "npm ci --ignore-scripts"]
           : ["npm", "npm install --no-audit --no-fund --ignore-scripts"];
 
+  // Corepack ships with the Node images but the packaged manager is not installed
+  // until it is activated. Without this every `pnpm run …`/`yarn …` command an agent
+  // was told it could run exits 127, which looks like a broken repository.
+  const activate =
+    packageManager === "npm"
+      ? []
+      : [`corepack enable && corepack prepare ${packageManager} --activate`];
+
   const commands: Toolchain["commands"] = {};
   const raw = snap.read("package.json");
   if (raw) {
@@ -92,7 +100,13 @@ function detectNode(snap: RepoSnapshot): Toolchain {
     }
   }
 
-  return { kind: "node", image: NODE_IMAGE, packageManager, setup: [install], commands };
+  return {
+    kind: "node",
+    image: NODE_IMAGE,
+    packageManager,
+    setup: [...activate, install],
+    commands,
+  };
 }
 
 function detectPython(snap: RepoSnapshot): Toolchain {

@@ -30,15 +30,29 @@ by default because they are what makes later reviews fast.
   }
 
   const reviewIndex = argv.indexOf("--review");
-  const reviewId = reviewIndex >= 0 ? argv[reviewIndex + 1] : undefined;
+  let reviewId: string | undefined;
+  if (reviewIndex >= 0) {
+    const value = argv[reviewIndex + 1];
+    // `maestro reap --review` with the id forgotten used to fall through to the
+    // UNSCOPED sweep, tearing down every in-flight review's containers. The most
+    // destructive action must never be what a typo produces.
+    if (!value || value.startsWith("--")) {
+      console.error("--review requires a review id, e.g. --review rv_1a2b3c");
+      return 1;
+    }
+    reviewId = value;
+  }
 
   console.log(color.bold("\nmaestro reap\n"));
   const swept = await driver.reap(reviewId ? { reviewId } : {});
+  const sweptAnything = swept.containers > 0 || swept.images > 0;
   console.log(
     checkLine(
-      swept.containers || swept.images ? "ok" : "ok",
+      sweptAnything ? "ok" : "info",
       "swept",
-      `${swept.containers} container(s), ${swept.images} image(s)`,
+      sweptAnything
+        ? `${swept.containers} container(s), ${swept.images} image(s)`
+        : "nothing to sweep",
     ),
   );
 
