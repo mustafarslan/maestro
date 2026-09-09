@@ -133,6 +133,21 @@ describe("trigger_review", () => {
     expect(n).toBe(1);
   });
 
+  it("triggers again once the first review is no longer pending", async () => {
+    // The dedupe key used to be a fixed `#41@latest`, which is unique across the whole
+    // jobs table and never pruned — so `trigger_review` worked exactly once per pull
+    // request, for ever, and every later call reported success having inserted nothing.
+    const client = await connect();
+    await call(client, "trigger_review", { url: "https://github.com/acme/web/pull/41" });
+    db.prepare("UPDATE jobs SET state='done'").run();
+    const second = await call(client, "trigger_review", {
+      url: "https://github.com/acme/web/pull/41",
+    });
+    expect(second.queued).toBe(true);
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM jobs").get() as { n: number };
+    expect(n).toBe(2);
+  });
+
   it("reports a parse failure rather than queueing nonsense", async () => {
     const client = await connect();
     const res = await call(client, "trigger_review", { url: "not a pull request" });

@@ -714,7 +714,31 @@ These are recorded because each was invisible to the test suite that existed at 
     202. A requested review now keys on the id of the comment that asked — redelivery repeats
     the id and stays idempotent, a person asking again gets what they asked for. This also
     makes `@maestro review` the recovery path for an automatic review whose job exhausted its
-    attempts, since that failed job holds its SHA's key permanently.
+    attempts, since that failed job holds its SHA's key permanently. Two further pieces were
+    needed before the claim was true: the job carries `force`, because otherwise a request at
+    an unchanged head reached `reviewPullRequest`, matched the existing row and returned
+    "already reviewed at this head sha" — silence, to someone who had asked; and a transient
+    "is one already queued or running" check, because the permanent key cannot express "not
+    twice at once" without also meaning "not ever again".
+
+93. **`trigger_review` over MCP worked exactly once per pull request, for ever.** The same
+    defect as 89, one call site over, and the same shape this session keeps finding: the MCP
+    server copied the webhook path's `#N@latest` dedupe key. Every call after the first
+    inserted nothing and reported `ok: true`. Both paths now share `hasPendingReviewJob`.
+    The first fix keyed on `Date.now()` and reproduced the bug in miniature: two calls in
+    the same millisecond collided, which passed locally and failed in the clean-checkout
+    gate. The key is random now; idempotency belongs to the pending check, not to it.
+
+94. **The manual-only gate had quietly turned off measurement.** The first version returned
+    before `recordLineChanges`, so a repository with automatic reviews off also stopped
+    recording whether the last review's findings were acted on — the strongest quality signal
+    available, and the one that needs no human action. A push is still a push. Moved above
+    the gate.
+
+95. **`--poll` with automatic triggers off is a daemon that reviews nothing.** The poller
+    lists open pull requests and compares head SHAs; it cannot see comments. The combination
+    is legal, silent and completely inert — the same "configuration that does nothing" class
+    the section above is about. It now warns, naming both ways out.
 
 90. **Asking for a review destroyed the review in progress.** The supersede loop ran on every
     trigger and skipped only reviews whose `head_sha` equalled the trigger's. A comment carries

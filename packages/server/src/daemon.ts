@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  hasPendingReviewJob,
   IN_FLIGHT_STATES,
   JobQueue,
   logger,
@@ -62,6 +63,15 @@ export interface RunningDaemon {
  */
 /** How long a claimed job stays claimed without renewal. Renewed at a third of this. */
 const LEASE_MS = 15 * 60_000;
+
+/**
+ * What a `review-pr` job carries.
+ *
+ * The pull request, plus whether the requester meant it enough to override the
+ * already-reviewed-this-SHA check. It was a bare `PullRequestRef` cast from JSON at both
+ * ends, which is how the flag could not be expressed at all.
+ */
+export type ReviewJobPayload = PullRequestRef & { force?: boolean };
 
 /**
  * Whether a trigger makes an in-flight review of the same pull request pointless.
@@ -203,6 +213,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return;
     }
 
+    // A push is the moment to ask whether the last review's findings were acted on.
+    // `ingestLineChanges` existed for this from the beginning and nothing ever called
+    // it, so the strongest available quality signal — the only one needing no human
+    // action — was never gathered, while STATUS described its granularity as a known
+    // limitation, which implied it ran.
+    //
+    // Above the manual-only gate on purpose: a push in a manual-only repository is still
+    // a push, and it is exactly when knowing whether the last findings were addressed is
+    // worth something. Putting this after the gate would have quietly turned the setting
+    // into "and also stop measuring".
+    void recordLineChanges(t.pr);
+
     // Opt-in mode: the pull request's own lifecycle starts nothing, and a review happens
     // when somebody with write access asks for one. Read from the repo's active playbook
     // rather than a flag, so it travels with the rest of the configuration and can differ
@@ -211,6 +233,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const repoId = reviews.ensureRepo(t.pr.owner, t.pr.repo);
       const active = playbooks.resolveForRepo(repoId);
       if (active && active.doc.router.automaticTriggers === false) {
+        // Poll mode cannot see comments — it lists open pull requests and compares head
+        // SHAs — so a polling daemon with automatic triggers off reviews nothing at all,
+        // ever. That is a configuration that silently does nothing, which is the bug
+        // this project has produced most often, so it says so at warn rather than
+        // logging a routine skip.
+        if (opts.poll?.repos.length) {
+          logger.warn(
+            { pr: t.pr.number, reason: t.reason },
+            "automatic reviews are off and this daemon polls, so it cannot see " +
+              "'@maestro review' comments: nothing will review this pull request. Run with " +
+              "--webhook-port, or set router.automaticTriggers back to true.",
+          );
+          return;
+        }
         logger.info(
           { pr: t.pr.number, reason: t.reason },
           "automatic reviews are off for this repository; comment '@maestro review' to ask for one",
@@ -230,15 +266,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       t.source === "comment"
         ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@comment-${t.commentId}`
         : `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@${t.headSha || "latest"}`;
-    const id = queue.enqueue({ kind: "review-pr", payload: t.pr, dedupeKey: key });
+    // Two people asking within a minute of each other are asking for one review, and the
+    // comment they will both read is updated in place. The permanent dedupe key cannot
+    // express that — it would drop the second for ever — so the transient question is
+    // asked directly.
+    if (t.source === "comment" && hasPendingReviewJob(db, t.pr)) {
+      logger.info({ pr: t.pr.number }, "a review of this pull request is already queued");
+      return;
+    }
+    const id = queue.enqueue({
+      kind: "review-pr",
+      // A person asking re-reviews even when the head has not moved. Without this the
+      // request reaches `reviewPullRequest`, finds a review already covering that SHA
+      // and returns "already reviewed at this head sha" — so somebody who asked got
+      // silence. There is one comment per pull request and it is updated in place, so a
+      // re-review refreshes it rather than adding noise, and only people with write
+      // access can ask.
+      payload: { ...t.pr, force: t.source === "comment" } satisfies ReviewJobPayload,
+      dedupeKey: key,
+    });
     logger.info({ key, reason: t.reason, enqueued: Boolean(id) }, "review trigger");
-
-    // A push is the moment to ask whether the last review's findings were acted on.
-    // `ingestLineChanges` existed for this from the beginning and nothing ever called
-    // it, so the strongest available quality signal — the only one needing no human
-    // action — was never gathered, while STATUS described its granularity as a known
-    // limitation, which implied it ran.
-    void recordLineChanges(t.pr);
 
     // A new head SHA makes any in-flight review of this PR unpostable; cancel it so it
     // stops holding a container and a scheduler slot.
@@ -258,7 +305,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const linear = LinearClient.fromEnv();
   if (linear) logger.info("linear issue lookup enabled");
 
-  const runOne = async (pr: PullRequestRef): Promise<void> => {
+  const runOne = async ({ force, ...pr }: ReviewJobPayload): Promise<void> => {
     const client = GitHubClient.fromEnv();
     if (!client) throw new Error("no GitHub credential configured");
     // Per-repo playbook assignment: a mobile repo and a backend repo want different
@@ -287,6 +334,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         playbookVersionId: record.id,
         linear,
         pr,
+        force,
         // Registering on the RESULT would register a review that has already finished:
         // the map would always be empty at the moment a push needs to cancel something,
         // so cancel-on-push could never fire during the minutes when it matters.
@@ -326,7 +374,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
 
           try {
             notify("review", { started: job.id });
-            await runOne(job.payload as PullRequestRef);
+            await runOne(job.payload as ReviewJobPayload);
             queue.complete(job.id);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

@@ -1,5 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { severityAtLeast } from "@maestro/agents";
-import { JobQueue, maestroHome, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import {
+  hasPendingReviewJob,
+  JobQueue,
+  maestroHome,
+  openStore,
+  ReviewStore,
+  type SqlDatabase,
+} from "@maestro/core";
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { parsePullRequestRef } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
@@ -325,13 +333,28 @@ export function buildServer(deps: McpDeps): McpServer {
         });
       }
 
-      // The same dedupe key the webhook path uses, so triggering by hand while a webhook
-      // is in flight collapses to one review rather than racing it.
-      const jobId = new JobQueue(db, "mcp").enqueue({
-        kind: "review-pr",
-        payload: pr,
-        dedupeKey: `${pr.owner}/${pr.repo}#${pr.number}@latest`,
-      });
+      // `dedupe_key` is unique across the whole jobs table and rows are never pruned, so
+      // a fixed per-pull-request key meant `trigger_review` worked exactly once for each
+      // pull request, for ever — the second call inserted nothing and reported success.
+      // The webhook path had the same bug for comment triggers; this is the same fix,
+      // one call site over. Random rather than a timestamp: two calls in the same
+      // millisecond collided on the key and the second silently vanished, which is the
+      // bug being fixed reappearing as a flaky test. Idempotency lives in the pending
+      // check below, so this key only has to be unique.
+      // Not the queue's dedupe key: that is permanent, so a fixed per-pull-request key
+      // meant the second call inserted nothing and still reported success. This asks the
+      // question actually worth asking — is one already queued or running — which lets a
+      // later call work while still refusing to stack two reviews of the same pull
+      // request.
+      const jobId = hasPendingReviewJob(db, pr)
+        ? null
+        : new JobQueue(db, "mcp").enqueue({
+            kind: "review-pr",
+            // Asked for by hand, so it re-reviews rather than reporting that this SHA
+            // was already covered.
+            payload: { ...pr, force: true },
+            dedupeKey: `${pr.owner}/${pr.repo}#${pr.number}@mcp-${randomUUID()}`,
+          });
 
       // A lease in the future means a worker is alive and claiming work. The COUNT(*)
       // form this replaces always returns a row, so the boolean was always true — a

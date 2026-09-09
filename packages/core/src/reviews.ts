@@ -222,3 +222,35 @@ export function reviewsForPullRequest(
     return meta?.repo_id === pr.repoId && meta.pr_number === pr.number;
   });
 }
+
+/**
+ * Whether a review of this pull request is already queued or running.
+ *
+ * The queue's `dedupe_key` is `UNIQUE` across the whole table and rows are never pruned,
+ * so it can only express "never enqueue this again" — which is right for a webhook
+ * delivery id and wrong for a person asking. A request keyed on who asked (the comment
+ * id, or the moment of an MCP call) is correctly enqueued a second time once the first
+ * has finished; what it must not do is stack a second review on top of one still
+ * running, which is wasted containers and money for a comment that gets updated in place
+ * either way.
+ *
+ * Deliberately about jobs rather than reviews: a queued job has no review row yet.
+ */
+export function hasPendingReviewJob(
+  db: SqlDatabase,
+  pr: { owner: string; repo: string; number: number },
+): boolean {
+  const rows = db
+    .prepare(
+      "SELECT payload_json FROM jobs WHERE kind='review-pr' AND state IN ('queued','running')",
+    )
+    .all<{ payload_json: string }>();
+  return rows.some((r) => {
+    try {
+      const p = JSON.parse(r.payload_json) as { owner?: string; repo?: string; number?: number };
+      return p.owner === pr.owner && p.repo === pr.repo && p.number === pr.number;
+    } catch {
+      return false;
+    }
+  });
+}

@@ -137,15 +137,51 @@ describe("manual-only reviews", () => {
     expect(queuedReviews()).toBe(1);
   });
 
-  it("runs a second request rather than swallowing it", async () => {
+  it("runs a later request rather than swallowing it", async () => {
     // `dedupe_key` is unique across the whole table and rows are never pruned, so keying
     // a request on the pull request alone dropped every later `@maestro review` on it
     // for ever — including after the first review had finished and the person was asking
     // about new commits. The key is the comment, which is what actually asked.
     const port = await start(false);
     await deliver(port, "issue_comment", requested(11));
+    db.prepare("UPDATE jobs SET state='done'").run();
     await deliver(port, "issue_comment", requested(12));
     expect(queuedReviews()).toBe(2);
+  });
+
+  it("does not stack a second request on one already queued", async () => {
+    // Two people asking within a minute are asking for one review, and they will both
+    // read the same comment, which is updated in place. The permanent dedupe key cannot
+    // express "not while one is pending" without also meaning "not ever again", so the
+    // transient question is asked directly.
+    const port = await start(false);
+    await deliver(port, "issue_comment", requested(11));
+    await deliver(port, "issue_comment", requested(12));
+    expect(queuedReviews()).toBe(1);
+  });
+
+  it("re-reviews on request even when the head has not moved", async () => {
+    // Without this the job runs, `reviewPullRequest` finds a review already covering that
+    // SHA, and returns "already reviewed at this head sha" — so a person who asked got
+    // silence. There is one comment per pull request and it is updated in place, so a
+    // re-review refreshes it rather than adding noise.
+    const port = await start(false);
+    await deliver(port, "issue_comment", requested(11));
+    const payload = db
+      .prepare("SELECT payload_json FROM jobs WHERE kind='review-pr'")
+      .get<{ payload_json: string }>();
+    expect(JSON.parse(payload?.payload_json ?? "{}")).toMatchObject({ force: true });
+  });
+
+  it("does not force a review the pull request asked for itself", async () => {
+    // Automatic triggers must stay idempotent per head SHA: a redelivered `opened` event
+    // that forced would re-run a completed review.
+    const port = await start(true);
+    await deliver(port, "pull_request", opened);
+    const payload = db
+      .prepare("SELECT payload_json FROM jobs WHERE kind='review-pr'")
+      .get<{ payload_json: string }>();
+    expect(JSON.parse(payload?.payload_json ?? "{}")).toMatchObject({ force: false });
   });
 
   it("does not re-run a redelivered request", async () => {

@@ -29,7 +29,12 @@ as an automatic trigger.
   is a trap for whoever next rewords it. And a requested review deduplicates on the
   comment's id rather than the pull request: `dedupe_key` is unique across the whole
   table and rows are never pruned, so the old key silently dropped every `@maestro review`
-  after the first — for ever, including after the first review had finished.
+  after the first — for ever, including after the first review had finished. A request also
+  forces the review, since otherwise one at an unchanged head answered "already reviewed at
+  this SHA" to somebody who had just asked.
+
+  Not for `--poll`: the poller cannot see comments, so a polling daemon with automatic
+  triggers off reviews nothing. It warns rather than pretending to work.
 - ~~**Who may trigger one.**~~ **Done.** A comment trigger is refused unless the delivery's
   `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` — the repository's own statement
   about the commenter, checked before the job is enqueued. Everyone else can still comment; they

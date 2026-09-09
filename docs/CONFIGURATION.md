@@ -62,11 +62,22 @@ are assignable per repository, so one repository can be manual-only while anothe
 Lifecycle events are then ignored and `@maestro review` is the only way in — still subject
 to the association check above.
 
-A requested review deduplicates on the comment that asked, not on the pull request, so
-asking twice runs twice while GitHub redelivering the same comment does not. That also makes
-`@maestro review` the recovery path for an automatic review whose job exhausted its
-attempts: the failed job holds that head SHA's dedupe key for ever, and a comment carries
-its own.
+A requested review deduplicates on the comment that asked, not on the pull request. GitHub
+redelivering the same comment does nothing; asking again later runs again, including at an
+unchanged head — a request from someone with write access re-reviews rather than answering
+"already reviewed at this SHA", and the single per-pull-request comment is updated in place
+rather than a second one being posted. Asking again while a review is still queued or
+running is ignored, since both askers read the same comment.
+
+That also makes `@maestro review` the recovery path for an automatic review whose job
+exhausted its attempts: the failed job holds that head SHA's dedupe key for ever, and a
+comment carries its own.
+
+`maestro mcp`'s `trigger_review` behaves the same way and for the same reason — it had the
+identical defect, a fixed per-pull-request key that let it work exactly once.
+
+One combination to avoid: `--poll` with `automaticTriggers: false`. Polling cannot see
+comments, so such a daemon reviews nothing at all. It warns when it happens.
 
 ### Linear (optional)
 
