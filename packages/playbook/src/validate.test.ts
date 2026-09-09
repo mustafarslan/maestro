@@ -258,3 +258,40 @@ describe("a gate the Studio can add", () => {
     expect(validateGraph(doc).length).toBeGreaterThan(0);
   });
 });
+
+describe("the rule the canvas enforces while an edge is drawn", () => {
+  // The Studio refuses an incompatible connection as it is drawn, using the node registry
+  // that already arrives with the playbook. It applies the same rule as `validateGraph`,
+  // and these pin the rule so the two cannot drift into disagreeing about what is legal —
+  // the canvas deciding one thing and the engine another is worse than no canvas check.
+  const kinds = (from: string, to: string): PlaybookDocument => {
+    const doc = clone();
+    doc.graph.edges.push({ from, to });
+    return doc;
+  };
+  const idOf = (kind: string) => clone().graph.nodes.find((n) => n.kind === kind)?.id as string;
+
+  it("refuses an edge out of the sink, which produces nothing", () => {
+    const issues = validateGraph(kinds(idOf("post"), idOf("triage")));
+    expect(issues.some((i) => i.code === "port-type")).toBe(true);
+  });
+
+  it("refuses a Checkout being fed to something expecting findings", () => {
+    const issues = validateGraph(kinds(idOf("prepare-env"), idOf("triage")));
+    expect(issues.some((i) => i.code === "port-type")).toBe(true);
+  });
+
+  it("refuses a self-loop", () => {
+    const issues = validateGraph(kinds(idOf("triage"), idOf("triage")));
+    expect(issues.some((i) => i.code === "self-loop")).toBe(true);
+  });
+
+  it("allows an agent to feed triage, which is the ordinary case", () => {
+    const doc = clone();
+    const agentNode = doc.graph.nodes.find((n) => n.kind === "agent");
+    const triage = doc.graph.nodes.find((n) => n.kind === "triage");
+    // Already wired; adding the same edge twice is what a careless drag would do.
+    doc.graph.edges.push({ from: agentNode?.id as string, to: triage?.id as string });
+    expect(validateGraph(doc).some((i) => i.code === "port-type")).toBe(false);
+  });
+});

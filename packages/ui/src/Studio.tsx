@@ -105,6 +105,43 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
     return () => clearTimeout(timer);
   }, [doc, dirty]);
 
+  /**
+   * Whether an edge the user is drawing is one the validator would accept.
+   *
+   * The same rule, deliberately: the ports a node produces must intersect the ports the
+   * target accepts, a sink produces nothing, and nothing may join itself. The registry
+   * carrying those ports already arrives with the playbook, so the canvas can answer
+   * before the edge exists rather than letting the graph become invalid and reporting it
+   * at publish.
+   *
+   * If this and `validateGraph` ever disagree, the validator is right — it is what the
+   * engine runs on — and this only decides what the mouse will let go of.
+   */
+  const connectionAllowed = useCallback(
+    (from: string | null, to: string | null): { ok: boolean; reason: string } => {
+      if (!doc || !data || !from || !to) return { ok: false, reason: "incomplete connection" };
+      if (from === to) return { ok: false, reason: "a node cannot feed itself" };
+
+      const kindOf = (id: string) => doc.graph.nodes.find((n) => n.id === id)?.kind;
+      const specOf = (id: string) => data.nodeRegistry.find((n) => n.kind === kindOf(id));
+      const source = specOf(from);
+      const target = specOf(to);
+      if (!source || !target) return { ok: false, reason: "unknown node" };
+
+      if (source.outputs.length === 0) {
+        return { ok: false, reason: `'${source.kind}' is a sink and produces nothing` };
+      }
+      if (!source.outputs.some((o) => target.inputs.includes(o))) {
+        return {
+          ok: false,
+          reason: `'${source.kind}' emits ${source.outputs.join("|")} which '${target.kind}' does not accept (${target.inputs.join("|")})`,
+        };
+      }
+      return { ok: true, reason: "" };
+    },
+    [doc, data],
+  );
+
   const { nodes, edges } = useMemo(() => {
     if (!doc) return { nodes: [] as Node[], edges: [] as Edge[] };
     const agentById = new Map(doc.agents.map((a) => [a.id, a]));
@@ -129,6 +166,10 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
           source: e.from,
           target: e.to,
           animated: true,
+          // Selectable so it can be removed with Backspace; the deletion is applied to the
+          // playbook in `onEdgesDelete` rather than only to the canvas, or the graph and
+          // the picture would disagree.
+          selectable: true,
         }),
       ),
     };
@@ -353,6 +394,42 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
               nodeTypes={nodeTypes}
               fitView
               proOptions={{ hideAttribution: true }}
+              // Rewiring, which the plan asks for and the canvas could not do. A
+              // connection is refused while it is being drawn rather than accepted and
+              // rejected at publish: the ports are typed, the browser already has the
+              // registry that types them, and letting somebody draw an invalid graph and
+              // learn about it two clicks later would satisfy the letter of the
+              // requirement and be worse than not having it.
+              isValidConnection={(c) => connectionAllowed(c.source, c.target).ok}
+              onConnect={(c) => {
+                const verdict = connectionAllowed(c.source, c.target);
+                if (!verdict.ok) {
+                  setIssues([{ code: "port-type", message: verdict.reason }]);
+                  return;
+                }
+                setIssues([]);
+                setDoc((prev) => {
+                  if (!prev || !c.source || !c.target) return prev;
+                  const next = structuredClone(prev);
+                  if (next.graph.edges.some((e) => e.from === c.source && e.to === c.target)) {
+                    return next;
+                  }
+                  next.graph.edges.push({ from: c.source, to: c.target });
+                  return next;
+                });
+              }}
+              onEdgesDelete={(removed) => {
+                setDoc((prev) => {
+                  if (!prev) return prev;
+                  const next = structuredClone(prev);
+                  for (const e of removed) {
+                    next.graph.edges = next.graph.edges.filter(
+                      (x) => !(x.from === e.source && x.to === e.target),
+                    );
+                  }
+                  return next;
+                });
+              }}
               onNodeClick={(_e, node) => {
                 const graphNode = doc.graph.nodes.find((n) => n.id === node.id);
                 setSelectedAgent(graphNode?.agentId ?? null);

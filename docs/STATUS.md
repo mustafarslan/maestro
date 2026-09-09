@@ -18,7 +18,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
-| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160) and **gate nodes with per-node failure policy** (162) | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
+| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160), **gate nodes with per-node failure policy** (162) and **rewiring with live port checking** (163) — every item the phase names | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
@@ -1967,9 +1967,26 @@ the server never sends fails it, and removing `live` from the server's response 
     Studio produces being one the engine can run. The gate's thresholds and the node's failure
     policy are editable.
 
-    Still not done from that line of the plan: rewiring edges on the canvas. The graph is
-    validated at save, so arbitrary rewiring needs the editor to reject an invalid connection as
-    it is drawn rather than after — real work, and recorded rather than half-built.
+163. **Rewiring, the last piece of that line of the plan.** I deferred it saying the editor
+    would have to reject an invalid connection as it is drawn, which needs the port rules in the
+    canvas — and then noticed the canvas already has them: `/api/playbook` sends `nodeRegistry`
+    with each node kind's `inputs` and `outputs`, and the UI was receiving it and using it for
+    nothing but labels. The rule itself is two lines: the ports a node produces must intersect
+    the ports the target accepts, a sink produces nothing, nothing joins itself.
+
+    So a connection is refused while it is being dragged, and an edge can be selected and
+    deleted, with the deletion applied to the playbook rather than only to the picture. The
+    alternative — accept any edge and let save-time validation object — would have satisfied the
+    line in the plan and been worse than not having it: an invalid graph drawn, and the reason
+    two clicks away.
+
+    The canvas's rule and `validateGraph` must not drift into disagreeing about what is legal,
+    so the rule is pinned in the validator's tests, and the code says which one wins if they
+    ever do: the validator, because it is what the engine runs on.
+
+    Worth noting how the deferral read a commit ago. "Real work, recorded rather than
+    half-built" was a reasonable-sounding sentence that turned out to rest on not having
+    checked what the browser already had.
 
 ### Found by mechanical sweep, still open
 
