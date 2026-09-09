@@ -160,20 +160,38 @@ export async function pollCommentReactions(
       commentId: number,
     ): Promise<{ content: string; login?: string }[]>;
   },
-  opts: { sinceMs?: number } = {},
+  opts: { sinceMs?: number; maxComments?: number } = {},
 ): Promise<{ comments: number; recorded: number }> {
   const since = new Date(Date.now() - (opts.sinceMs ?? 14 * 24 * 60 * 60_000)).toISOString();
+
+  // Bounded, and ordered so the newest comments are the ones that get the budget.
+  //
+  // This is one request per comment per sweep, every ten minutes, for ever. Unbounded that
+  // is 1200 requests an hour at 200 comments in the window and 6000 at a thousand — and
+  // GitHub allows 5000. The measurement would have starved the reviews it exists to
+  // measure, quietly, on exactly the busy repository where the numbers would matter most.
+  //
+  // Newest-first rather than round-robin: a reaction almost always arrives while the pull
+  // request is still being looked at, so the recent comments are where the signal is. An
+  // old comment falling out of the sweep loses a rare late reaction, which is a far
+  // cheaper failure than exhausting the rate limit.
   const rows = db
     .prepare(
       `SELECT DISTINCT f.posted_comment_id AS commentId, r.pr_number AS number,
-              repos.owner AS owner, repos.name AS repo
+              repos.owner AS owner, repos.name AS repo,
+              COALESCE(r.finished_at, r.created_at) AS at
          FROM findings f
          JOIN reviews r ON r.id = f.review_id
          JOIN repos ON repos.id = r.repo_id
         WHERE f.posted_comment_id IS NOT NULL
-          AND COALESCE(r.finished_at, r.created_at) >= ?`,
+          AND COALESCE(r.finished_at, r.created_at) >= ?
+        ORDER BY at DESC
+        LIMIT ?`,
     )
-    .all<{ commentId: string; number: number; owner: string; repo: string }>(since);
+    .all<{ commentId: string; number: number; owner: string; repo: string }>(
+      since,
+      opts.maxComments ?? 50,
+    );
 
   let recorded = 0;
   for (const row of rows) {

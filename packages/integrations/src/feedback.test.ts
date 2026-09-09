@@ -341,6 +341,71 @@ describe("reactions are polled, because no webhook delivers them", () => {
     await expect(pollCommentReactions(db, failing)).resolves.toMatchObject({ recorded: 0 });
   });
 
+  it("never makes more requests in one sweep than its cap", async () => {
+    // One request per comment per sweep, every ten minutes, for ever. Unbounded that is
+    // 1200 requests an hour at 200 comments and 6000 at a thousand — and GitHub allows
+    // 5000. The measurement would have starved the reviews it exists to measure, on
+    // exactly the busy repository where the numbers matter most.
+    for (let i = 0; i < 30; i++) seedFinding("security", 900 + i);
+    const c = client([{ content: "+1", login: "alice" }]);
+
+    const result = await pollCommentReactions(db, c, { maxComments: 5 });
+
+    expect(result.comments).toBe(5);
+    expect(c.calls).toBe(5);
+  });
+
+  it("spends its budget on the newest comments, where the reactions are", async () => {
+    // A reaction almost always arrives while the pull request is still being looked at.
+    // An old comment falling out of the sweep loses a rare late reaction; the alternative
+    // failure is exhausting the rate limit, which loses everything.
+    const old = seedFinding("security", 801);
+    db.prepare("UPDATE reviews SET finished_at=?").run(
+      new Date(Date.now() - 10 * 24 * 60 * 60_000).toISOString(),
+    );
+    const pv = db.prepare("SELECT id FROM playbook_versions LIMIT 1").get<{ id: string }>();
+    const recentReview = new ReviewStore(db).create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 99,
+      headSha: "recent",
+      playbookVersionId: pv?.id as string,
+    });
+    db.prepare(
+      `INSERT INTO findings (id, review_id, agent_id, category, severity, confidence, title,
+                             body, posted_comment_id, status, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      newId("fd"),
+      recentReview.id,
+      "security",
+      "c",
+      "high",
+      0.9,
+      "t",
+      "b",
+      "802",
+      "open",
+      new Date().toISOString(),
+    );
+    db.prepare("UPDATE reviews SET finished_at=? WHERE id=?").run(
+      new Date().toISOString(),
+      recentReview.id,
+    );
+
+    const asked: number[] = [];
+    const c = {
+      async listCommentReactions(_pr: unknown, id: number) {
+        asked.push(id);
+        return [];
+      },
+    };
+    await pollCommentReactions(db, c, { maxComments: 1 });
+
+    expect(asked).toEqual([802]);
+    expect(old).toBeTruthy();
+  });
+
   it("does not ask about comments from reviews older than the window", async () => {
     seedFinding("security", 706);
     db.prepare("UPDATE reviews SET created_at=?, finished_at=?").run(

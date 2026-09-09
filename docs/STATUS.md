@@ -1595,6 +1595,23 @@ before a release, and either would catch the other side changing under us.
     This is the part of 143 that was fixable without the redesign: the hole stays open, and the
     review stops overstating what it means.
 
+145. **The reaction poller I added would have exhausted GitHub's rate limit.** One request per
+    posted comment per sweep, every ten minutes, for ever, over a fourteen-day window and with no
+    cap. Twenty comments is 120 requests an hour; two hundred is 1200, a quarter of a token's
+    5000; a thousand is 6000, more than the whole allowance. The measurement would have starved
+    the reviews it exists to measure — on exactly the busy repository where the numbers matter
+    most, and gradually, so it would have looked like GitHub being slow rather than like this.
+
+    Capped at fifty per sweep — 300 an hour whatever the volume — and ordered newest-first rather
+    than round-robin, because a reaction almost always arrives while the pull request is still
+    being looked at. An old comment dropping out of the sweep loses a rare late reaction; the
+    alternative failure loses everything. Both properties are pinned: removing the cap fails two
+    tests, reversing the order fails one.
+
+    Mine, from earlier in this session, found by re-reading my own changes rather than the
+    codebase's. Worth noting what nearly hid it: it is correct at every scale I would have tested
+    it at, and wrong at the scale it would actually run at.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
