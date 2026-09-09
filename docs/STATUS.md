@@ -2383,6 +2383,23 @@ the server never sends fails it, and removing `live` from the server's response 
     without real containers: the moment the daemon held the interface instead of the
     class, the compiler said so.
 
+187. **A restart after a kill looked stuck for half an hour and said nothing.** The
+    recovery cutoff — thirty minutes, deliberately longer than the fifteen-minute job
+    lease — is correct: a review a live worker is still running must never be mistaken for
+    an orphan and have its containers destroyed underneath it. Its consequence is invisible
+    from outside. Kill the daemon mid-review, restart, and the board shows those reviews as
+    in flight for half an hour, their jobs stay locked for a quarter of one, and nothing
+    anywhere explains it. That reads as stuck, and the first thing anybody does about a
+    stuck queue is restart it again, which changes nothing.
+
+    Not a bug in the mechanism, so it is not fixed by changing the mechanism: the daemon
+    now says on startup what it found and what will happen to it, and
+    `docs/CONFIGURATION.md` has an "After a crash" section giving both numbers and why they
+    are what they are. Both halves are asserted — a recent in-flight review is left alone,
+    an old one is failed — because a daemon that recovered nothing would satisfy the first
+    on its own, and an orphan protected for ever is a container that can never be
+    collected.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

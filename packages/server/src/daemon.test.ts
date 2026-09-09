@@ -591,3 +591,69 @@ describe("the reaper sweeps on startup", () => {
     expect(calls[0]?.protectReviewIds).toContain(reviewId);
   }, 15_000);
 });
+
+describe("what a restart says about reviews it did not start", () => {
+  /**
+   * The 30-minute cutoff is deliberate: it exceeds the job lease, so a review a live
+   * worker is still running can never be mistaken for an orphan and have its containers
+   * destroyed underneath it. Its consequence is not obvious from outside — after a kill
+   * and an immediate restart the board shows those reviews as in flight and nothing says
+   * why, which reads as stuck.
+   */
+  let db: SqlDatabase;
+  let version: string;
+  let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    version = new PlaybookStore(db).publish(defaultPlaybook(), { activate: true }).id;
+  });
+  afterEach(async () => {
+    await running?.stop();
+    running = undefined;
+  });
+
+  it("leaves a recent in-flight review alone rather than failing it", async () => {
+    const reviews = new ReviewStore(db);
+    const id = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 2,
+      headSha: "c".repeat(40),
+      playbookVersionId: version,
+    }).id;
+    reviews.setState(id, "analyzing");
+
+    running = await startDaemon({ db, concurrentReviews: 0 });
+    // Still analyzing: another worker may hold it, and destroying a live review's
+    // containers is the failure this cutoff exists to prevent.
+    expect(
+      db.prepare("SELECT state FROM reviews WHERE id=?").get<{ state: string }>(id)?.state,
+    ).toBe("analyzing");
+  }, 15_000);
+
+  it("fails one that is older than the cutoff", async () => {
+    // The other half: a daemon that never recovered anything would pass the test above,
+    // and an orphan protected for ever is a container that can never be collected.
+    const reviews = new ReviewStore(db);
+    const id = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 3,
+      headSha: "d".repeat(40),
+      playbookVersionId: version,
+    }).id;
+    reviews.setState(id, "analyzing");
+    const longAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+    db.prepare("UPDATE reviews SET created_at=?, started_at=? WHERE id=?").run(
+      longAgo,
+      longAgo,
+      id,
+    );
+
+    running = await startDaemon({ db, concurrentReviews: 0 });
+    expect(
+      db.prepare("SELECT state FROM reviews WHERE id=?").get<{ state: string }>(id)?.state,
+    ).toBe("failed");
+  }, 15_000);
+});

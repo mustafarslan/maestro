@@ -234,6 +234,24 @@ maestro reap      # remove stray containers and snapshot images — usually enou
 maestro prune     # delete the step-by-step trace of old reviews
 ```
 
+## After a crash
+
+Killing the daemon mid-review and restarting is safe, but not instant, and the delay is
+deliberate.
+
+A worker's claim on a job is a **15-minute lease**, and a review is treated as abandoned only
+after **30 minutes** — longer than the lease, so a review a live worker is still running can
+never be mistaken for an orphan and have its containers destroyed underneath it. The cost is
+that after a kill and an immediate restart:
+
+- the board shows those reviews as in flight for up to 30 minutes;
+- their queued work is re-claimed after 15;
+- nothing is lost, and restarting again does not shorten either number.
+
+The daemon says so on startup when it finds reviews in that state, so an apparently stuck
+queue is distinguishable from a genuinely stuck one. Containers left by the killed process
+are swept by the startup reap unless they belong to a review still inside that window.
+
 ## Sandbox networking
 
 > **The prepare-phase allowlist is advisory.** The container is pointed at the proxy with

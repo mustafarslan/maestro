@@ -152,6 +152,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const recovered = recoverStaleReviews(db, LEASE_MS * 2);
   if (recovered) logger.warn({ recovered }, "failed reviews left behind by a previous process");
 
+  // Reviews too young to be recovered yet.
+  //
+  // The cutoff is deliberately conservative — see above — but its consequence is not
+  // obvious from outside: after a kill and an immediate restart the board shows those
+  // reviews as in flight for up to half an hour, their jobs stay locked for a quarter of
+  // one, and nothing anywhere says why. That reads as stuck, and the first thing somebody
+  // does about a stuck queue is restart it again, which changes nothing.
+  //
+  // Saying it costs nothing and cannot mistake a live review for an orphan, which is the
+  // one thing the cutoff exists to prevent.
+  const held = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM reviews WHERE state IN (${IN_FLIGHT_STATES.map(() => "?").join(",")})`,
+    )
+    .get<{ n: number }>(...IN_FLIGHT_STATES)?.n;
+  if (held) {
+    logger.warn(
+      { inFlight: held, recoverableAfterMs: LEASE_MS * 2 },
+      "reviews are still marked in flight. If no worker is running them they were left by " +
+        "a previous process, and are held by their lease rather than stuck: the queue " +
+        "re-claims them after 15 minutes and they are marked failed after 30. Restarting " +
+        "again does not shorten that.",
+    );
+  }
+
   const inFlight = new Map<string, AbortController>();
   let stopping = false;
 
