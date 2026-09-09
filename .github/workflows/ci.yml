@@ -53,9 +53,9 @@ jobs:
       # a parse error naming nothing. That only exists once the server is a subprocess
       # with stdout as a pipe, which no unit test reproduces.
       - name: MCP protocol, against the compiled binary
-        run: |
-          MAESTRO_HOME=$(mktemp -d) ./dist/maestro init >/dev/null
-          node scripts/mcp-protocol-check.mjs ./dist/maestro
+        # The script provisions and cleans up its own MAESTRO_HOME: it used to inherit
+        # whatever the caller had, which made the result depend on ambient state.
+        run: node scripts/mcp-protocol-check.mjs ./dist/maestro
 
       - name: Smoke-test the compiled binary
         run: |

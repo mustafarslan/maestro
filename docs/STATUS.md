@@ -1819,6 +1819,24 @@ to answer.
     This is the class 154 named, applied to the product rather than to a script: a check that
     proves something exists where what matters is whether it works.
 
+156. **I pushed a commit whose gate had failed, and the failure was in my own check.** The MCP
+    round trip added in 154 inherited whatever `MAESTRO_HOME` the caller had. It passed every
+    time I ran it, because my shell pointed at a home I had just initialised; it failed inside
+    the clean-checkout gate, because the gate runs against the real `~/.maestro`, which has
+    migrations and no active playbook — so `get_playbook` answered nothing and the assertions
+    reported `undefined`.
+
+    A verification script that needs the world arranged beforehand verifies the arrangement as
+    much as the code. It creates and removes its own temporary `MAESTRO_HOME` now, and passes
+    with the variable unset; CI's separate `mktemp` step is gone, since the script no longer
+    needs help.
+
+    The worse half is the process failure. I ran the gate, grepped its output for a summary
+    line, saw the commit go through, and pushed — without checking the exit code. The gate had
+    printed two FAILs. That is the same defect as the `| tail -1` swallowing an exit status
+    earlier in this session, committed by hand rather than by a script, an hour after fixing it.
+    Verified the other way now: a deliberately failing MCP check exits the gate 1.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
