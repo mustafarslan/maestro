@@ -1851,6 +1851,28 @@ to answer.
     surrounding output will eventually be inferred wrongly. Say the verdict, in the tool's own
     words, or the reader supplies one.
 
+### The UI/server contract, now checked
+
+The admin UI declares the shape of every response it consumes, by hand, in
+`packages/ui/src/api.ts`. Twelve interfaces, and nothing had ever compared them with what the
+server sends.
+
+The drift is not hypothetical. `PlaybookDoc` was missing `automaticTriggers` and `thinkingBudget`
+for as long as both existed — found twice in this session, by hand, while doing something else —
+and the `live` field added to the environments response had to be copied across by hand too. A
+field the UI expects and the server omits is `undefined` at render time: a blank column, or a
+throw inside a `.map`, with nothing failing anywhere beforehand. TypeScript cannot see across an
+HTTP boundary, so it says nothing.
+
+`ui-contract.test.ts` seeds a finished review with a finding, a task, a span and an environment,
+starts the real admin server, calls every endpoint the UI calls, and checks each declared
+required field is present in what comes back. Optional fields are skipped, since absent is what
+optional means, and extra server fields are fine — the UI ignores them. The dangerous direction
+is the only one asserted.
+
+Verified in both directions rather than assumed: adding a field to the UI's `EnvironmentRow` that
+the server never sends fails it, and removing `live` from the server's response fails it too.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
