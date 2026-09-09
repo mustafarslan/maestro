@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { connect } from "node:net";
+import { createServer, type Server } from "node:http";
+import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobQueue, newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
@@ -472,5 +473,52 @@ describe("backpressure when the disk is full", () => {
     // retry, so `state` is 'queued' again by now — which is why this asserts on
     // `attempts` rather than on the state, and why the pause test does too.
     expect(attempts()).toBeGreaterThan(0);
+  }, 15_000);
+});
+
+describe("a daemon that cannot bind its webhook port", () => {
+  let db: SqlDatabase;
+  let holder: Server;
+  let port: number;
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    new PlaybookStore(db).publish(defaultPlaybook(), { activate: true });
+    holder = createServer();
+    await new Promise<void>((r) => holder.listen(0, "0.0.0.0", r));
+    port = (holder.address() as AddressInfo).port;
+  });
+  afterEach(async () => {
+    await new Promise((r) => holder.close(r));
+  });
+
+  it("says so in a sentence", async () => {
+    await expect(
+      startDaemon({ db, webhookPort: port, webhookSecret: "s3cret", concurrentReviews: 0 }),
+    ).rejects.toThrow(/webhook listener cannot bind.*already listening/s);
+  }, 15_000);
+
+  it("does not leave its admin server bound", async () => {
+    // The admin server binds and the workers start before the webhook listener does, so
+    // throwing straight out left both running. Invisible from the CLI, which exits;
+    // in-process the next start finds its own admin port taken.
+    const admin = 7891;
+    await expect(
+      startDaemon({
+        db,
+        adminPort: admin,
+        webhookPort: port,
+        webhookSecret: "s3cret",
+        concurrentReviews: 0,
+      }),
+    ).rejects.toThrow();
+
+    // Binding it now proves nothing else holds it.
+    const probe = createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(admin, "127.0.0.1", resolve);
+    });
+    await new Promise((r) => probe.close(r));
   }, 15_000);
 });

@@ -34,6 +34,7 @@ import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { type RunningAdmin, startAdminServer } from "./admin.js";
 import { collectBody } from "./api.js";
+import { listen } from "./listen.js";
 import { DEFAULT_LIMITS, Scheduler, type SchedulerLimits } from "./scheduler.js";
 
 /**
@@ -502,7 +503,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         res.writeHead(400).end("bad payload");
       }
     });
-    await new Promise<void>((r) => webhookServer?.listen(opts.webhookPort, "0.0.0.0", r));
+    try {
+      await listen(webhookServer, opts.webhookPort, "0.0.0.0", "webhook listener");
+    } catch (err) {
+      // The admin server is already bound and the workers are already looping by this
+      // point, so throwing straight out leaves both running. The process exits when this
+      // is the CLI, which is why it was invisible; in-process — the tests, and anything
+      // embedding the daemon — the next start finds its own admin port taken.
+      stopping = true;
+      await admin?.close();
+      await Promise.allSettled(workers);
+      throw err;
+    }
     webhookPort = (webhookServer.address() as AddressInfo).port;
   }
 

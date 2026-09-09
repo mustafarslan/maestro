@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import type { SqlDatabase } from "@maestro/core";
 import { logger } from "@maestro/core";
 import { authorize, handleApi } from "./api.js";
+import { listen } from "./listen.js";
 import { UI_ASSETS } from "./ui-assets.generated.js";
 
 export interface AdminServerOptions {
@@ -115,7 +116,7 @@ export async function startAdminServer(opts: AdminServerOptions): Promise<Runnin
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(opts.port, host, resolve));
+  await listen(server, opts.port, host, "admin server");
   const port = (server.address() as AddressInfo).port;
   logger.info({ host, port }, "admin server listening");
 

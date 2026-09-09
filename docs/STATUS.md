@@ -2289,6 +2289,31 @@ the server never sends fails it, and removing `live` from the server's response 
     own repository now. A test that passes for a reason unrelated to what it asserts is
     the thing this project keeps finding, and it is no different when I write it.
 
+180. **The likeliest operational failure a daemon has printed a Bun stack trace.** Starting
+    a second `maestro serve` on a port already in use produced nine lines of
+    `node:_http_server` source, a `$bunfs/root/maestro` frame, and `EADDRINUSE` somewhere
+    in the middle. Every other error this CLI produces is a sentence.
+
+    The cause is that `server.listen(port, host, callback)` reports success through the
+    callback and failure through an `error` **event**. Both listeners wrapped only the
+    callback in a promise, so with no listener on that event Node terminated the process —
+    which is also why `main().catch(…)` never ran and could not have. The promise never
+    settled; there was nothing to catch.
+
+    A port already in use is not an exotic case: a restart before the old process released
+    it, or two instances by accident. `EACCES` and `EADDRNOTAVAIL` get their own sentences
+    too, since a privileged port and a bad `--admin-host` are the other two ways this
+    happens.
+
+181. **And it left the admin server bound behind it.** The admin listener and the worker
+    loops both start before the webhook listener does, so a webhook bind failure threw
+    straight out with both still running. Invisible from the CLI, because the process
+    exits — but in-process, which is what the tests and anything embedding the daemon are,
+    the next start finds its own admin port taken by the daemon that failed. The failure
+    path now stops the workers and closes the admin server before rethrowing.
+
+    Found only because fixing 180 meant looking at what happens after the throw.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
