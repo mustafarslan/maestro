@@ -149,3 +149,78 @@ describe("conformance suite", () => {
     expect(report.checks.find((c) => c.name === "tool call")?.passed).toBe(false);
   });
 });
+
+describe("extended thinking", () => {
+  /** Captures the request body the adapter actually puts on the wire. */
+  function capturing() {
+    let body: Record<string, unknown> | undefined;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          id: "msg_1",
+          type: "message",
+          role: "assistant",
+          model: "m",
+          content: [{ type: "text", text: "ok" }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    return { get: () => body, fetchImpl };
+  }
+
+  it("sends adaptive thinking to a model that rejects an explicit budget", async () => {
+    // budget_tokens is rejected with a 400 on Opus 5 — which the shipped default playbook
+    // binds three agents to. Sending the older shape would have failed every call the
+    // moment anyone set the field in the Studio.
+    const cap = capturing();
+    const provider = new Provider({
+      id: "anthropic",
+      kind: "anthropic",
+      apiKey: "sk-test",
+      fetch: cap.fetchImpl,
+    });
+    await provider.chat({
+      model: "claude-opus-5",
+      messages: [{ role: "user", content: "hi" }],
+      thinkingBudget: 4096,
+    });
+
+    expect(cap.get()?.thinking).toEqual({ type: "adaptive" });
+    expect(JSON.stringify(cap.get())).not.toContain("budget_tokens");
+  });
+
+  it("still sends an explicit budget to a model that requires one", async () => {
+    const cap = capturing();
+    const provider = new Provider({
+      id: "anthropic",
+      kind: "anthropic",
+      apiKey: "sk-test",
+      fetch: cap.fetchImpl,
+    });
+    await provider.chat({
+      model: "claude-haiku-4-5-20251001",
+      messages: [{ role: "user", content: "hi" }],
+      thinkingBudget: 4096,
+    });
+
+    expect(cap.get()?.thinking).toMatchObject({ type: "enabled", budget_tokens: 4096 });
+  });
+
+  it("sends nothing at all when no budget is configured", async () => {
+    // The overwhelming majority of calls; a stray thinking block would change behaviour
+    // and cost for every one of them.
+    const cap = capturing();
+    const provider = new Provider({
+      id: "anthropic",
+      kind: "anthropic",
+      apiKey: "sk-test",
+      fetch: cap.fetchImpl,
+    });
+    await provider.chat({ model: "claude-opus-5", messages: [{ role: "user", content: "hi" }] });
+    expect(cap.get()?.thinking).toBeUndefined();
+  });
+});

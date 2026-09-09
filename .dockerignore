@@ -1,0 +1,23 @@
+# The build runs `pnpm install` itself; copying the host's tree in first makes pnpm try
+# to remove a directory it did not create, which fails outright in a non-TTY build.
+node_modules
+**/node_modules
+
+# Build output is regenerated inside the image. Copying it in wastes layers and risks
+# shipping a binary built for the host's architecture.
+dist
+**/dist
+
+# Both patterns matter, and the second is the one that bites. A root-only
+# `*.tsbuildinfo` leaves the per-package ones in place, and tsc then reports every
+# project "up to date" against outputs that .dockerignore just excluded — so it skips
+# the build entirely and nothing resolves. An incremental build is only safe when its
+# state and its outputs travel together.
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+.git
+.github
+docs
+*.md
+!README.md

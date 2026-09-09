@@ -20,6 +20,10 @@ the README so the claims in that file stay short and true.
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
+| **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
+| **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
+| **Container deployment** | The image builds and runs: migrations apply, both listeners bind, the admin API returns 200 with a token and 401 without, the UI serves, and the webhook port rejects an unsigned body |
+| **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
 | **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
 | **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
@@ -56,14 +60,14 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
   Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
   admin UI on its first run.
-- **The webhook path has not received a real delivery.** Signature verification and event
-  interpretation are unit-tested; no GitHub App has been created.
-- **The Compose deployment is unverified and labelled experimental in the file itself.** Sandboxes
-  are siblings on the host daemon, so they reach the egress proxy only if its port is both fixed
-  and published; that is now wired (`MAESTRO_PROXY_PORT_RANGE`, published on the bridge gateway) and
-  unit-tested, but running it needs a Linux host with the socket mounted and that has not happened.
-- **Release CI has not run.** `.github/workflows/release.yml` cross-compiles four targets; only the
-  host target has actually been built.
+- **No GitHub App exists.** Webhook deliveries were verified by signing real payloads with the
+  configured secret and posting them to the running daemon, which is the same code path GitHub
+  exercises; what has not been done is registering an App so GitHub itself sends them.
+- **One part of Compose remains unverified: the sandbox-to-proxy route.** The image now builds and
+  runs, both listeners work, and the compose file resolves with the proxy range published on the
+  bridge gateway only. What has *not* been exercised is a sibling sandbox container dialling
+  `172.17.0.1:7790` — that needs a Linux host, because Docker Desktop has no such gateway. The file
+  stays labelled experimental for that reason alone.
 - **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
   across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
   found a fairness bug; it does not start 40 real containers.
@@ -232,6 +236,24 @@ These are recorded because each was invisible to the test suite that existed at 
     bare `exit=1` — the shape of a genuine failure. That is the most expensive false positive:
     confident, specific and entirely an artefact of our own posture. Such failures are now
     labelled in the tool result.
+
+36. **The Docker image had never been built, and could not be.** Three faults in one file:
+    `COPY . .` pulled in the host's `node_modules`, which pnpm then refuses to remove without a
+    TTY; the base image ships Node 20 while the workspace requires 22.14; and a global
+    `npm install -g pnpm@10` fought `packageManager`, the same conflict that kept CI red. There
+    was no `.dockerignore` at all.
+37. **A root-only `*.tsbuildinfo` ignore made the build silently skip itself.** With `dist`
+    excluded but per-package `tsconfig.tsbuildinfo` copied in from the host, `tsc -b` reported
+    every project "up to date" against outputs that had just been excluded — so it built nothing
+    and every import failed to resolve. An incremental build is only safe when its state and its
+    outputs travel together; the fix is `**/*.tsbuildinfo`, not `*.tsbuildinfo`.
+38. **`thinkingBudget` was dead config with a live hazard.** It has been in the playbook schema and
+    the Studio's model picker from the start and was never read by the provider. Worse than inert:
+    the obvious implementation sends `budget_tokens`, which current Anthropic models *reject with a
+    400* — including `claude-opus-5`, which the shipped default playbook binds three agents to. So
+    the first person to set that field would have broken every call. Now sent as
+    `{type:"adaptive"}` for those models and `budget_tokens` only for models that still require it,
+    asserted against the actual request body.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

@@ -53,6 +53,34 @@ export class Provider {
     return staticCapabilities(this.kind, model);
   }
 
+  /**
+   * Extended thinking, in the shape the target model actually accepts.
+   *
+   * `thinkingBudget` has been in the playbook schema and the Studio's model picker since
+   * the beginning and was never read here — a knob that silently did nothing, like the
+   * scheduler and the prompt budget before it.
+   *
+   * The shape is not one shape. Claude 4.6 and newer take `{ type: "adaptive" }` and
+   * REJECT an explicit token budget with a 400; older models require
+   * `{ type: "enabled", budgetTokens: N }`. Sending the older form to `claude-opus-5` —
+   * which the shipped default playbook binds three agents to — would have failed every
+   * call outright the moment anyone set the field.
+   */
+  private thinkingOptions(req: ChatRequest): Parameters<typeof generateText>[0]["providerOptions"] {
+    if (!req.thinkingBudget || !this.capabilities(req.model).thinking) return undefined;
+
+    if (this.kind === "anthropic") {
+      return {
+        anthropic: acceptsThinkingBudget(req.model)
+          ? { thinking: { type: "enabled", budgetTokens: req.thinkingBudget } }
+          : { thinking: { type: "adaptive" } },
+      };
+    }
+    // Other providers express reasoning effort differently; left alone rather than
+    // guessed at, because a wrong provider option is a 400 on every call.
+    return undefined;
+  }
+
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const started = Date.now();
     try {
@@ -64,6 +92,7 @@ export class Provider {
         temperature: req.temperature,
         maxOutputTokens: req.maxTokens,
         abortSignal: req.signal,
+        providerOptions: this.thinkingOptions(req),
         // Maestro's loop owns retries. Leaving the SDK's layer on as well would give
         // 3x3 attempts with compounding backoff, invisible to the budget check.
         maxRetries: 0,
@@ -278,4 +307,25 @@ function normaliseUsage(usage: SdkUsage): Usage {
     cacheReadTokens: cacheRead,
     cacheWriteTokens: cacheWrite,
   };
+}
+
+/**
+ * Whether a model still takes an explicit thinking token budget.
+ *
+ * Claude 4.6 and later moved to adaptive thinking and reject `budget_tokens` with a 400.
+ * Everything older still requires it. Defaulting to "adaptive" for unrecognised names is
+ * the safer side of the line: a newer model is the likelier unknown, and adaptive is what
+ * newer models want.
+ */
+function acceptsThinkingBudget(model: string): boolean {
+  const legacy = [
+    "claude-3-5",
+    "claude-3-7",
+    "claude-opus-4-0",
+    "claude-opus-4-1",
+    "claude-sonnet-4-0",
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5",
+  ];
+  return legacy.some((prefix) => model.startsWith(prefix));
 }
