@@ -22,11 +22,11 @@ as an automatic trigger.
   There is no setting that says "only review when asked". This is the substance of the
   request and needs a home — most naturally a per-repo field on `repos`, editable from the
   Studio, with the global default in the playbook.
-- **Who may trigger one.** A comment is anyone's to write on a public repository, and a
-  review spawns containers and spends money on model calls. Manual triggering needs an
-  authorisation rule — repository write access is the obvious one, from the webhook
-  payload's `author_association`, and it should be checked before the job is enqueued
-  rather than after.
+- ~~**Who may trigger one.**~~ **Done.** A comment trigger is refused unless the delivery's
+  `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` — the repository's own statement
+  about the commenter, checked before the job is enqueued. Everyone else can still comment; they
+  just cannot spend. Automatic triggers are unaffected, since those come from the pull request's
+  lifecycle rather than from someone asking.
 - **Acknowledging the request.** `@claude` reacts to the comment so the author knows it was
   heard. Maestro currently answers a comment trigger with nothing until the review posts,
   which for a several-minute review looks like it was ignored.

@@ -686,7 +686,16 @@ These are recorded because each was invisible to the test suite that existed at 
     class as every honesty defect in this document — the output implying more than was done.
     A partial review now says so above the fold and names the agents that did not complete.
 
-Findings 75-86 were reported by **Maestro reviewing this session's own commits** — the first two
+87. **Anyone who could comment could spend money.** `@maestro review` started a review for any
+    commenter, and on a public repository a comment is anyone's to write — so a passer-by could
+    start containers and bill model calls, repeatedly. The delivery carries GitHub's own
+    statement about the commenter, `author_association`, which is the one signal here that is not
+    written by the person being judged. Only `OWNER`, `MEMBER` and `COLLABORATOR` may ask now,
+    checked before the job is enqueued; an unrecognised or absent association is refused rather
+    than treated as authorised. Automatic triggers are unaffected, since those come from the pull
+    request's lifecycle. Recorded as an open decision in TODO.md this morning and closed here.
+
+Findings 75-87 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.

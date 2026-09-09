@@ -62,7 +62,13 @@ describe("event interpretation", () => {
       action: "created",
       repository,
       issue: { number: 12 },
-      comment: { body: "please take another look\n/maestro review" },
+      // The association matters now: a comment is anyone's to write, and a review costs
+      // money. This test is about the command being recognised, so it comes from someone
+      // allowed to ask.
+      comment: {
+        body: "please take another look\n/maestro review",
+        author_association: "COLLABORATOR",
+      },
     });
     expect(t).toMatchObject({ kind: "review", pr: { number: 12 } });
   });
@@ -119,12 +125,12 @@ describe("poll mode", () => {
 });
 
 describe("triggering a review from a comment", () => {
-  const comment = (bodyText: string) =>
+  const comment = (bodyText: string, association = "MEMBER") =>
     interpretEvent("issue_comment", {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
       issue: { number: 41 },
-      comment: { body: bodyText },
+      comment: { body: bodyText, author_association: association },
     });
 
   it("accepts the mention form, which is what @claude taught people to expect", () => {
@@ -187,5 +193,56 @@ describe("pull requests that stop being worth reviewing", () => {
     for (const action of ["opened", "reopened", "ready_for_review", "synchronize"]) {
       expect(prEvent(action).kind, `${action} should trigger a review`).toBe("review");
     }
+  });
+});
+
+describe("who may spend money asking for a review", () => {
+  const from = (association: string) =>
+    interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      issue: { number: 41 },
+      comment: { body: "@maestro review", author_association: association },
+    });
+
+  it("accepts people with write access to the repository", () => {
+    for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+      expect(from(association).kind, association).toBe("review");
+    }
+  });
+
+  it("refuses everyone else, because a review costs money", () => {
+    // A comment is anyone's to write on a public repository, and a review starts
+    // containers and bills model calls. Without this, any passer-by could run up a bill
+    // by commenting, repeatedly.
+    for (const association of ["CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "NONE", "MANNEQUIN"]) {
+      expect(from(association).kind, association).toBe("ignore");
+    }
+  });
+
+  it("refuses a comment with no association at all", () => {
+    // A payload shape we do not recognise must not be treated as authorised.
+    const t = interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      issue: { number: 41 },
+      comment: { body: "@maestro review" },
+    });
+    expect(t.kind).toBe("ignore");
+  });
+
+  it("says why, so the refusal is diagnosable", () => {
+    const t = from("NONE");
+    expect(t.reason).toContain("NONE");
+  });
+
+  it("does not gate the automatic triggers", () => {
+    // Those come from the pull request's own lifecycle, not from someone commenting.
+    const t = interpretEvent("pull_request", {
+      action: "opened",
+      repository: { name: "web", owner: { login: "acme" } },
+      pull_request: { number: 7, head: { sha: "a".repeat(40) } },
+    });
+    expect(t.kind).toBe("review");
   });
 });

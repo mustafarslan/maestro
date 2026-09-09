@@ -38,6 +38,10 @@ A GitHub App is preferred; a PAT works for a single user.
 | `GITHUB_TOKEN` | PAT, used when no App is configured |
 | `GITHUB_WEBHOOK_SECRET` | Required by `serve --webhook-port`; deliveries without a valid HMAC are refused |
 
+A comment can ask for a review — `@maestro review` — but only from someone the repository
+reports as `OWNER`, `MEMBER` or `COLLABORATOR`. A review starts containers and bills model
+calls, and on a public repository a comment is anyone's to write.
+
 Agents never see any of these. They run offline in a container with no credentials, and the
 orchestrator is the only writer.
 

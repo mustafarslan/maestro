@@ -10,6 +10,19 @@ import type { PullRequestRef } from "./github.js";
  * attacker asking us to review a repository of their choosing.
  */
 
+/**
+ * Who may spend money by asking for a review.
+ *
+ * GitHub's `author_association` on the delivery, which is the repository's own statement
+ * about the commenter and not something the commenter writes. OWNER, MEMBER and
+ * COLLABORATOR have write access; everyone else — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR,
+ * NONE — can comment on a public repository without being able to merge anything, and a
+ * review they trigger starts containers and bills model calls.
+ *
+ * Automatic triggers are unaffected: those come from the pull request's own lifecycle.
+ */
+const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
 export type ReviewTrigger =
   | { kind: "review"; pr: PullRequestRef; headSha: string; reason: string }
   | { kind: "cancel"; pr: PullRequestRef; staleSha: string; reason: string }
@@ -95,6 +108,20 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
     if (/^\s*[/@]maestro\s+review\b/im.test(text)) {
       const number = (payload as { issue?: { number?: number } }).issue?.number;
       if (!number) return { kind: "ignore", reason: "comment is not on a pull request" };
+
+      // A comment is anyone's to write on a public repository, and a review starts
+      // containers and spends money on model calls. GitHub states the commenter's
+      // relationship to the repository on the delivery itself, which is the only
+      // trustworthy signal available here — the comment body certainly is not.
+      const association = (payload as { comment?: { author_association?: string } }).comment
+        ?.author_association;
+      if (!TRUSTED_ASSOCIATIONS.has(association ?? "")) {
+        return {
+          kind: "ignore",
+          reason: `review requested by ${association ?? "an unknown"} association, which cannot spend`,
+        };
+      }
+
       return {
         kind: "review",
         pr: { owner, repo, number },
