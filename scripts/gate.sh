@@ -12,11 +12,26 @@ rm -rf "$DST"; mkdir -p "$DST"
 cd "$SRC"
 git ls-files -z | tar --null -cf - -T - | (cd "$DST" && tar xf -)
 # Overlay uncommitted changes; deletions too.
-git status --porcelain -z | while IFS= read -r -d '' entry; do
+#
+# `-uall` because the default collapses a wholly-new directory to one entry ending in
+# `/`. Without it, a new file in a new directory never reached the checkout — and the
+# `[ -f ] && { … }` idiom this loop used then returned 1 as the last command of the loop
+# body, which under `set -e` killed the gate before it printed a single line. A gate that
+# dies with no output is indistinguishable from one that fails a check, and the fix for
+# only that half would have been worse: the gate would have passed while testing a tree
+# missing the new file.
+#
+# `if` rather than `&&` so a skipped entry is a skip, not a non-zero exit.
+git status --porcelain -z -uall | while IFS= read -r -d '' entry; do
   st="${entry:0:2}"; f="${entry:3}"
   case "$st" in
     *D*) rm -f "$DST/$f" ;;
-    *)   [ -f "$f" ] && { mkdir -p "$DST/$(dirname "$f")"; cp "$f" "$DST/$f"; } ;;
+    *)
+      if [ -f "$f" ]; then
+        mkdir -p "$DST/$(dirname "$f")"
+        cp "$f" "$DST/$f"
+      fi
+      ;;
   esac
 done
 cd "$DST"

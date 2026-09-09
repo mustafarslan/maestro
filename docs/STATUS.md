@@ -55,6 +55,7 @@ None is a missing implementation; each is a claim only the real thing can settle
 | Per-agent isolation | Two agents ran concurrently in separate containers off one shared snapshot image |
 | Dependency cache | Second run of the same lockfile skipped install entirely: no setup commands, no egress |
 | Real review quality | Reviewed a real PR and reported two genuine defects, both confirmed by hand against the source (see below) |
+| Inline comment anchors | `commentableAnchors` run against a real pull request's diff from `pulls.listFiles`: three hunks, every right-side hunk start present, 81 anchors agreeing exactly with an independently written second walk of the same patch. The patch is kept as a fixture so the parser stays checked against GitHub's own output rather than only against shapes invented alongside it |
 | GitHub integration | PR fetch, fork detection and downgrade, checkout, dry-run review, idempotency refusing a duplicate SHA. The base-branch config read is wired and unit-tested as of finding 68, but has not been exercised against a real repository carrying a `.maestro.yaml` |
 | MCP server | Real MCP client handshake: 10 tools, resources, and `set_agent_model` publishing a new playbook version |
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
@@ -2423,6 +2424,30 @@ the server never sends fails it, and removing `live` from the server's response 
     Docker before and after: a running container of a dead review is now reported and
     reaped; a running container of a live review is still reported as in flight and left
     alone.
+
+189. **The gate ran a different tree than the one about to be committed.** Adding a file in
+    a NEW directory — the first fixture directory this project has had — made the gate die
+    before printing a single line.
+
+    Two faults, and the dangerous one is not the one that showed. `git status --porcelain`
+    collapses a wholly-new directory to one entry ending in `/`, so the overlay loop's
+    `[ -f "$f" ]` was false and the file never reached the checkout. That alone would have
+    been silent: the gate would have passed, having compiled and tested a tree missing the
+    new code. What made it loud was the second fault — `[ -f "$f" ] && { … }` was the last
+    command in the loop body, so a false test returned 1 from the loop, and `set -e` killed
+    the script with no output at all.
+
+    A gate that dies silently is indistinguishable from a gate that fails a check, which is
+    how twenty minutes went into looking for a broken test that did not exist. And fixing
+    only that half — the obvious half — would have been strictly worse than leaving it
+    broken: it would have converted a loud stop into a green gate over an untested tree.
+
+    Measured both ways. With `-uall` the checkout has the fixture and runs 793 tests; with
+    the `if` fix but without `-uall` it runs **785** and never sees the file. Eight tests
+    quietly absent is what "the gate passed" would have meant.
+
+    This is the script every commit in this project has gone through, and it is the third
+    time it has been the thing at fault rather than the thing that found one.
 
 ### Found by mechanical sweep, still open
 
