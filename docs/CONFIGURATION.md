@@ -243,3 +243,14 @@ GITHUB_TOKEN=$(gh auth token) node scripts/live-github-check.mjs owner/repo#1
 
 The GitHub one takes `--write` to also exercise posting, finding and updating a comment; it
 deletes what it creates, including when a step fails.
+
+Before cutting a release:
+
+```
+GITHUB_TOKEN=$(gh auth token) node scripts/release-assets-check.mjs
+```
+
+Downloads every published asset and reads its executable header, so a dropped or ignored
+`--target` in the build matrix — which would still produce four uploads, all built for
+whichever runner finished last — is caught here rather than by three quarters of users
+being told their platform is unsupported.

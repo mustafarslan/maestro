@@ -22,7 +22,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
-| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact, happy path and failure paths, which found 130; Compose runs locally; **no multi-platform release has been downloaded and run** |
+| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
 
 What that leaves, in order of how much it would tell us:
 
@@ -126,6 +126,16 @@ insecure neighbour, so it was not pattern-matching on "API route".
   no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised.
   Webhook deliveries were verified by signing real payloads with the configured secret and posting
   them to the running daemon, which is the same code path GitHub exercises.
+- ~~**No multi-platform release has been downloaded and run.**~~ **Done.** All four assets of
+  v0.1.0 were downloaded from GitHub and identified by executable header —
+  `darwin-arm64` Mach-O arm64, `darwin-x64` Mach-O x86_64, `linux-x64` ELF x86-64,
+  `linux-arm64` ELF aarch64 — so `bun build --target` really did produce four different
+  binaries rather than four copies of whichever runner finished last. The darwin-arm64 one was
+  installed by `install.sh` through its private-release path (the elaborate grep-and-sed asset
+  resolution, which had never run) and executed: `0.1.0`. `scripts/release-assets-check.mjs`
+  keeps it checkable before each release. The three foreign-architecture binaries are verified
+  as correct artifacts, not as working programs; that needs those machines.
+
 - **No full model review has been driven through Compose.** Everything up to that point is
   verified against a running deployment, including the sandbox-network path the egress proxy
   depends on. What has not run is a review that actually calls a model, which needs credentials.
