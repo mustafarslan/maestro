@@ -131,24 +131,34 @@ export async function doctor(): Promise<number> {
         },
   );
 
-  // Disk is where a leaking reaper actually hurts: snapshot image layers fill a disk
-  // long before stray containers become visible in `docker ps`.
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const run = promisify(execFile);
-    const { stdout } = await run("docker", [
-      "system",
-      "df",
-      "--format",
-      "{{.Type}} {{.Size}} {{.Reclaimable}}",
+  // Leaked snapshot IMAGES are the disk cost the reaper can hide: stray containers show
+  // up in `docker ps` long before the layers behind them do, and the check above counts
+  // only containers.
+  //
+  // Scoped to Maestro's own label, not `docker system df`. A daemon-wide total is
+  // dominated by unrelated images and by the non-slim base image every review pulls, so
+  // a growing pile of leaked snapshots would not move the number — which is the only
+  // thing this line exists to show. Goes through `probe()` like every other external
+  // call here, for its 10s timeout: `doctor` is what people run when something is
+  // already broken, and a wedged daemon must not hang it with no output.
+  if (docker) {
+    const out = await probe("docker", [
+      "images",
+      "-q",
+      "--filter",
+      "label=maestro.managed=true",
+      "--filter",
+      "reference=maestro/snapshot",
     ]);
-    const images = stdout.split("\n").find((l) => l.startsWith("Images"));
-    if (images) {
-      checks.push({ status: "info", label: "docker disk", detail: images.trim() });
-    }
-  } catch {
-    // Docker already has its own check above; a failure here is not worth a second line.
+    const snapshots = out ? out.split("\n").filter(Boolean).length : 0;
+    checks.push({
+      status: "info",
+      label: "snapshots",
+      detail:
+        snapshots === 0
+          ? "no snapshot images"
+          : `${snapshots} snapshot image(s) - shared with the dependency cache; 'maestro reap' leaves those`,
+    });
   }
 
   console.log(color.bold("\nmaestro doctor\n"));
