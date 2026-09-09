@@ -1202,6 +1202,24 @@ Every one of them fails the suite when broken. Seven did not when the sweep star
     or not. The harness checks the baseline is green before it changes anything now. It is the
     same failure as a vacuous test, applied to the tool built to find vacuous tests.
 
+140. **The README's first instruction returned 404.** `curl -fsSL .../install.sh | sh` is the
+    first thing anyone reads and the first thing anyone runs, and this repository is private, so
+    the raw URL answers 404 to everybody — including its author. With `-f` the pipe hands `sh`
+    an empty script, which exits 0: the error is on stderr and the command as a whole succeeds,
+    so nothing is installed and nothing obviously went wrong.
+
+    The README now leads with the token form, which was run verbatim to check it — installs, and
+    reports `0.1.0` — and keeps the plain form beneath it for when the repository is public.
+
+    Two claims below it were also stale: "Manual-only mode, and restricting who may ask, are open
+    items in docs/TODO.md" pointed readers at TODO for two things built earlier in this session,
+    and TODO itself already said Done. The README now describes what exists: the association
+    gate, `router.automaticTriggers`, and the fact that it does not apply to `--poll`.
+
+    Found by reading the README as a stranger would rather than as its author, which is the same
+    move as running the installer against a served artifact — and it is the one document nobody
+    had checked, having spent the session checking everything the documents describe.
+
 ### The prompt fence, attacked rather than read
 
 Prompt injection is named as this project's dominant threat: pull request titles,

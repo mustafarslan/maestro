@@ -12,10 +12,21 @@ a code change.
 
 ## Install
 
+This repository is private, so the installer needs a token that can read it. `MAESTRO_TOKEN`
+covers both the script and the release asset:
+
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
+export MAESTRO_TOKEN=$(gh auth token)
+curl -fsSL -H "Authorization: Bearer $MAESTRO_TOKEN" \
+  https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
 maestro init
 maestro doctor
+```
+
+Once the repository is public, the token drops out and the first line is the whole install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
 ```
 
 Docker is the one dependency Maestro cannot install for you; `doctor` checks for it.
@@ -161,8 +172,15 @@ by commenting on the pull request:
 @maestro review
 ```
 
-`/maestro review` works too. Manual-only mode, and restricting who may ask, are open items
-in [docs/TODO.md](docs/TODO.md).
+`/maestro review` works too, and trailing words are ignored, so `@maestro review it please`
+is fine.
+
+Only people GitHub reports as `OWNER`, `MEMBER` or `COLLABORATOR` may ask: a review starts
+containers and spends money, and on a public repository a comment is anyone's to write.
+
+To review **only** when asked, set `router.automaticTriggers: false` in the playbook — or flip
+"Review every pull request automatically" in the Studio. The lifecycle events above then start
+nothing. Not for `--poll`, which cannot see comments; the daemon says so if you try.
 
 ## Reference
 
