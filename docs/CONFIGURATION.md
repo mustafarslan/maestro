@@ -34,9 +34,24 @@ A GitHub App is preferred; a PAT works for a single user.
 
 | Variable | Purpose |
 | --- | --- |
-| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | App credentials |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | App credentials; override the stored ones |
 | `GITHUB_TOKEN` | PAT, used when no App is configured |
 | `GITHUB_WEBHOOK_SECRET` | Required by `serve --webhook-port`; deliveries without a valid HMAC are refused |
+
+The App is easiest to create through GitHub's manifest flow, which states the permissions
+Maestro needs and lets you confirm them in one click rather than filling in a form:
+
+```
+maestro github-app create               # or --org <org>, --webhook-url <url>
+# open the printed loopback URL, confirm on GitHub
+maestro github-app installed <id>       # after installing it on your repositories
+maestro doctor
+```
+
+It asks for **contents** and **metadata** read and **pull requests** and **issues** write — enough
+to read a diff and post one comment, and no write access to code. The private key is stored 0600
+in `$MAESTRO_HOME/github-app.json`; the environment variables above override it if set. Passing
+no `--webhook-url` creates the app with its webhook disabled, which is right for `serve --poll`.
 
 A comment can ask for a review — `@maestro review` — but only from someone the repository
 reports as `OWNER`, `MEMBER` or `COLLABORATOR`. A review starts containers and bills model

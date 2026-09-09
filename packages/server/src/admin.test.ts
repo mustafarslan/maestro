@@ -314,3 +314,46 @@ describe("the environments endpoint the operator view reads", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("the endpoints the Studio and Quality views need", () => {
+  it("serves the golden-set comparison the quality loop is measured by", async () => {
+    // `compareVersions` existed since the eval harness landed and only the CLI and MCP
+    // could reach it, so "the UI shows a version-versus-version comparison" was true of
+    // neither surface. An install with no fixtures answers with empty lists rather than
+    // an error, because that is the ordinary state of a fresh one.
+    const res = await fetch(`${base}/api/eval`, { headers: auth });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scores: unknown[]; comparisons: unknown[] };
+    expect(body.scores).toEqual([]);
+    expect(body.comparisons).toEqual([]);
+  });
+
+  it("refuses a connection test with no model rather than guessing one", async () => {
+    const res = await fetch(`${base}/api/providers/test`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ providerId: "anthropic" }),
+    });
+    const body = (await res.json()) as { ok: boolean; error?: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toMatch(/model/);
+  });
+
+  it("says which provider has no credential instead of failing obscurely", async () => {
+    // This is the common case on a fresh install, and it is the answer that tells
+    // somebody what to do next rather than showing them a stack trace.
+    const res = await fetch(`${base}/api/providers/test`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ providerId: "nonexistent", model: "m" }),
+    });
+    const body = (await res.json()) as { ok: boolean; error?: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toMatch(/no credential configured for provider 'nonexistent'/);
+  });
+
+  it("keeps both behind the token", async () => {
+    expect((await fetch(`${base}/api/eval`)).status).toBe(401);
+    expect((await fetch(`${base}/api/providers/test`, { method: "POST" })).status).toBe(401);
+  });
+});

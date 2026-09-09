@@ -2,6 +2,7 @@
 import { logger } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
 import { evaluate } from "./commands/evaluate.js";
+import { githubApp } from "./commands/github-app.js";
 import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { mcp } from "./commands/mcp.js";
@@ -24,6 +25,7 @@ ${color.bold("COMMANDS")}
   init                 create ~/.maestro, run migrations, seed the default playbook
   doctor               check runtime, git, docker, database and playbook health
   llm <sub>            providers, model catalog, conformance tests, API keys
+  github-app <sub>     create a GitHub App through GitHub's manifest flow
   playbook <sub>       inspect, export, import and activate playbook versions
   review <target>      review a local checkout or a pull request
   serve                run the daemon: webhooks/poller, workers, admin UI
@@ -55,6 +57,8 @@ async function main(): Promise<number> {
       return init();
     case "doctor":
       return doctor();
+    case "github-app":
+      return githubApp(rest);
     case "llm":
       return llm(rest);
     case "playbook":

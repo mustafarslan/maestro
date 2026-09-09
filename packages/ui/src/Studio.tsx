@@ -49,6 +49,34 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  /** Per-agent "test connection" results, keyed by agent id. */
+  const [tests, setTests] = useState<
+    Record<string, { state: "running" | "done"; message: string }>
+  >({});
+
+  /**
+   * One real round trip through the provider this agent is bound to.
+   *
+   * A reachability check that does not call the model would pass for a model that cannot
+   * use tools, and a review agent bound to one of those fails minutes into a review with
+   * an error nobody connects back to this screen. So the check is the same conformance
+   * round trip `maestro llm test` runs, and it reports the tool result specifically.
+   */
+  const testBinding = async (agentId: string, providerId: string, model: string) => {
+    setTests((t) => ({ ...t, [agentId]: { state: "running", message: "calling the provider…" } }));
+    try {
+      const res = await api.testProvider(providerId, model);
+      const message = !res.ok
+        ? (res.error ?? "failed")
+        : res.report?.observed.tools === false
+          ? "reachable, but this model cannot call tools — unusable for a review agent"
+          : `${res.report?.checks.filter((c) => c.passed).length ?? 0}/${res.report?.checks.length ?? 0} checks passed` +
+            `, ${((res.report?.costCents ?? 0) / 100).toFixed(4)} spent`;
+      setTests((t) => ({ ...t, [agentId]: { state: "done", message } }));
+    } catch (err) {
+      setTests((t) => ({ ...t, [agentId]: { state: "done", message: String(err) } }));
+    }
+  };
 
   const load = useCallback(() => {
     api.playbook().then((d) => {
@@ -390,6 +418,37 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                       }
                     />
                   </label>
+                  <label className="field">
+                    <span className="field-label">Thinking budget (tokens)</span>
+                    <input
+                      type="number"
+                      step="1000"
+                      value={agent.model.thinkingBudget ?? ""}
+                      placeholder="off"
+                      onChange={(e) =>
+                        updateModel(agent.id, {
+                          thinkingBudget:
+                            e.target.value === "" ? undefined : Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="row" style={{ alignItems: "center", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => testBinding(agent.id, agent.model.providerId, agent.model.model)}
+                    disabled={tests[agent.id]?.state === "running"}
+                  >
+                    {tests[agent.id]?.state === "running" ? "Testing…" : "Test connection"}
+                  </button>
+                  {/* Said before the click, not after: this makes a real call, and a
+                      button that quietly spends money is not a button. */}
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {tests[agent.id]?.message ??
+                      "one real round trip — checks the credential, the model name and whether it can call tools"}
+                  </span>
                 </div>
 
                 <label className="field">

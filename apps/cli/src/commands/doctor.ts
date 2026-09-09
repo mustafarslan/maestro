@@ -10,7 +10,7 @@ import {
   openStore,
   spendSince,
 } from "@maestro/core";
-import { GitHubClient } from "@maestro/integrations";
+import { GitHubClient, storedGitHubApp } from "@maestro/integrations";
 import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
 import { checkLine, color } from "../ui.js";
@@ -156,14 +156,26 @@ export async function doctor(): Promise<number> {
   // container — and `doctor` is the command people run precisely to avoid that. The
   // identity is worth printing too: reviewing as the wrong account is a configuration
   // mistake that looks like nothing at all.
+  const storedApp = storedGitHubApp();
   const gh = GitHubClient.fromEnv();
   if (!gh) {
     checks.push({
       status: "warn",
       label: "github",
       detail:
-        "no credential - set GITHUB_TOKEN, or the GITHUB_APP_* variables. " +
+        "no credential - run 'maestro github-app create', or set GITHUB_TOKEN. " +
         "'maestro review <local-path>' works without one; pull requests do not",
+    });
+  } else if (storedApp && !storedApp.installationId && !process.env.GITHUB_APP_INSTALLATION_ID) {
+    // An App with no installation authenticates fine and can reach no repository, which
+    // is a state the manifest flow leaves you in by design — the app exists before
+    // anybody installs it. Saying "authenticated" here would be true and useless.
+    checks.push({
+      status: "warn",
+      label: "github",
+      detail:
+        `app ${storedApp.slug ?? storedApp.appId} is created but not installed anywhere - ` +
+        "install it, then run 'maestro github-app installed <installation-id>'",
     });
   } else {
     // Bounded like every other external call here: doctor must not hang on a wedged

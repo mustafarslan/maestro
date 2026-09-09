@@ -39,6 +39,12 @@ export const api = {
   stats: () => request<StatsResponse>("/api/stats"),
   feedback: () => request<FeedbackResponse>("/api/findings/feedback"),
   environments: () => request<{ environments: EnvironmentRow[] }>("/api/environments"),
+  evalScores: () => request<EvalResponse>("/api/eval"),
+  testProvider: (providerId: string, model: string) =>
+    request<ProviderTestResponse>("/api/providers/test", {
+      method: "POST",
+      body: JSON.stringify({ providerId, model }),
+    }),
 };
 
 export interface Issue {
@@ -154,6 +160,8 @@ export interface ModelBinding {
   model: string;
   temperature?: number;
   maxTokens?: number;
+  /** Extended thinking. In the schema and forwarded by the runner; the picker had no field. */
+  thinkingBudget?: number;
   maxSteps: number;
   costCapCents: number;
   fallback: { providerId: string; model: string }[];
@@ -237,4 +245,39 @@ export interface EnvironmentRow {
   repo: string;
   pr_number: number;
   review_state: string;
+}
+
+/** Recorded golden-set scores, and the version-versus-version comparison built from them. */
+export interface EvalResponse {
+  scores: {
+    fixture: string;
+    playbookVersionId?: string;
+    misses: string[];
+    precision?: number;
+    recall?: number;
+    costCents: number;
+    agentsRun: number;
+  }[];
+  comparisons: {
+    playbookVersionId: string;
+    runs: number;
+    precision?: number;
+    recall?: number;
+    falsePositives: number;
+    costCents: number;
+  }[];
+}
+
+/** One real round trip through a provider. Costs a little; answers the whole question. */
+export interface ProviderTestResponse {
+  ok: boolean;
+  error?: string;
+  report?: {
+    providerId: string;
+    model: string;
+    checks: { name: string; passed: boolean; detail: string; durationMs: number }[];
+    observed: { tools?: boolean };
+    passed: boolean;
+    costCents: number;
+  };
 }

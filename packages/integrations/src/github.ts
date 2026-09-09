@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { logger } from "@maestro/core";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
+import { storedGitHubApp } from "./github-app.js";
 
 const exec = promisify(execFile);
 
@@ -70,7 +71,13 @@ export class GitHubClient {
             auth: {
               appId: auth.app.appId,
               privateKey: auth.app.privateKey,
-              installationId: auth.app.installationId,
+              // Omitted, never passed as undefined: `@octokit/auth-app` throws
+              // "installationId is set to a falsy value" on the key being present at all.
+              // `fromEnv` has always treated it as optional, so an App configured without
+              // GITHUB_APP_INSTALLATION_ID threw at construction — a branch nothing
+              // exercised until the manifest flow made it the normal first state, since
+              // an app has no installation until somebody installs it.
+              ...(auth.app.installationId ? { installationId: auth.app.installationId } : {}),
             },
           });
   }
@@ -78,17 +85,24 @@ export class GitHubClient {
   static fromEnv(): GitHubClient | null {
     const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
     if (token) return new GitHubClient({ kind: "token", token });
-    const appId = process.env.GITHUB_APP_ID;
-    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+
+    // Environment first, then the file `maestro init --github-app` writes. Without the
+    // second, the manifest flow would store a private key nowhere anything reads it and
+    // the operator would still have to paste a PEM into an environment variable, which
+    // is most of what the flow exists to avoid.
+    const stored = storedGitHubApp();
+    const appId = process.env.GITHUB_APP_ID ?? stored?.appId;
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY ?? stored?.privateKey;
     if (appId && privateKey) {
+      const installationId =
+        process.env.GITHUB_APP_INSTALLATION_ID ?? stored?.installationId?.toString();
       return new GitHubClient({
         kind: "app",
         app: {
           appId,
+          // A PEM pasted into an environment variable arrives with literal backslash-n.
           privateKey: privateKey.replaceAll("\\n", "\n"),
-          installationId: process.env.GITHUB_APP_INSTALLATION_ID
-            ? Number(process.env.GITHUB_APP_INSTALLATION_ID)
-            : undefined,
+          installationId: installationId ? Number(installationId) : undefined,
         },
       });
     }

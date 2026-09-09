@@ -1,8 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { JobQueue, type SqlDatabase } from "@maestro/core";
+import { JobQueue, maestroHome, type SqlDatabase } from "@maestro/core";
+import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
-import { ModelCatalog, ProviderConfigStore } from "@maestro/llm";
+import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
 import { NODE_SPECS, PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 
 export interface ApiContext {
@@ -134,6 +135,47 @@ const routes: Route[] = [
       providers: new ProviderConfigStore(ctx.db).list(),
       models: new ModelCatalog(ctx.db).list(),
     }),
+  },
+  {
+    // Phase 9's other half. `compareVersions` has existed since the eval harness landed
+    // and only the CLI and MCP could reach it, so "the UI shows a version-versus-version
+    // comparison" — the plan's stated exit for the quality loop — was true of neither.
+    //
+    // Reads recorded scores; it does not run reviews. Running the golden set takes
+    // minutes and spends money, and a button that quietly does that is not a button.
+    method: "GET",
+    pattern: /^\/api\/eval$/,
+    handler: async () => {
+      let scores: EvalScore[] = [];
+      try {
+        scores = loadScores(fixturesDir(maestroHome()));
+      } catch {
+        // No fixtures directory yet is the ordinary state of a fresh install.
+      }
+      return { scores, comparisons: compareVersions(scores) };
+    },
+  },
+  {
+    // "Test connection", which the plan puts on the model picker. One real round trip
+    // through the provider, because that is the only thing that answers the question: a
+    // reachability check that does not call the model passes for a model that cannot use
+    // tools, and binding a review agent to one of those fails at run time instead.
+    method: "POST",
+    pattern: /^\/api\/providers\/test$/,
+    handler: async (ctx, _req, _m, body) => {
+      const { providerId, model } = (body ?? {}) as { providerId?: string; model?: string };
+      if (!providerId || !model) return { ok: false, error: "providerId and model are required" };
+
+      const provider = (await new ProviderConfigStore(ctx.db).buildRegistry()).get(providerId);
+      if (!provider) {
+        return { ok: false, error: `no credential configured for provider '${providerId}'` };
+      }
+      try {
+        return { ok: true, report: await runConformance(provider, model) };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
   },
   {
     // The environments view the plan's observability phase names: what is running now,

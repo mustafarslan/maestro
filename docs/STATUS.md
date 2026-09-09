@@ -3,6 +3,35 @@
 An honest account of what has been verified against reality, and what has not. Kept separate from
 the README so the claims in that file stay short and true.
 
+## Phases against the plan
+
+Every phase's stated exit criterion, checked against the code rather than from memory. "Built"
+means the code exists and is tested; "verified" means it has been run against the real thing.
+The gap between those two columns is the honest summary of this project's state.
+
+| Phase | Exit criterion | Built | Verified |
+| --- | --- | --- | --- |
+| 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run |
+| 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | Ollama Cloud live, through both the `openai-compatible` and `openai` adapters; `anthropic` and `google` fixtures only |
+| 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
+| 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
+| 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest, exchange, storage and the `doctor` states are tested; **the GitHub round trip is not** |
+| 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes |
+| 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
+| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment | publish/rollback/pin verified; test connection verified against Ollama |
+| 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
+| 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
+| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
+| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer and Compose run locally; **no multi-platform release has been downloaded and run** |
+
+What that leaves, in order of how much it would tell us:
+
+1. **A live GitHub round trip.** Every other unverified item is downstream of this one: the App flow, a real webhook delivery, a posted comment, cancel-on-push under real timing.
+2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local stand-in.
+3. **Forty real containers.** The load scenario is real concurrency over a simulated sandbox.
+
+None is a missing implementation; each is a claim only the real thing can settle.
+
 ## Verified end to end
 
 | Capability | How it was verified |
@@ -78,9 +107,12 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
   Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
   admin UI on its first run.
-- **No GitHub App exists.** Webhook deliveries were verified by signing real payloads with the
-  configured secret and posting them to the running daemon, which is the same code path GitHub
-  exercises; what has not been done is registering an App so GitHub itself sends them.
+- **No GitHub App has been registered.** The manifest flow that creates one now exists and its
+  parts are tested — manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, and the
+  `doctor` states including "created but installed nowhere". What has not happened is a real run:
+  no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised.
+  Webhook deliveries were verified by signing real payloads with the configured secret and posting
+  them to the running daemon, which is the same code path GitHub exercises.
 - **No full model review has been driven through Compose.** Everything up to that point is
   verified against a running deployment, including the sandbox-network path the egress proxy
   depends on. What has not run is a review that actually calls a model, which needs credentials.
@@ -898,6 +930,42 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     see. Both unset by default: a cap nobody asked for silently stops reviewing. `maestro doctor`
     shows the balance, since a cap whose balance is invisible is one people discover by reviews
     quietly stopping.
+
+109. **The GitHub App manifest flow was a plan item with no implementation.** Phase 3 says
+    `init` creates the App through GitHub's manifest flow, and nothing did — an operator had to
+    fill in a dozen form fields, choose a permissions matrix by hand, download a PEM and paste it
+    into an environment variable. `maestro github-app create` sends a manifest stating exactly
+    what Maestro needs (contents and metadata read, pull requests and issues write — no write
+    access to code, no administration), takes the redirect back on a loopback listener that lives
+    for one exchange, and stores the key 0600 in `MAESTRO_HOME`. `GitHubClient.fromEnv` reads
+    that file, because storing a key nothing reads would have left the PEM-pasting in place.
+    `doctor` distinguishes "created but installed nowhere", which is the state the flow
+    legitimately leaves you in until somebody installs the app.
+
+110. **An App with no installation crashed at construction.** `@octokit/auth-app` throws
+    "installationId is set to a falsy value" when the key is present and undefined, and
+    `fromEnv` has always treated `GITHUB_APP_INSTALLATION_ID` as optional — so the documented
+    configuration threw before making a single request. Nothing exercised it because no App
+    existed; the manifest flow makes it the normal first state. The key is now omitted rather
+    than passed as undefined.
+
+111. **Half of Phase 9's exit was reachable from no surface.** `compareVersions` computes
+    precision, recall, false positives and cost per playbook version, and the CLI and MCP could
+    read it while the UI — the one the plan names — could not. The quality view now shows it
+    beside acceptance, with the two kept visibly separate: acceptance is what humans did with
+    real findings, the golden set is what a fixed set of known defects says about a prompt or
+    model change, and only the second can be run before shipping.
+
+112. **"Test connection" was in the plan and in no interface.** Binding an agent to a model
+    that cannot call tools fails minutes into a review, with an error nobody connects back to
+    the model picker. The button does the same conformance round trip `maestro llm test` runs
+    and says so before it is pressed, since a button that quietly spends money is not a button.
+
+113. **`thinkingBudget` reached the provider and had no field.** It is in the schema and the
+    runner forwards it — `wiring.test.ts` exists partly because it was dead twice — but the
+    Studio's model picker never offered it, so the only way to set it was hand-editing YAML.
+    The UI's `ModelBinding` interface is a hand-maintained copy of the zod schema and had
+    drifted; that is the same two-sources-of-truth shape, now one field closer to matching.
 
 ### Found by mechanical sweep, still open
 
