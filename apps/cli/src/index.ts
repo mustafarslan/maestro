@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { logger } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
+import { evaluate } from "./commands/evaluate.js";
 import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { mcp } from "./commands/mcp.js";
@@ -26,9 +27,10 @@ ${color.bold("COMMANDS")}
   review <target>      review a local checkout or a pull request
   serve                run the daemon: webhooks/poller, workers, admin UI
   mcp                  stdio MCP server for Claude Code
+  eval <sub>           score reviews against golden-PR fixtures
   version              print the version
 
-${color.dim("eval and studio arrive with the measurement and UI phases")}
+
 `);
   return 0;
 }
@@ -61,6 +63,8 @@ async function main(): Promise<number> {
       return serve(rest);
     case "mcp":
       return mcp(rest);
+    case "eval":
+      return evaluate(rest);
     default:
       console.error(`unknown command: ${cmd}\n`);
       usage();

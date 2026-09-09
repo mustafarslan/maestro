@@ -1,7 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { logger, ReviewStore, type SpanRecorder, type SqlDatabase } from "@maestro/core";
+import {
+  logger,
+  planIncremental,
+  ReviewStore,
+  type SpanRecorder,
+  type SqlDatabase,
+} from "@maestro/core";
 import {
   type EngineDeps,
   type ReviewOutcome,
@@ -32,6 +38,8 @@ export interface ReviewPullRequestOptions {
   dryRun?: boolean;
   /** Re-review a head SHA that has already been reviewed (e.g. after a playbook change). */
   force?: boolean;
+  /** Set false to always review the full diff instead of the delta since the last round. */
+  incremental?: boolean;
   signal?: AbortSignal;
 }
 
@@ -89,13 +97,30 @@ export async function reviewPullRequest(
   const superseded = reviews.supersedeOlder(repoId, pr.number, pr.headSha);
   if (superseded) log.info({ superseded }, "superseded older reviews for this pull request");
 
+  // Repeated pushes to the same pull request should get cheaper and stay readable:
+  // review the delta since the last reviewed head, and carry forward anything that was
+  // reported and never addressed so it does not silently vanish between rounds.
+  const plan = planIncremental(db, {
+    repoId,
+    prNumber: pr.number,
+    headSha: pr.headSha,
+    baseSha: pr.baseSha,
+    allowIncremental: opts.incremental !== false,
+  });
+  if (plan.incremental) {
+    log.info(
+      { since: plan.previousHeadSha?.slice(0, 8), carried: plan.carried.length },
+      "incremental review",
+    );
+  }
+
   const envSpec = resolveEnvSpec(playbook.envSpec, pr);
   const workdir = mkdtempSync(join(tmpdir(), `maestro-${pr.repo}-`));
 
   try {
     reviews.setState(reviewId, "preparing");
     const token = await client.cloneToken();
-    await checkoutPullRequest(pr, workdir, token);
+    await checkoutPullRequest(pr, workdir, token, plan.previousHeadSha);
 
     const outcome = await runReview(
       { ...opts.deps, db },
@@ -103,13 +128,19 @@ export async function reviewPullRequest(
         reviewId,
         playbook,
         sourcePath: workdir,
-        baseRef: pr.baseSha,
+        baseRef: plan.baseRef,
         changedFiles: pr.changedFiles,
         changedLines: pr.changedLines,
         context: {
           pr: { number: pr.number, title: pr.title, description: pr.body, author: pr.author },
           repo: { owner: pr.owner, name: pr.repo, defaultBranch: pr.baseRef },
           diff: { changedFiles: pr.changedFiles, changedLines: pr.changedLines },
+          carriedFindings: plan.carried.length
+            ? plan.carried.map(
+                (c) =>
+                  `${c.severity} ${c.category} at ${c.file ?? "PR"}:${c.lineStart ?? "?"} - ${c.title}`,
+              )
+            : undefined,
         },
         envSpec,
         signal: opts.signal,
@@ -146,6 +177,12 @@ export async function reviewPullRequest(
     } else {
       posted = await client.postReview(pr, markdown, []);
     }
+
+    // Without the comment id, a later reaction cannot be matched back to the findings
+    // it was reacting to, and the whole precision signal is lost.
+    db.prepare(
+      "UPDATE findings SET posted_comment_id=?, status='posted' WHERE review_id=? AND status='open'",
+    ).run(String(posted.id), reviewId);
 
     reviews.setState(reviewId, outcome.state, {
       error: outcome.error,

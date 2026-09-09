@@ -163,6 +163,15 @@ function buildUserPrompt(
     );
   }
 
+  if (ctx.carriedFindings?.length) {
+    parts.push(
+      "These issues were reported on an earlier round of this pull request and have not " +
+        "been addressed. Do not repeat them; only report them again if this change makes " +
+        "them worse or if you find something genuinely new:\n" +
+        ctx.carriedFindings.map((f) => `  - ${f}`).join("\n"),
+    );
+  }
+
   parts.push(
     "Start with git_diff to see the change, then read the surrounding code before judging it.",
     allowedCommands.length

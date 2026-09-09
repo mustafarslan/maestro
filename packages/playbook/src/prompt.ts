@@ -63,6 +63,8 @@ export interface PromptContext {
     acceptanceCriteria?: string;
   };
   commands?: string[];
+  /** Findings from an earlier round that were reported and never addressed. */
+  carriedFindings?: string[];
 }
 
 const TEMPLATE_VAR = /\{\{\s*([\w.]+)\s*\}\}/g;

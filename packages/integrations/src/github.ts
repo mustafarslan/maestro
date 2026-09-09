@@ -245,6 +245,8 @@ export async function checkoutPullRequest(
   pr: PullRequestContext,
   dir: string,
   token?: string,
+  /** Extra commit to fetch, so an incremental review can diff against the last round. */
+  alsoFetch?: string,
 ): Promise<void> {
   const url = token
     ? pr.cloneUrl.replace("https://", `https://x-access-token:${token}@`)
@@ -255,7 +257,18 @@ export async function checkoutPullRequest(
   await run(["init", "--quiet", dir]);
   await run(["-C", dir, "remote", "add", "origin", url]);
   // Both SHAs are needed: head to review, base to diff against.
-  await run(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", pr.headSha, pr.baseSha]);
+  const wanted = [
+    pr.headSha,
+    pr.baseSha,
+    ...(alsoFetch && alsoFetch !== pr.baseSha ? [alsoFetch] : []),
+  ];
+  try {
+    await run(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", ...wanted]);
+  } catch {
+    // A previous head may have been force-pushed away; the review still has to happen,
+    // so fall back to the base and let the caller's diff degrade to a full review.
+    await run(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", pr.headSha, pr.baseSha]);
+  }
   await run(["-C", dir, "checkout", "--quiet", pr.headSha]);
   // Strip the credential so it cannot leak via .git/config into the container.
   await run(["-C", dir, "remote", "set-url", "origin", pr.cloneUrl]);

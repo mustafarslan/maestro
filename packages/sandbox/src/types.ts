@@ -29,6 +29,8 @@ export interface PreparedEnvironment {
   allowedCommands: string[];
   setupResults: ExecResult[];
   egressLog: { host: string; allowed: boolean }[];
+  /** True when the dependency layer was reused instead of reinstalled. */
+  cacheHit?: boolean;
 }
 
 /** One agent's isolated view of the prepared snapshot. */

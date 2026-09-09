@@ -13,6 +13,7 @@ import type { PullRequestRef } from "./github.js";
 export type ReviewTrigger =
   | { kind: "review"; pr: PullRequestRef; headSha: string; reason: string }
   | { kind: "cancel"; pr: PullRequestRef; staleSha: string; reason: string }
+  | { kind: "feedback"; commentId: number; reaction: string; actor?: string; reason: string }
   | { kind: "ignore"; reason: string };
 
 interface PullRequestEvent {
@@ -87,6 +88,24 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
       };
     }
     return { kind: "ignore", reason: "comment is not a maestro command" };
+  }
+
+  // Reactions on Maestro's own comment are the feedback signal precision is measured
+  // from; they are not review triggers.
+  if (event === "reaction" && body.action === "created") {
+    const reaction = (payload as { reaction?: { content?: string; user?: { login?: string } } })
+      .reaction;
+    const comment = (payload as { comment?: { id?: number } }).comment;
+    if (reaction?.content && comment?.id) {
+      return {
+        kind: "feedback",
+        commentId: comment.id,
+        reaction: reaction.content,
+        actor: reaction.user?.login,
+        reason: `reaction ${reaction.content}`,
+      };
+    }
+    return { kind: "ignore", reason: "reaction without a comment" };
   }
 
   if (event === "ping") return { kind: "ignore", reason: "ping" };

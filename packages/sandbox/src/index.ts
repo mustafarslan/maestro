@@ -1,3 +1,4 @@
+export * from "./cache.js";
 export * from "./docker.js";
 export * from "./egress-proxy.js";
 export * from "./toolchain.js";

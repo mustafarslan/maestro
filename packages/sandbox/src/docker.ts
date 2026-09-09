@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { logger, newId } from "@maestro/core";
 import type { EnvSpec } from "@maestro/playbook";
+import { dependencyCacheKey, mayWriteCache, snapshotTag } from "./cache.js";
 import { startEgressProxy } from "./egress-proxy.js";
 import { detectedCommands, detectToolchain, expandAuto } from "./toolchain.js";
 import type {
@@ -118,6 +119,32 @@ export class DockerSandboxDriver implements SandboxDriver {
     const allowedCommands = expandAuto(spec.allowedCommands, detectedCommands(toolchain));
 
     log.info({ toolchain: toolchain.kind, image, setup, allowedCommands }, "preparing environment");
+
+    // Installing dependencies dominates a review's wall clock. When the lockfile, base
+    // image and setup commands are all unchanged, the previous dependency layer is
+    // reusable and the prepare phase drops to near zero.
+    const cacheKey = dependencyCacheKey({ sourcePath: req.sourcePath, image, setup, toolchain });
+    const cachedTag = cacheKey ? snapshotTag(cacheKey) : null;
+    if (cachedTag) {
+      const hit = await docker(["image", "inspect", cachedTag], { timeoutMs: 20_000 });
+      if (hit.exitCode === 0) {
+        log.info({ cachedTag }, "dependency cache hit; skipping install");
+        const refreshed = await refreshCheckout(cachedTag, req, spec, id, reviewId);
+        if (refreshed) {
+          return {
+            id,
+            reviewId,
+            imageId: refreshed,
+            toolchain,
+            allowedCommands,
+            setupResults: [],
+            egressLog: [],
+            cacheHit: true,
+          };
+        }
+        log.warn({ cachedTag }, "cache hit but refresh failed; falling back to a full install");
+      }
+    }
 
     const pull = await docker(["pull", image], { timeoutMs: spec.timeouts.prepareSec * 1000 });
     if (pull.exitCode !== 0 && !pull.stderr.includes("up to date")) {
@@ -242,6 +269,14 @@ export class DockerSandboxDriver implements SandboxDriver {
       );
       if (commit.exitCode !== 0) throw new Error(`docker commit failed: ${commit.stderr}`);
 
+      // A fork PR may READ the cache but never write it: one hostile fork would
+      // otherwise poison the dependency layer for every later review of this repo.
+      const installOk = setupResults.every((r) => r.exitCode === 0);
+      if (cachedTag && installOk && mayWriteCache(spec.trust)) {
+        await docker(["tag", `maestro/snapshot:${id}`, cachedTag], { timeoutMs: 30_000 });
+        log.info({ cachedTag }, "dependency snapshot cached");
+      }
+
       return {
         id,
         reviewId,
@@ -250,6 +285,7 @@ export class DockerSandboxDriver implements SandboxDriver {
         allowedCommands,
         setupResults,
         egressLog: proxy.log.map((e) => ({ host: e.host, allowed: e.allowed })),
+        cacheHit: false,
       };
     } finally {
       // The proxy closes with the phase: no network survives into analyze.
@@ -359,6 +395,65 @@ export class DockerSandboxDriver implements SandboxDriver {
     for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
 
     return { containers: containers.length, images: images.length };
+  }
+}
+
+/**
+ * Layers the current checkout onto a cached dependency image.
+ *
+ * Only the dependency layer is reused; the source always comes from this pull request,
+ * or a review would silently analyse the previous one's code.
+ */
+async function refreshCheckout(
+  cachedTag: string,
+  req: PrepareRequest,
+  spec: EnvSpec,
+  id: string,
+  reviewId: string,
+): Promise<string | null> {
+  const containerId = `maestro-cache-${id}`;
+  try {
+    const create = await docker(
+      [
+        "create",
+        "--name",
+        containerId,
+        "--label",
+        `${LABEL_MANAGED}=true`,
+        "--label",
+        `${LABEL_REVIEW}=${reviewId}`,
+        "--label",
+        `${LABEL_CREATED}=${new Date().toISOString()}`,
+        "--workdir",
+        WORKDIR,
+        cachedTag,
+        "sleep",
+        "60",
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (create.exitCode !== 0) return null;
+
+    const copy = await docker(["cp", `${req.sourcePath}/.`, `${containerId}:${WORKDIR}`], {
+      timeoutMs: spec.timeouts.prepareSec * 1000,
+    });
+    if (copy.exitCode !== 0) return null;
+
+    const commit = await docker(
+      [
+        "commit",
+        "--change",
+        `LABEL ${LABEL_MANAGED}=true`,
+        "--change",
+        `LABEL ${LABEL_REVIEW}=${reviewId}`,
+        containerId,
+        `maestro/snapshot:${id}`,
+      ],
+      { timeoutMs: 300_000 },
+    );
+    return commit.exitCode === 0 ? `maestro/snapshot:${id}` : null;
+  } finally {
+    await docker(["rm", "-f", containerId], { timeoutMs: 60_000 });
   }
 }
 

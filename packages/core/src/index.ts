@@ -1,4 +1,5 @@
 export * from "./ids.js";
+export * from "./incremental.js";
 export * from "./logger.js";
 export * from "./paths.js";
 export * from "./queue.js";

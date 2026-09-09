@@ -5,6 +5,7 @@ import { JobQueue, logger, ReviewStore, SpanRecorder, type SqlDatabase } from "@
 import {
   diffPoll,
   GitHubClient,
+  ingestReaction,
   interpretEvent,
   newPollState,
   type PullRequestRef,
@@ -75,6 +76,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
 
   /** Enqueue rather than review inline: the HTTP handler must return immediately. */
   const enqueueTrigger = (t: ReviewTrigger): void => {
+    // Reactions are the feedback signal precision is measured from, not review triggers.
+    if (t.kind === "feedback") {
+      const result = ingestReaction(db, t.commentId, t.reaction, t.actor);
+      if (result) {
+        logger.info({ ...result, reaction: t.reaction }, "feedback ingested");
+        notify("review", { reviewId: result.reviewId, feedback: true });
+      }
+      return;
+    }
     if (t.kind !== "review") {
       logger.debug({ reason: t.reason }, "trigger ignored");
       return;
