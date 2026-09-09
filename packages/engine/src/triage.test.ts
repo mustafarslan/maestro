@@ -184,6 +184,35 @@ describe("triage", () => {
     expect(result.posted[0]?.agreementCount).toBe(2);
   });
 
+  it("does not merge findings that are merely in the same neighbourhood", () => {
+    // Reported by Maestro against the bucket-based fix: `Math.floor(line / 10)` plus
+    // neighbouring buckets merged lines 45 and 55 — ten apart, almost certainly two
+    // defects — while splitting pairs that straddled a boundary. The distance is now
+    // explicit and symmetric.
+    const result = triage(doc, [
+      { agentId: "security", findings: [f({ lineStart: 45 })] },
+      { agentId: "architecture", findings: [f({ lineStart: 55, title: "A different defect" })] },
+    ]);
+    expect(result.posted.length + result.suppressed.length).toBe(2);
+  });
+
+  it("merges the same defect whichever agent reports first", () => {
+    // With buckets the outcome depended on arrival order; the same agents must produce
+    // the same review whichever way round the findings arrive.
+    const near = [f({ lineStart: 78 }), f({ lineStart: 80, title: "Same defect" })] as const;
+    const forwards = triage(doc, [
+      { agentId: "security", findings: [near[0]] },
+      { agentId: "architecture", findings: [near[1]] },
+    ]);
+    const backwards = triage(doc, [
+      { agentId: "architecture", findings: [near[1]] },
+      { agentId: "security", findings: [near[0]] },
+    ]);
+    expect(forwards.posted).toHaveLength(1);
+    expect(backwards.posted).toHaveLength(1);
+    expect(forwards.posted[0]?.agreementCount).toBe(backwards.posted[0]?.agreementCount);
+  });
+
   it("does not treat one agent reporting twice as agreement with itself", () => {
     const result = triage(doc, [
       {

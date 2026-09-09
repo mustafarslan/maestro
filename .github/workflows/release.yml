@@ -20,8 +20,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # No version here: package.json's `packageManager` field is the single source, and
+      # naming a version in both is a hard error rather than a fallback.
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - uses: oven-sh/setup-bun@v2

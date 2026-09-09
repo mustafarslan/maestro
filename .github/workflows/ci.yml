@@ -5,13 +5,19 @@ on:
     branches: [master]
   pull_request:
 
+# A newer push makes an older run's result irrelevant; paying for it is pure waste.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No version here: package.json's `packageManager` field is the single source, and
+      # naming a version in both is a hard error rather than a fallback.
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - uses: oven-sh/setup-bun@v2

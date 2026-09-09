@@ -40,6 +40,14 @@ export interface ReviewPullRequestOptions {
   force?: boolean;
   /** Set false to always review the full diff instead of the delta since the last round. */
   incremental?: boolean;
+  /**
+   * Fired as soon as the review row exists, before any long-running work.
+   *
+   * The caller cannot otherwise register its AbortController anywhere useful: the review
+   * id is not known until this function creates it, and waiting for the return value
+   * means only registering a review that has already finished.
+   */
+  onStart?: (info: { reviewId: string; headSha: string; prNumber: number }) => void;
   signal?: AbortSignal;
 }
 
@@ -93,6 +101,9 @@ export async function reviewPullRequest(
       return { reviewId, state: existing.state, skipped: "already reviewed at this head sha" };
     }
   }
+
+  // Before anything slow: the caller needs the id to be able to cancel this review.
+  opts.onStart?.({ reviewId, headSha: pr.headSha, prNumber: pr.number });
 
   const superseded = reviews.supersedeOlder(repoId, pr.number, pr.headSha);
   if (superseded) log.info({ superseded }, "superseded older reviews for this pull request");

@@ -51,33 +51,21 @@ const SEVERITY_RANK: Record<Severity, number> = {
 export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageResult {
   const { minConfidence, maxInlineComments, agreementBoost } = doc.triage;
 
-  const groups = new Map<string, TriagedFinding>();
+  const groups: TriagedFinding[] = [];
   /** Who wrote the description currently leading each group — not who reported first. */
-  const leadAgent = new Map<string, string>();
+  const leadAgent = new Map<TriagedFinding, string>();
 
   for (const { agentId, findings } of inputs) {
     for (const finding of findings) {
-      const candidates = dedupeKeys(finding);
-      // The first candidate is this finding's own key; the rest are neighbours it may
-      // join. Only join a neighbour that already exists — never create one.
-      const key = candidates.find((k) => groups.has(k)) ?? candidates[0] ?? "repo:none";
-      const existing = groups.get(key);
+      // One agent reporting twice in the same place is not agreement with itself, so a
+      // group it already contributed to is not a candidate for it.
+      const existing = groups.find((g) => sameDefect(g, finding) && !g.agentIds.includes(agentId));
 
       if (!existing) {
-        groups.set(key, { ...finding, agentIds: [agentId], agreementCount: 1 });
-        leadAgent.set(key, agentId);
+        const group: TriagedFinding = { ...finding, agentIds: [agentId], agreementCount: 1 };
+        groups.push(group);
+        leadAgent.set(group, agentId);
         continue;
-      }
-
-      // One agent reporting two defects in the same window is not agreement with
-      // itself; keep them separate rather than inflating the agreement count.
-      if (existing.agentIds.includes(agentId)) {
-        const own = candidates[0] ?? key;
-        if (!groups.has(own)) {
-          groups.set(own, { ...finding, agentIds: [agentId], agreementCount: 1 });
-          leadAgent.set(own, agentId);
-          continue;
-        }
       }
 
       // Two agents describing the same defect is corroboration, not a reason to say it
@@ -96,14 +84,14 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
       // is telling a different story rather than restating the same one.
       const incomingLeads = finding.body.length > existing.body.length;
       const other = incomingLeads
-        ? { agentId: leadAgent.get(key) ?? agentId, ...existing }
+        ? { agentId: leadAgent.get(existing) ?? agentId, ...existing }
         : { agentId, ...finding };
 
       if (incomingLeads) {
         existing.title = finding.title;
         existing.body = finding.body;
         existing.category = finding.category;
-        leadAgent.set(key, agentId);
+        leadAgent.set(existing, agentId);
       }
       if (other.category !== existing.category) {
         const also = existing.alsoReported ?? [];
@@ -114,7 +102,7 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
     }
   }
 
-  const ranked = [...groups.values()].sort((a, b) => {
+  const ranked = [...groups].sort((a, b) => {
     const bySeverity = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
     if (bySeverity !== 0) return bySeverity;
     // Within a severity, a confident finding outranks a speculative one.
@@ -146,31 +134,37 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
   return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed) };
 }
 
-const BUCKET_LINES = 10;
+/**
+ * How far apart two reports of the same defect may be anchored.
+ *
+ * Agents rarely pick the identical line — one cites the `if`, another the return inside
+ * it. Buckets were the first attempt and were wrong in both directions: they merged
+ * findings 9 lines apart while splitting findings 2 lines apart across a boundary, and
+ * which happened depended on where the code sat relative to a multiple of ten. An
+ * explicit distance says what is actually meant and is symmetric.
+ */
+const MERGE_DISTANCE = 3;
 
 /**
- * Candidate group keys for a finding, best match first.
+ * Whether two findings should be treated as one defect.
  *
- * A shared LOCATION is the evidence that two agents found the same defect. Category is
- * not: agents invent their own slugs, so one defect arrives as `dead-conditional` from
- * one and `no-op-ternary` from another, and keying on category posted both — the
- * duplication that makes people stop reading an automated reviewer.
+ * A shared LOCATION is the evidence. Category is not: agents invent their own slugs, so
+ * one defect arrives as `dead-conditional` from one and `no-op-ternary` from another,
+ * and keying on category posted both — the duplication that makes people stop reading an
+ * automated reviewer.
  *
- * But a finding with no line number carries no location evidence at all. Keying those on
- * file alone collapses every whole-PR observation into one group, scoring disagreement as
- * corroboration and demoting all but the longest to a footnote — over-merging, which is
- * the same failure wearing the other mask. So category comes back exactly where location
- * is missing, and nowhere else.
- *
- * Neighbouring buckets are candidates too: agents rarely anchor to the identical line,
- * and lines 78 and 80 straddle a bucket boundary that means nothing to a reader.
+ * A finding with no line number carries no location evidence at all, so category is the
+ * only signal left and it decides. Without that, every whole-PR observation collapsed
+ * into one group, scoring disagreement as corroboration — over-merging, the same failure
+ * wearing the other mask.
  */
-function dedupeKeys(f: Finding): string[] {
-  const file = f.file ?? "repo";
-  if (!f.lineStart) return [`${file}:none:${f.category.toLowerCase()}`];
+function sameDefect(a: Finding, b: Finding): boolean {
+  if ((a.file ?? "repo") !== (b.file ?? "repo")) return false;
 
-  const bucket = Math.floor(f.lineStart / BUCKET_LINES);
-  return [`${file}:${bucket}`, `${file}:${bucket - 1}`, `${file}:${bucket + 1}`];
+  if (!a.lineStart || !b.lineStart) {
+    return !a.lineStart && !b.lineStart && a.category.toLowerCase() === b.category.toLowerCase();
+  }
+  return Math.abs(a.lineStart - b.lineStart) <= MERGE_DISTANCE;
 }
 
 function buildSummary(

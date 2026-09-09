@@ -133,9 +133,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         playbook: record.doc,
         playbookVersionId: record.id,
         pr,
+        // Registering on the RESULT would register a review that has already finished:
+        // the map would always be empty at the moment a push needs to cancel something,
+        // so cancel-on-push could never fire during the minutes when it matters.
+        onStart: ({ reviewId }) => inFlight.set(reviewId, controller),
         signal: controller.signal,
       });
-      if (result.reviewId) inFlight.set(result.reviewId, controller);
       notify("review", { reviewId: result.reviewId, state: result.state });
     } finally {
       for (const [id, c] of inFlight) if (c === controller) inFlight.delete(id);
