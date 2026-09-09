@@ -1034,6 +1034,27 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     the fast-path `SELECT` hid it; removing the conflict clause reproduces the constraint error
     verbatim.
 
+121. **Anyone who could comment could take over Maestro's comment.** `findPreviousComment`
+    matched on the marker and nothing else, and the marker is a plain HTML comment —
+    `<!-- maestro-review -->` — visible in the source of every review Maestro posts. On a public
+    repository anybody may comment on a pull request, so anybody could post that string and
+    Maestro would write its review into *their* comment instead of posting its own. Three
+    consequences, in rising order of seriousness: the review is attributed to them and remains
+    editable by them, sitting exactly where a reviewer expects Maestro's output;
+    `posted_comment_id` then points at a comment Maestro does not own, so the reaction feedback
+    that drives every precision number is gathered from one an attacker controls; and placing
+    the marker before the first review means Maestro never posts a comment of its own at all.
+
+    The array holding the matches was called `mine` — the assumption stated out loud and never
+    checked. It is marker **and** author now: the login for a personal token, the app id on
+    `performed_via_github_app` for an installation. If the author cannot be established the
+    method returns null and the caller posts a new comment, because a duplicate comment is a
+    nuisance and writing into a stranger's is not.
+
+    This belongs to the threat model the project already names — pull request content is
+    attacker-controlled and the orchestrator is meant to be the only writer — and it had
+    survived every reading pass because the filter looked obviously right.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

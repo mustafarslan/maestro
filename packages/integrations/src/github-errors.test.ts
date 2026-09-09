@@ -68,3 +68,68 @@ describe("reading the base branch config", () => {
     await expect(client.getBaseBranchConfig(pr)).resolves.toBeNull();
   });
 });
+
+/**
+ * Whose comment Maestro is allowed to overwrite.
+ *
+ * The marker is a plain HTML comment, visible in the source of every review Maestro
+ * posts, and on a public repository anybody may comment on a pull request. Matching on
+ * it alone meant anybody could claim Maestro's comment slot.
+ */
+describe("finding Maestro's own previous comment", () => {
+  const MARKER = "<!-- maestro-review -->";
+  const listing = (comments: unknown[]) => ({
+    users: { getAuthenticated: async () => ({ data: { login: "maestro-bot" } }) },
+    issues: { listComments: () => ({}) },
+    __comments: comments,
+  });
+  const client = (comments: unknown[], rest = listing(comments)) => {
+    const c = new GitHubClient({ kind: "token", token: "t" });
+    (c as unknown as { octokit: unknown }).octokit = {
+      rest,
+      paginate: async () => comments,
+    };
+    return c;
+  };
+
+  it("finds its own comment", async () => {
+    const c = client([{ id: 1, body: `${MARKER}\nreview`, user: { login: "maestro-bot" } }]);
+    await expect(c.findPreviousComment(pr, MARKER)).resolves.toBe(1);
+  });
+
+  it("refuses a stranger's comment carrying the marker", async () => {
+    // Otherwise the review is written into their comment: attributed to them, editable by
+    // them afterwards, sitting where a reviewer expects Maestro's output — and the
+    // reaction feedback that drives the precision numbers is then collected from a
+    // comment an attacker controls.
+    const c = client([
+      { id: 9, body: `${MARKER}\nnothing to see here`, user: { login: "drive-by" } },
+    ]);
+    await expect(c.findPreviousComment(pr, MARKER)).resolves.toBeNull();
+  });
+
+  it("picks its own even when a stranger placed the marker first", async () => {
+    const c = client([
+      { id: 9, body: `${MARKER}\nsquatted`, user: { login: "drive-by" } },
+      { id: 10, body: `${MARKER}\nthe real one`, user: { login: "maestro-bot" } },
+    ]);
+    await expect(c.findPreviousComment(pr, MARKER)).resolves.toBe(10);
+  });
+
+  it("posts a new comment rather than guessing when it cannot tell who it is", async () => {
+    // Fail closed. A duplicate comment is a nuisance; writing into a stranger's is not.
+    const c = client([{ id: 1, body: MARKER, user: { login: "maestro-bot" } }], {
+      users: {
+        getAuthenticated: async () => {
+          throw new Error("network down");
+        },
+      },
+    } as never);
+    await expect(c.findPreviousComment(pr, MARKER)).resolves.toBeNull();
+  });
+
+  it("ignores its own comments that do not carry the marker", async () => {
+    const c = client([{ id: 1, body: "just chatting", user: { login: "maestro-bot" } }]);
+    await expect(c.findPreviousComment(pr, MARKER)).resolves.toBeNull();
+  });
+});

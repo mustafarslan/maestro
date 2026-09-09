@@ -58,10 +58,12 @@ export class GitHubClient {
   /** Which credential this client holds. The two have different permissions. */
   readonly authKind: GitHubAuth["kind"];
   private readonly installationId?: number;
+  private readonly appId?: string;
 
   constructor(auth: GitHubAuth, baseUrl?: string) {
     this.authKind = auth.kind;
     this.installationId = auth.kind === "app" ? auth.app.installationId : undefined;
+    this.appId = auth.kind === "app" ? auth.app.appId : undefined;
     this.octokit =
       auth.kind === "token"
         ? new Octokit({ auth: auth.token, baseUrl })
@@ -310,15 +312,78 @@ export class GitHubClient {
     return { id: data.id, mode: "comment" };
   }
 
-  /** Finds a previous Maestro comment so a re-review updates rather than piles on. */
+  /**
+   * Who this credential posts as. Resolved once; a null means "could not tell".
+   *
+   * Kept separate from `identity()`, which is for humans reading `doctor` output. This one
+   * is a security check and has to fail closed.
+   */
+  private selfAuthor?: { login?: string; appId?: number } | null;
+
+  private async resolveSelfAuthor(): Promise<{ login?: string; appId?: number } | null> {
+    if (this.selfAuthor !== undefined) return this.selfAuthor;
+    try {
+      if (this.authKind === "token") {
+        const { data } = await this.octokit.rest.users.getAuthenticated();
+        this.selfAuthor = { login: data.login };
+      } else {
+        // An installation token cannot ask who it is, but every comment it makes carries
+        // the app that made it, and the app id is exactly what we hold.
+        this.selfAuthor = { appId: this.appId ? Number(this.appId) : undefined };
+        if (!this.selfAuthor.appId) this.selfAuthor = null;
+      }
+    } catch {
+      this.selfAuthor = null;
+    }
+    return this.selfAuthor;
+  }
+
+  /**
+   * Finds Maestro's own previous comment, so a re-review updates rather than piles on.
+   *
+   * The marker alone is not enough, and matching on it alone was a real hole. The marker
+   * is a plain HTML comment visible in the source of every review Maestro posts, and on a
+   * public repository anybody may comment on a pull request — so anybody could post
+   * `<!-- maestro-review -->` and Maestro would write its review into *their* comment
+   * instead of its own. The review would then be attributed to them and editable by them
+   * afterwards, sitting exactly where a reviewer expects Maestro's output; `posted_comment_id`
+   * would point at a comment Maestro does not own, so the reaction feedback that drives the
+   * precision numbers would be collected from one an attacker controls; and placing the
+   * marker before the first review would mean Maestro never posted a comment of its own at
+   * all. The variable holding the matches was called `mine`, which is the assumption stated
+   * out loud and never checked.
+   *
+   * So: marker AND author. If the author cannot be established, this returns null and the
+   * caller posts a new comment — a duplicate comment is a nuisance, writing into a
+   * stranger's is not.
+   */
   async findPreviousComment(pr: PullRequestContext, marker: string): Promise<number | null> {
+    const self = await this.resolveSelfAuthor();
+    if (!self) {
+      logger.warn(
+        { pr: pr.number },
+        "cannot establish which account Maestro posts as; posting a new comment rather than " +
+          "risking an update to somebody else's",
+      );
+      return null;
+    }
+
     const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
       owner: pr.owner,
       repo: pr.repo,
       issue_number: pr.number,
       per_page: 100,
     });
-    const mine = comments.filter((c) => (c.body ?? "").includes(marker));
+
+    const mine = comments.filter((c) => {
+      if (!(c.body ?? "").includes(marker)) return false;
+      if (self.login) return c.user?.login === self.login;
+      // App: the comment must have been made by this app's installation.
+      return (
+        (c as { performed_via_github_app?: { id?: number } }).performed_via_github_app?.id ===
+        self.appId
+      );
+    });
     return mine.length ? (mine.at(-1)?.id ?? null) : null;
   }
 
