@@ -125,9 +125,19 @@ export async function evaluate(argv: string[]): Promise<number> {
 
   if (sub !== "run") return usage();
 
-  const fixtures = loadFixtures(dir, arg(argv, "--fixture"));
+  const only = arg(argv, "--fixture");
+  const fixtures = loadFixtures(dir, only);
   if (!fixtures.length) {
-    console.error(`no fixtures found in ${dir}`);
+    // Distinguish an empty directory from a filter that matched nothing. "No fixtures
+    // found in <dir>" sent somebody looking in a directory that had exactly what they
+    // asked about, under a different name.
+    const all = loadFixtures(dir);
+    console.error(
+      only && all.length
+        ? `no fixture named '${only}'. There ${all.length === 1 ? "is" : "are"} ${all.length}: ` +
+            all.map((f) => f.name).join(", ")
+        : `no fixtures found in ${dir}`,
+    );
     return 1;
   }
 

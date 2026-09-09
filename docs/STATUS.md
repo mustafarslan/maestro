@@ -2234,6 +2234,19 @@ the server never sends fails it, and removing `live` from the server's response 
     a subcommand that does not exist is 1, and no subcommand at all is 1, because an
     incomplete command is not a request for help.
 
+177. **Two messages that were accurate about the wrong thing.** `maestro eval run
+    --fixture nope` printed "no fixtures found in <dir>" while that directory held a
+    fixture — just not one called `nope`. The message sends somebody to check a directory
+    that has exactly what they asked about, under a different name. It now says which
+    fixtures are there, and still says the directory is empty when it is.
+
+    And `maestro playbook import /nonexistent.yaml` printed
+    `ENOENT: no such file or directory, open '…'` — the one error in that command that
+    did not read like a sentence.
+
+    Both found by running the binary rather than reading it, which is the third time
+    today that has been the difference. Small on their own; the pattern is not.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

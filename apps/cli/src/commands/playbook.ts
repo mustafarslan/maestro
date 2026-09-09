@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openStore, ReviewStore } from "@maestro/core";
 import { NODE_SPECS, PlaybookStore, parseYaml, safeParsePlaybook, toYaml } from "@maestro/playbook";
 import { arg, rejectUnknownFlags } from "../args.js";
@@ -89,6 +89,13 @@ export async function playbook(argv: string[]): Promise<number> {
         if (!file) return usage();
         // Parse without validating, so we can report every issue at once instead of
         // surfacing whichever one happened to throw first.
+        // A missing file is the commonest way this is typed wrong, and the raw
+        // `ENOENT: no such file or directory, open '…'` was the one error in this
+        // command that did not read like a sentence.
+        if (!existsSync(file)) {
+          console.log(checkLine("fail", "no such file", file));
+          return 1;
+        }
         const result = safeParsePlaybook(parseYaml(readFileSync(file, "utf8")));
         if (!result.ok) {
           console.log(color.bold(`\n${result.issues.length} issue(s) in ${file}\n`));
