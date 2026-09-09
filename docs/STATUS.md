@@ -403,6 +403,17 @@ These are recorded because each was invisible to the test suite that existed at 
     fixture. Both are now undefined when there is nothing to measure, rendered `n/a`, and the
     average skips them.
 
+57. **The database was world-readable.** SQLite creates its file with the process umask, so
+    `~/.maestro/maestro.db` was 0644. It holds every review — pull request titles, diff summaries,
+    agent findings, provider configuration — all from private repositories, and on any shared host
+    that was every local account's to read, from a tool whose entire job is looking at code people
+    did not publish. API keys were not exposed: those live in the keychain or a 0600 file. The
+    store now chmods itself and its write-ahead log to 0600 on open, and tightens the home
+    directory to 0700 — `mkdirSync`'s mode applies only when it creates the directory, so an
+    upgrade from an earlier version kept whatever mode it already had. Enforced in `openStore`
+    rather than in `init`, because the daemon, the CLI and the MCP server all open the store
+    directly and a rule enforced at one entry point is a rule with holes.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
