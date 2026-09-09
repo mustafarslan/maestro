@@ -1114,11 +1114,30 @@ live run" list, and neither needed one.
 
 - **GitHub's webhook payloads.** Every field the parser reads, checked against real API objects.
   Found 123 — and, before it, that GitHub delivers no `reaction` event at all (122).
+- **Docker's `-q` output.** One line per tag, not per image. Found 124.
 - **Linear's GraphQL schema.** Linear validates before it authenticates, so the query shape is
   checkable with no key. `scripts/live-linear-check.mjs` does it, control first.
 
 Both are scripts rather than tests, because both reach the network; both are cheap enough to run
 before a release, and either would catch the other side changing under us.
+
+124. **The reaper double-counted everything it swept.** `docker images -q` prints a line per
+    *tag*, not per image, and Maestro tags every snapshot twice — once as the review's snapshot
+    and once as the dependency cache, deliberately, pointing at the same id. So a listing of
+    three images came back as six lines: the reaper ran `docker inspect` on each image twice,
+    called `docker rmi` on each id twice, and reported double the number it had actually
+    removed. `protected` was inflated the same way. Nothing broke — the second `rmi` fails
+    silently on an id already gone — which is precisely why it could sit there: the only symptom
+    was a number an operator reads and believes.
+
+    Verified against the running daemon before the fix and after: six lines, three unique ids.
+    The test fixture is that real output rather than something invented to match the code.
+    `maestro doctor`'s count escaped the bug by accident, because it adds a `reference=` filter
+    that happens to narrow each image to one tag; it deduplicates now too, rather than staying
+    correct by coincidence.
+
+    Third external contract checked against reality in as many commits, and the first where the
+    tool's actual behaviour differed from the obvious reading of its output.
 
 ### Found by mechanical sweep, still open
 

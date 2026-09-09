@@ -632,14 +632,32 @@ async function refreshCheckout(
   }
 }
 
-async function listIds(args: string[]): Promise<string[]> {
-  const res = await docker(args, { timeoutMs: 30_000 });
-  return res.exitCode === 0
-    ? res.stdout
+/**
+ * Ids from a `docker ... -q` listing, each one once.
+ *
+ * `docker images -q` prints a line per TAG, not per image, and Maestro tags every
+ * snapshot twice — once as the review's snapshot and once as the dependency cache. So a
+ * listing of three images came back as six lines, and the reaper inspected each image
+ * twice, called `docker rmi` on each id twice, and reported double the number of images
+ * it had actually removed. The second `rmi` fails silently on an id that is already gone,
+ * so nothing broke; the count an operator reads was simply wrong, and so was `protected`.
+ *
+ * Verified against the running daemon: six lines, three unique ids.
+ */
+export function uniqueIds(stdout: string): string[] {
+  return [
+    ...new Set(
+      stdout
         .split("\n")
         .map((s) => s.trim())
-        .filter(Boolean)
-    : [];
+        .filter(Boolean),
+    ),
+  ];
+}
+
+async function listIds(args: string[]): Promise<string[]> {
+  const res = await docker(args, { timeoutMs: 30_000 });
+  return res.exitCode === 0 ? uniqueIds(res.stdout) : [];
 }
 
 async function snapshotOfDirectory(path: string) {

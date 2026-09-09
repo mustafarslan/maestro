@@ -17,6 +17,9 @@ import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
 
+/** `docker images -q` prints one line per tag; the same image can appear several times. */
+const uniq = (xs: string[]): string[] => [...new Set(xs)];
+
 // "info" is neither pass nor fail: an optional integration being absent is information.
 type Status = "ok" | "warn" | "fail" | "info";
 interface Check {
@@ -268,7 +271,9 @@ export async function doctor(): Promise<number> {
   // call here, for its 10s timeout: `doctor` is what people run when something is
   // already broken, and a wedged daemon must not hang it with no output.
   if (docker) {
-    const all =
+    // Deduplicated for the same reason the reaper is: `docker images -q` prints a line
+    // per tag, and Maestro tags every snapshot twice.
+    const all = uniq(
       (
         await probeLines("docker", [
           "images",
@@ -278,7 +283,8 @@ export async function doctor(): Promise<number> {
           "--filter",
           "reference=maestro/snapshot",
         ])
-      )?.filter(Boolean) ?? [];
+      )?.filter(Boolean) ?? [],
+    );
     // Only cache-shared snapshots survive a reap: reap() skips an image whose id is also
     // a cache id and deletes every other labelled snapshot. Reporting all of them as
     // "reap leaves those" would tell an operator to ignore exactly the ones leaking.
