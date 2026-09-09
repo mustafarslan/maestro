@@ -7,6 +7,7 @@ import {
   GitHubClient,
   ingestReaction,
   interpretEvent,
+  LinearClient,
   newPollState,
   type PullRequestRef,
   type ReviewTrigger,
@@ -110,6 +111,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const workers: Promise<void>[] = [];
   const workerCount = opts.concurrentReviews ?? 3;
 
+  // Optional: absent when LINEAR_API_KEY is unset, and reviews simply run without
+  // ticket context rather than failing.
+  const linear = LinearClient.fromEnv();
+  if (linear) logger.info("linear issue lookup enabled");
+
   const runOne = async (pr: PullRequestRef): Promise<void> => {
     const client = GitHubClient.fromEnv();
     if (!client) throw new Error("no GitHub credential configured");
@@ -132,6 +138,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
         playbook: record.doc,
         playbookVersionId: record.id,
+        linear,
         pr,
         // Registering on the RESULT would register a review that has already finished:
         // the map would always be empty at the moment a push needs to cancel something,

@@ -104,6 +104,17 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
 
   const blocked = outcome.egressLog.filter((e) => !e.allowed);
   lines.push(
+    // Whether ticket context was available changes how much weight the product agent's
+    // verdict deserves, so the reader is told which issue was checked — or that none was.
+    ...(outcome.linearIssue
+      ? [
+          `**Checked against** — Linear issue \`${outcome.linearIssue.identifier}\`: ${outcome.linearIssue.title}` +
+            (outcome.linearIssue.acceptanceCriteria
+              ? " (acceptance criteria included)"
+              : " (no acceptance criteria in the issue)"),
+          "",
+        ]
+      : []),
     `**Environment** — toolchain \`${outcome.toolchain ?? "unknown"}\`, ` +
       `${outcome.allowedCommands.length} allowlisted command(s), analyzed with no network access.` +
       (blocked.length

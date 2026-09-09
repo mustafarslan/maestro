@@ -81,6 +81,16 @@ it is safe to feed attacker-controlled PR text to a model at all — see
 + the editable persona + a fixed output contract. The wrapper lives in code so no persona edit —
 including one made in the Studio — can remove the injection defenses.
 
+**The product agent reads the ticket, not just the PR description.** When `LINEAR_API_KEY`
+is set, Maestro resolves the issue from the branch name, PR body or title — in that order, because
+a branch name is chosen before any work and is what Linear's own git integration generates — and
+injects its acceptance criteria into the product agent's context. The PR description is the
+author's account of what they built; the ticket is the independent record of what was asked for,
+and checking one against the other is the whole job. Linear is never exposed as an agent tool:
+agents run offline with no credentials, so the orchestrator fetches and the agent reads text.
+Every failure — no key, no issue referenced, an unreachable tracker — degrades to a review without
+ticket context rather than a failed review, and the comment says which issue it checked against.
+
 **Agents are scheduled across reviews, not within one.** A worker pool admits agent tasks under
 global, per-agent, per-repo and per-provider limits, rotating across reviews rather than FIFO. So
 while the product agent is saturated on PR #1, the security and architecture agents flow to PR #2

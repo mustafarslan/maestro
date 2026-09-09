@@ -17,6 +17,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      # Linear, optional: lets the product agent check the diff against the issue's
+      # acceptance criteria instead of only the author's own PR description.
+      LINEAR_API_KEY: ${LINEAR_API_KEY:-}
+      LINEAR_TEAM_PREFIXES: ${LINEAR_TEAM_PREFIXES:-}
       # GitHub App (preferred) or a PAT for a single-user setup.
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}

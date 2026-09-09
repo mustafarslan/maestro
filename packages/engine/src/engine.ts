@@ -66,6 +66,8 @@ export interface NodeOutcome {
 }
 
 export interface ReviewOutcome {
+  /** The tracker issue this PR was checked against, when one was found. */
+  linearIssue?: { identifier: string; title: string; acceptanceCriteria?: string };
   reviewId: string;
   /** False when a provider has no pricing data, so cost is unknown rather than zero. */
   costKnown?: boolean;
@@ -114,6 +116,13 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     costKnown: !(modelSteps > 0 && totalCost === 0),
     durationMs: Date.now() - startedAt,
     toolchain: prepared?.toolchain.kind,
+    linearIssue: req.context.linear?.identifier
+      ? {
+          identifier: req.context.linear.identifier,
+          title: req.context.linear.title ?? "",
+          acceptanceCriteria: req.context.linear.acceptanceCriteria,
+        }
+      : undefined,
     setupFailed: prepared?.setupResults.some((r) => r.exitCode !== 0) ?? false,
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],

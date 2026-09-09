@@ -22,6 +22,7 @@ import {
   type PullRequestContext,
   type PullRequestRef,
 } from "./github.js";
+import { type LinearClient, resolveIssueForPullRequest } from "./linear.js";
 
 /** Lets Maestro find and update its own previous comment instead of piling on. */
 export const COMMENT_MARKER = "<!-- maestro-review -->";
@@ -40,6 +41,8 @@ export interface ReviewPullRequestOptions {
   force?: boolean;
   /** Set false to always review the full diff instead of the delta since the last round. */
   incremental?: boolean;
+  /** Linear issue lookup. Absent means reviews run without ticket context. */
+  linear?: LinearClient;
   /**
    * Fired as soon as the review row exists, before any long-running work.
    *
@@ -133,6 +136,16 @@ export async function reviewPullRequest(
     const token = await client.cloneToken();
     await checkoutPullRequest(pr, workdir, token, plan.previousHeadSha);
 
+    // The ticket is the independent record of what was asked for; the PR description is
+    // the author's own account of it. The product agent needs the former to judge the
+    // latter, so it is fetched here — by the orchestrator, never by an agent, which has
+    // no credentials and no network by design.
+    const issue = await resolveIssueForPullRequest(opts.linear, {
+      branch: pr.headRef,
+      title: pr.title,
+      body: pr.body,
+    });
+
     const outcome = await runReview(
       { ...opts.deps, db },
       {
@@ -149,6 +162,12 @@ export async function reviewPullRequest(
           pr: { number: pr.number, title: pr.title, description: pr.body, author: pr.author },
           repo: { owner: pr.owner, name: pr.repo, defaultBranch: pr.baseRef },
           diff: { changedFiles: pr.changedFiles, changedLines: pr.changedLines },
+          linear: issue && {
+            identifier: issue.identifier,
+            title: issue.title,
+            description: issue.description,
+            acceptanceCriteria: issue.acceptanceCriteria,
+          },
           carriedFindings: plan.carried.length
             ? plan.carried.map(
                 (c) =>

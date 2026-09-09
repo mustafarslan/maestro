@@ -4,7 +4,12 @@ import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import { ReviewRecorder, renderReview, runReview } from "@maestro/engine";
-import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
+import {
+  GitHubClient,
+  LinearClient,
+  parsePullRequestRef,
+  reviewPullRequest,
+} from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
@@ -110,6 +115,8 @@ export async function review(argv: string[]): Promise<number> {
         },
         playbook,
         playbookVersionId: playbookRecord.id,
+        // Undefined unless LINEAR_API_KEY is set; the review runs either way.
+        linear: LinearClient.fromEnv(),
         pr: prRef,
         dryRun: argv.includes("--dry-run"),
         force: argv.includes("--force"),

@@ -7,7 +7,8 @@ import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
 
-type Status = "ok" | "warn" | "fail";
+// "info" is neither pass nor fail: an optional integration being absent is information.
+type Status = "ok" | "warn" | "fail" | "info";
 interface Check {
   status: Status;
   label: string;
@@ -110,6 +111,25 @@ export async function doctor(): Promise<number> {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Optional integration: its absence is information, not a problem. Saying nothing at
+  // all is worse — a product agent reviewing against no acceptance criteria looks the
+  // same as one reviewing against the wrong ones.
+  checks.push(
+    process.env.LINEAR_API_KEY
+      ? {
+          status: "ok",
+          label: "linear",
+          detail: process.env.LINEAR_TEAM_PREFIXES
+            ? `issue lookup enabled, prefixes: ${process.env.LINEAR_TEAM_PREFIXES}`
+            : "issue lookup enabled",
+        }
+      : {
+          status: "info",
+          label: "linear",
+          detail: "not configured - set LINEAR_API_KEY to check PRs against their issue",
+        },
+  );
 
   console.log(color.bold("\nmaestro doctor\n"));
   for (const c of checks) console.log(checkLine(c.status, c.label, c.detail));

@@ -38,6 +38,9 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## Not yet verified
 
+- **Linear has never been called against a real workspace.** Key extraction, criteria parsing
+  and every degradation path are unit-tested against a fake transport, but no live API key has
+  been used, so the GraphQL query shape is unverified against the real endpoint.
 - **Hosted providers have never made a live call.** The Anthropic, OpenAI and Google adapters pass
   the conformance suite against recorded fixtures only. All live testing used Ollama. The shipped
   default playbook binds every agent to Anthropic, so a fresh install needs an `ANTHROPIC_API_KEY`
@@ -168,6 +171,20 @@ These are recorded because each was invisible to the test suite that existed at 
 26. **`read_file` clamped its range silently.** After the cap in 18, an agent asking for lines
     1-600 got 1-300 with nothing said — which is how an agent comes to report that a function is
     never closed, having been shown only its first half.
+
+27. **Linear integration was never implemented.** `PromptContext.linear` existed, the agent
+    prompt rendered it, and a persona template variable referenced it — but nothing anywhere
+    populated it. A wired socket with nothing plugged in, structurally identical to the dead
+    scheduler in 21, and it went unnoticed because every consumer of the field handles its
+    absence gracefully. It was a headline requirement, not an extra. Now implemented: issue
+    resolution from branch/body/title, acceptance-criteria extraction, and the resolved issue
+    named in the review comment so a reader can see what the product agent was judging against.
+28. **The first issue-key matcher read `utf-8`, `base-64` and `covid-19` as issue keys**,
+    because it uppercased the text before matching. Each false key is a wasted API round trip on
+    every review, or a lookup that hits a real issue in an unrelated team. Prose is now matched
+    case-sensitively, branch names are matched only at segment boundaries, issue numbers may not
+    lead with a zero (Linear numbers from 1, so `v2-0` is a version), and `LINEAR_TEAM_PREFIXES`
+    removes the ambiguity entirely for teams that want it.
 
 Findings 11-20 and 23-25 were reported by **Maestro reviewing its own commits**. It also produced one
 false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
