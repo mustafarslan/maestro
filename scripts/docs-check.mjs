@@ -13,7 +13,24 @@
  *
  *   node scripts/docs-check.mjs
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/** Every non-test source file under a directory, skipping build output. */
+function sourceFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      if (entry === "dist" || entry === "node_modules") continue;
+      out.push(...sourceFiles(path));
+    } else if (/\.(ts|tsx)$/.test(entry) && !entry.includes(".test.")) {
+      out.push(path);
+    }
+  }
+  return out;
+}
 
 const docs = ["README.md", "docs/STATUS.md", "docs/TODO.md", "docs/CONFIGURATION.md"];
 let bad = 0;
@@ -78,17 +95,24 @@ for (const doc of docs) {
 // `maestro eval`, and the CLI answers `maestro evaluate` with a usage error. Check 3
 // covers the four documents and stopped at their edge, so a wrong command in the admin
 // UI — read by exactly the person who is about to type it — went unnoticed.
+//
+// The first version of this check listed six files and missed `packages/mcp/src/server.ts`,
+// which told a model to run `maestro evaluate run <fixture>` — the same wrong command, in
+// the surface most likely to be acted on without a person reading it. A hand-kept list of
+// places to check is a list that will be short by one. It walks the source now: a command
+// the CLI accepts is fine wherever it appears, and one it does not is worth knowing about
+// wherever it appears.
 {
-  const surfaces = [
-    "packages/ui/src/Quality.tsx",
-    "packages/ui/src/Studio.tsx",
-    "packages/ui/src/App.tsx",
-    "apps/cli/src/commands/evaluate.ts",
-    "apps/cli/src/commands/doctor.ts",
-    "apps/cli/src/commands/init.ts",
-  ].filter(existsSync);
+  // Only formatted mentions — inside a backtick, a single quote or a <code> span. That is
+  // how this codebase writes an instruction to somebody, and it separates
+  // "run `maestro reap`" from prose like "comment is not a maestro command" or the log
+  // line "maestro failed". Every real instruction in the tree is formatted one of those
+  // three ways; rewording the prose to suit the check would be the tail wagging the dog.
+  // `@maestro review` is a pull request comment, not a command, so it is excluded.
+  const instruction = /(?<![@\w])(?<=`|'|<code>)maestro ([a-z][\w-]*)/g;
+  const surfaces = sourceFiles("packages").concat(sourceFiles("apps"));
   for (const file of surfaces) {
-    for (const m of readFileSync(file, "utf8").matchAll(/\bmaestro ([a-z][\w-]*)/g)) {
+    for (const m of readFileSync(file, "utf8").matchAll(instruction)) {
       if (!known.has(m[1]))
         fail(`${file}: prints 'maestro ${m[1]}', which the CLI does not accept`);
     }

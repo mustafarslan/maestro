@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -164,7 +166,19 @@ describe("run_eval", () => {
     const client = await connect();
     const res = await call(client, "run_eval", {});
     expect(res.scores).toEqual([]);
-    expect(res.note).toMatch(/maestro evaluate/);
+    // Against the CLI's own command list rather than against a spelling written here.
+    // This assertion used to read /maestro evaluate/ — the command is `maestro eval`,
+    // and the CLI answers the longer spelling with a usage error. The test had locked in
+    // the mistake it was meant to guard, and told a model to type it.
+    const source = readFileSync(
+      join(import.meta.dirname, "../../../apps/cli/src/index.ts"),
+      "utf8",
+    );
+    const accepted = new Set([...source.matchAll(/case "([\w-]+)":/g)].map((m) => m[1]));
+    for (const m of String(res.note).matchAll(/maestro ([a-z][\w-]*)/g)) {
+      expect(accepted, `run_eval tells the caller to run 'maestro ${m[1]}'`).toContain(m[1]);
+    }
+    expect(res.note).toMatch(/maestro eval/);
   });
 });
 
@@ -186,5 +200,55 @@ describe("tool surface", () => {
     ]) {
       expect(names).toContain(expected);
     }
+  });
+});
+
+describe("an id that does not exist says so", () => {
+  /**
+   * The caller here is a model, which acts on what it is told. "This review exists and
+   * has nothing in it" and "there is no such review" lead to different next moves, and
+   * only one of them was true.
+   */
+  const raw = async (client: Client, name: string, args: Record<string, unknown>) => {
+    const res = (await client.callTool({ name, arguments: args })) as {
+      content: { type: string; text: string }[];
+    };
+    return res.content[0]?.text ?? "";
+  };
+
+  it("get_review does not report an empty review for an id that is not one", async () => {
+    const client = await connect();
+    expect(await raw(client, "get_review", { reviewId: "nope" })).toContain("no review with id");
+  });
+
+  it("get_review still returns the review when there is one", async () => {
+    // The other half: a handler that always said "no review" would pass the test above.
+    const client = await connect();
+    expect(await raw(client, "get_review", { reviewId })).toContain(reviewId);
+  });
+
+  it("dismiss_finding does not report success for a finding that does not exist", async () => {
+    // This tool is the feedback signal precision is measured from. A dismissal that
+    // silently lands nowhere makes that number quietly wrong, and the person who typed
+    // the id slightly wrong is told it worked.
+    const client = await connect();
+    const said = await raw(client, "dismiss_finding", { findingId: "nope", reason: "x" });
+    expect(said).toContain("no finding with id");
+    expect(said).not.toContain('"ok": true');
+  });
+
+  it("dismiss_finding does dismiss one that exists", async () => {
+    const client = await connect();
+    db.prepare(
+      `INSERT INTO findings (id, review_id, agent_id, category, severity, confidence, title, body, created_at)
+       VALUES ('fd-1', ?, 'security', 'bug', 'high', 0.9, 't', 'b', ?)`,
+    ).run(reviewId, new Date().toISOString());
+
+    expect(
+      await raw(client, "dismiss_finding", { findingId: "fd-1", reason: "not real" }),
+    ).toContain('"ok": true');
+    expect(
+      db.prepare("SELECT status FROM findings WHERE id='fd-1'").get<{ status: string }>()?.status,
+    ).toBe("dismissed");
   });
 });

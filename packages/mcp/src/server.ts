@@ -82,9 +82,16 @@ export function buildServer(deps: McpDeps): McpServer {
       description: "Full detail for one review: tasks, findings, per-agent cost and timing.",
       inputSchema: { reviewId: z.string() },
     },
-    async ({ reviewId }) =>
-      text({
-        review: db.prepare("SELECT * FROM reviews WHERE id=?").get(reviewId),
+    async ({ reviewId }) => {
+      // A review that does not exist is not a review with nothing in it. Returning
+      // `{review: undefined, tasks: [], findings: [], spend: []}` reads to a caller as
+      // "this ran and found nothing", which is a different and wrong statement — and the
+      // caller here is a model, which will act on it. `explain_finding` beside this one
+      // already says so; this did not.
+      const review = db.prepare("SELECT * FROM reviews WHERE id=?").get(reviewId);
+      if (!review) return text(`no review with id ${reviewId}`);
+      return text({
+        review,
         tasks: db
           .prepare(
             "SELECT node_id, kind, agent_id, state, error, cost_cents FROM tasks WHERE review_id=?",
@@ -101,7 +108,8 @@ export function buildServer(deps: McpDeps): McpServer {
              FROM llm_calls WHERE review_id=? GROUP BY provider_id, model`,
           )
           .all(reviewId),
-      }),
+      });
+    },
   );
 
   server.registerTool(
@@ -126,9 +134,17 @@ export function buildServer(deps: McpDeps): McpServer {
       inputSchema: { findingId: z.string(), reason: z.string().optional() },
     },
     async ({ findingId, reason }) => {
-      db.prepare(
-        "UPDATE findings SET status='dismissed', suppressed_reason=COALESCE(?, suppressed_reason) WHERE id=?",
-      ).run(reason ?? null, findingId);
+      const done = db
+        .prepare(
+          "UPDATE findings SET status='dismissed', suppressed_reason=COALESCE(?, suppressed_reason) WHERE id=?",
+        )
+        .run(reason ?? null, findingId);
+      // `ok: true` for a finding that does not exist told the caller the dismissal
+      // landed when nothing was updated. This tool is the feedback signal precision is
+      // measured from, so a silently dropped dismissal is not a cosmetic error: the
+      // number it feeds is quietly wrong, and a person who typed the id slightly wrong
+      // has no way to know.
+      if (done.changes === 0) return text(`no finding with id ${findingId}`);
       return text({ ok: true, findingId, reason });
     },
   );
@@ -383,7 +399,7 @@ export function buildServer(deps: McpDeps): McpServer {
       title: "Run eval",
       description:
         "Score stored eval fixtures and report precision, recall and miss rate per playbook " +
-        "version. Reads scores already recorded by `maestro evaluate`; it does not itself run " +
+        "version. Reads scores already recorded by `maestro eval`; it does not itself run " +
         "reviews, because those take minutes and cost money.",
       inputSchema: { fixture: z.string().optional() },
     },
@@ -402,8 +418,8 @@ export function buildServer(deps: McpDeps): McpServer {
           scores: [],
           comparisons: [],
           note: fixture
-            ? `no recorded scores for fixture '${fixture}' - run 'maestro evaluate run ${fixture}'`
-            : "no recorded scores - add a fixture with 'maestro evaluate add' and run 'maestro evaluate run'",
+            ? `no recorded scores for fixture '${fixture}' - run 'maestro eval run ${fixture}'`
+            : "no recorded scores - add a fixture with 'maestro eval add' and run 'maestro eval run'",
         });
       }
       return text({ scores: selected, comparisons: compareVersions(selected) });

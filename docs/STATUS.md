@@ -2314,6 +2314,40 @@ the server never sends fails it, and removing `live` from the server's response 
 
     Found only because fixing 180 meant looking at what happens after the throw.
 
+182. **`get_review` reported an empty review for an id that is not a review.** It returned
+    `{review: undefined, tasks: [], findings: [], spend: []}` — which reads as "this ran
+    and found nothing", a different and wrong statement. The caller is a model, and it
+    acts on what it is told: "no findings" and "no such review" lead somewhere different.
+    `explain_finding`, twenty lines below, already answered "no finding with id …"; this
+    did not.
+
+183. **`dismiss_finding` reported success for a finding that does not exist.** `UPDATE …
+    WHERE id=?` matching nothing still returned `{ok: true}`. This is the tool the plan
+    names as the feedback signal precision is measured from, so a dismissal that lands
+    nowhere makes that number quietly wrong — and the person who typed the id slightly
+    wrong is told it worked. It checks `changes` now.
+
+184. **The wrong subcommand name again, in the surface most likely to be acted on.**
+    `run_eval` told the caller to run the long spelling of `eval`, which the CLI answers
+    with a usage error. This is finding 169 exactly — fixed in the admin UI, and the guard
+    written for it took a hand-kept list of six files to check.
+    `packages/mcp/src/server.ts` was not one of them.
+
+    A list of places to check is a list that will be short by one, and this one was short
+    by the surface a model reads without a person looking. The check walks the source tree
+    now, matching only formatted instructions — inside a backtick, a single quote or a
+    `<code>` span, which is how this codebase writes an instruction to somebody. That
+    separates a genuine "run `maestro reap`" from ordinary prose and from a log line that
+    happens to start with the product's name, without rewording either to suit the check.
+
+    And the test for `run_eval` asserted the long spelling: it had locked in the mistake it
+    existed to guard, and required the tool to keep telling a model to type it. It reads
+    the CLI's own `case` list now, so the assertion cannot restate a spelling that does not
+    work.
+
+    (As with 169, this entry cannot write the rejected spelling out, because the check
+    covers this file. That is the check being right.)
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
