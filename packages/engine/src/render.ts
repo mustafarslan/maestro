@@ -59,6 +59,22 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     lines.push("No findings met the reporting threshold.", "");
   }
 
+  // Degraded coverage belongs above the fold, not inside a collapsed block. "No findings"
+  // reads as a clean bill of health, and it is not one when half the crew never ran: a
+  // reader skimming the top line would take silence for a verdict. Observed on a real
+  // run where two of three agents died on a provider quota and the headline still said
+  // nothing was found.
+  const failedAgents = outcome.nodes.filter((n) => n.kind === "agent" && n.state === "failed");
+  if (failedAgents.length) {
+    const names = failedAgents.map((n) => n.agentId ?? n.nodeId).join(", ");
+    lines.push(
+      `> **Partial review.** ${failedAgents.length} agent(s) did not complete: ${names}. ` +
+        "Whatever they would have found is missing from this comment, so treat it as an " +
+        "incomplete pass rather than a clean one.",
+      "",
+    );
+  }
+
   lines.push("<details><summary>What Maestro checked</summary>", "");
 
   const agentRows = outcome.nodes.filter((n) => n.kind === "agent");

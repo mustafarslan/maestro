@@ -679,7 +679,14 @@ These are recorded because each was invisible to the test suite that existed at 
     replaced rather than passed through. A fence is only worth what the set of places it is
     applied is worth.
 
-Findings 75-85 were reported by **Maestro reviewing this session's own commits** — the first two
+86. **"No findings" read as a clean bill of health while half the crew never ran.** On a real run
+    two of three agents died on a provider quota; the comment's headline still said "No findings
+    met the reporting threshold" and the failures were disclosed only inside the collapsed
+    details block. Silence from an agent that never ran is not a verdict, and this is the same
+    class as every honesty defect in this document — the output implying more than was done.
+    A partial review now says so above the fold and names the agents that did not complete.
+
+Findings 75-86 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.
