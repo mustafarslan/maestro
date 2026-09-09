@@ -26,7 +26,13 @@ The gap between those two columns is the honest summary of this project's state.
 
 What that leaves, in order of how much it would tell us:
 
-1. **A live GitHub *write*.** The read half is now verified: `scripts/live-github-check.mjs` runs every read path against the real API — identity, pull request, open list, base-branch config both present and absent, commit compare, previous-comment lookup, clone token — and found a defect doing so (116). What remains is the half that changes something: a delivery sent by GitHub rather than signed locally, a comment actually posted, the App manifest redirect, and cancel-on-push under real timing. All of it needs a repository somebody is willing to have Maestro write to.
+1. **A delivery sent by GitHub.** Both halves of the API are now verified live by
+   `scripts/live-github-check.mjs`: the read paths, and — with `--write` — posting a comment,
+   finding it again by its marker and editing it in place, each read back afterwards and all of
+   it removed again. Verifying the read half found a defect (116). What is left is the part
+   nothing local can stand in for: a webhook GitHub itself sends rather than one signed here, the
+   App manifest redirect, and cancel-on-push under real timing. Those need an App installed on a
+   repository and a push to it.
 2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local stand-in.
 3. **Forty real containers.** The load scenario is real concurrency over a simulated sandbox.
 

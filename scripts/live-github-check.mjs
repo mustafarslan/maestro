@@ -7,11 +7,14 @@
  * and it is a script rather than a test because it needs a credential and a real pull
  * request, neither of which CI has.
  *
- * It makes no writes: no comment is posted, nothing is created. The one thing it cannot
- * cover is `postReview`/`updateComment`, which by definition change something.
+ * Read-only by default. `--write` adds the three calls that change something —
+ * `postReview`, `findPreviousComment`, `updateComment` — and removes what it created.
  *
  *   pnpm build
  *   GITHUB_TOKEN=$(gh auth token) node scripts/live-github-check.mjs <owner>/<repo>#<number>
+ *
+ * Add --write to also exercise post/find/update. That one creates a comment on the pull
+ * request and deletes it again, including if a step fails.
  */
 import { GitHubClient } from "../packages/integrations/dist/index.js";
 
@@ -91,5 +94,67 @@ await check("cloneToken", async () => {
   return token ? `${token.length} chars` : "none";
 });
 
-console.log(failures ? `\n${failures} failed\n` : "\nall read paths verified live\n");
+/**
+ * The write path, behind an explicit flag.
+ *
+ * Posting, finding and updating a comment is the half no fixture can cover, and it is the
+ * half a review depends on: one comment per pull request, updated in place rather than
+ * piled on. Everything it creates it removes again, including on failure — a test run
+ * that leaves a comment behind on somebody's pull request is worse than no test run.
+ *
+ * Opt-in because it writes to a real repository. Nothing here calls a model.
+ */
+if (process.argv.includes("--write")) {
+  const MARKER = "<!-- maestro-live-check -->";
+  const token = await client.cloneToken();
+  let commentId;
+
+  const remove = async () => {
+    if (!commentId) return;
+    const res = await fetch(
+      `https://api.github.com/repos/${ref.owner}/${ref.repo}/issues/comments/${commentId}`,
+      { method: "DELETE", headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" } },
+    );
+    console.log(res.ok ? `  ok   cleanup: deleted comment ${commentId}` : `  FAIL cleanup: ${res.status} — DELETE comment ${commentId} by hand`);
+    if (!res.ok) failures++;
+  };
+
+  console.log("\n  write path (creates a comment and deletes it again)\n");
+  try {
+    await check("postReview", async () => {
+      const posted = await client.postReview(pr, `${MARKER}\nMaestro live check — this comment deletes itself.`);
+      commentId = posted.id;
+      // No inline anchors passed, so this must take the issue-comment path rather than
+      // the review path: a review with no comments would still show as a review.
+      if (posted.mode !== "comment") throw new Error(`expected an issue comment, got ${posted.mode}`);
+      return `id ${posted.id} as a ${posted.mode}`;
+    });
+
+    await check("findPreviousComment finds it", async () => {
+      const found = await client.findPreviousComment(pr, MARKER);
+      if (found !== commentId) throw new Error(`found ${found}, expected ${commentId}`);
+      return `id ${found}`;
+    });
+
+    await check("updateComment edits in place", async () => {
+      await client.updateComment(ref, commentId, `${MARKER}\nEdited by the live check.`);
+      // Read it back: an update that silently no-ops would pass a test that only checks
+      // the call did not throw, and "one comment updated in place" is the whole claim.
+      const res = await fetch(
+        `https://api.github.com/repos/${ref.owner}/${ref.repo}/issues/comments/${commentId}`,
+        { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" } },
+      );
+      const body = (await res.json()).body ?? "";
+      if (!body.includes("Edited by the live check")) throw new Error("the edit did not land");
+      // And still exactly one comment carries the marker — updating must not have posted.
+      const again = await client.findPreviousComment(pr, MARKER);
+      if (again !== commentId) throw new Error(`marker now matches ${again}, not ${commentId}`);
+      return "edit landed, still one comment";
+    });
+  } finally {
+    await remove();
+  }
+}
+
+console.log(failures ? `\n${failures} failed\n` : "\nall checked paths verified live\n");
 process.exit(failures ? 1 : 0);
