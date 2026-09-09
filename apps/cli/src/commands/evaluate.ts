@@ -21,6 +21,17 @@ import { DockerSandboxDriver } from "@maestro/sandbox";
 import { arg } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
+/**
+ * A ratio, or "n/a" when there was nothing to measure.
+ *
+ * Rendering an absent ratio as 0% reads as "it got everything wrong" when it means "the
+ * question was never asked" — a clean-code fixture, which exists to check that Maestro
+ * stays quiet, has no expected findings and so no recall to report.
+ */
+function pct(value: number | undefined): string {
+  return value === undefined ? "n/a" : `${(value * 100).toFixed(0)}%`;
+}
+
 const exec = promisify(execFile);
 
 function usage(): number {
@@ -95,7 +106,7 @@ export async function evaluate(argv: string[]): Promise<number> {
     for (const v of compareVersions(scores)) {
       console.log(
         `  ${color.cyan(v.playbookVersionId)}  runs=${v.runs}  ` +
-          `precision=${(v.precision * 100).toFixed(0)}%  recall=${(v.recall * 100).toFixed(0)}%  ` +
+          `precision=${pct(v.precision)}  recall=${pct(v.recall)}  ` +
           `false-positives=${v.falsePositives}  cost=${v.costCents.toFixed(2)}c`,
       );
     }
@@ -217,7 +228,7 @@ export async function evaluate(argv: string[]): Promise<number> {
         checkLine(
           ok ? "ok" : "warn",
           fixture.name,
-          `precision ${(score.precision * 100).toFixed(0)}% recall ${(score.recall * 100).toFixed(0)}%` +
+          `precision ${pct(score.precision)} recall ${pct(score.recall)}` +
             ` · ${score.hits.length} hit, ${score.misses.length} missed, ${score.falsePositives.length} false-positive` +
             ` · ${(score.durationMs / 1000).toFixed(0)}s`,
         ),

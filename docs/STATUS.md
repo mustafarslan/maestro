@@ -394,6 +394,15 @@ These are recorded because each was invisible to the test suite that existed at 
     configured", with nothing to suggest a key had been saved one character away. Validated
     against the configured list now.
 
+56. **The eval harness scored "said nothing" as zero precision and a clean fixture as zero
+    recall.** Both ratios divided by `denominator || 1`, so an absent denominator produced 0
+    rather than "not measurable". A clean-code fixture — which exists precisely to check that
+    Maestro stays quiet — therefore always scored 0% recall for behaving perfectly, making the one
+    fixture that tests for false positives look like total failure in every report. Version
+    comparison averaged those zeroes in, dragging down any version measured against such a
+    fixture. Both are now undefined when there is nothing to measure, rendered `n/a`, and the
+    average skips them.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

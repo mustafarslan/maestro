@@ -136,3 +136,65 @@ describe("version comparison", () => {
     expect(compared[1]?.recall).toBe(0);
   });
 });
+
+describe("ratios that cannot be measured", () => {
+  const outcome = (titles: string[]) =>
+    ({
+      triage: {
+        posted: titles.map((title) => ({
+          title,
+          body: "",
+          category: "c",
+          severity: "high" as const,
+          confidence: 0.9,
+          agentIds: ["security"],
+          agreementCount: 1,
+        })),
+        suppressed: [],
+        summary: "",
+      },
+      costCents: 0,
+      durationMs: 1,
+      nodes: [],
+    }) as unknown as Parameters<typeof scoreOutcome>[1];
+
+  it("reports no precision when nothing was reported, rather than zero", () => {
+    // Zero is a claim; undefined is the truth. Scoring silence as 0% precision makes
+    // "said nothing" indistinguishable from "said two wrong things".
+    const score = scoreOutcome(
+      { name: "f", target: ".", baseRef: "main", expected: [{ match: "idor" }] },
+      outcome([]),
+    );
+    expect(score.precision).toBeUndefined();
+    expect(score.recall).toBe(0); // it genuinely missed the one expected finding
+  });
+
+  it("reports no recall for a fixture that expects nothing", () => {
+    // A clean-code fixture exists to check that Maestro stays QUIET. Scoring it 0%
+    // recall made the one fixture that tests for false positives always look like total
+    // failure.
+    const score = scoreOutcome(
+      { name: "clean", target: ".", baseRef: "main", expected: [] },
+      outcome([]),
+    );
+    expect(score.recall).toBeUndefined();
+  });
+
+  it("averages only the versions that have a ratio", () => {
+    // Folding an absent ratio in as zero drags a version's score down for fixtures that
+    // never asked the question.
+    const withRatio = scoreOutcome(
+      { name: "a", target: ".", baseRef: "main", expected: [{ match: "idor" }] },
+      outcome(["idor in the handler"]),
+      "pv-1",
+    );
+    const withoutRatio = scoreOutcome(
+      { name: "clean", target: ".", baseRef: "main", expected: [] },
+      outcome([]),
+      "pv-1",
+    );
+
+    const [comparison] = compareVersions([withRatio, withoutRatio]);
+    expect(comparison?.recall).toBe(1);
+  });
+});

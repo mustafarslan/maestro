@@ -73,8 +73,10 @@ export interface EvalScore {
   falsePositives: { title: string; pattern: string }[];
   /** Reported findings that were neither expected nor forbidden. */
   unclassified: number;
-  precision: number;
-  recall: number;
+  /** Undefined when nothing was reported: precision over no predictions is not zero. */
+  precision?: number;
+  /** Undefined when the fixture expects nothing, as a clean-code fixture does. */
+  recall?: number;
   costCents: number;
   durationMs: number;
   agentsRun: number;
@@ -119,8 +121,15 @@ export function scoreOutcome(
   // Unclassified findings count against precision: they may be genuine, but on a fixture
   // with a known answer key they are unverified, and treating them as correct would let
   // a noisy agent score well.
-  const precisionDenominator = reported.length || 1;
-  const recallDenominator = fixture.expected.length || 1;
+  //
+  // Both ratios are UNDEFINED rather than zero when their denominator is empty, because
+  // zero is a claim and undefined is the truth. Precision over no predictions said
+  // nothing; scoring that 0 makes it indistinguishable from having said two wrong
+  // things. Recall over an empty answer key is worse: a clean-code fixture, which exists
+  // precisely to check that Maestro stays quiet, scored 0% recall for behaving perfectly
+  // — so the one fixture that tests for false positives always looked like total failure.
+  const precision = reported.length ? hits.length / reported.length : undefined;
+  const recall = fixture.expected.length ? hits.length / fixture.expected.length : undefined;
 
   return {
     fixture: fixture.name,
@@ -129,8 +138,8 @@ export function scoreOutcome(
     misses,
     falsePositives,
     unclassified,
-    precision: hits.length / precisionDenominator,
-    recall: hits.length / recallDenominator,
+    precision,
+    recall,
     costCents: outcome.costCents,
     durationMs: outcome.durationMs,
     agentsRun: outcome.nodes.filter((n) => n.kind === "agent" && n.state === "done").length,
@@ -176,10 +185,18 @@ export function loadScores(dir: string): EvalScore[] {
 export interface VersionComparison {
   playbookVersionId: string;
   runs: number;
-  precision: number;
-  recall: number;
+  /** Undefined when nothing was reported: precision over no predictions is not zero. */
+  precision?: number;
+  /** Undefined when the fixture expects nothing, as a clean-code fixture does. */
+  recall?: number;
   falsePositives: number;
   costCents: number;
+}
+
+/** Mean of the defined values, or undefined when none are. */
+function mean(values: (number | undefined)[]): number | undefined {
+  const present = values.filter((v): v is number => v !== undefined);
+  return present.length ? present.reduce((a, b) => a + b, 0) / present.length : undefined;
 }
 
 export function compareVersions(scores: EvalScore[]): VersionComparison[] {
@@ -189,14 +206,20 @@ export function compareVersions(scores: EvalScore[]): VersionComparison[] {
     byVersion.set(key, [...(byVersion.get(key) ?? []), s]);
   }
 
-  return [...byVersion.entries()]
-    .map(([playbookVersionId, runs]) => ({
-      playbookVersionId,
-      runs: runs.length,
-      precision: runs.reduce((n, r) => n + r.precision, 0) / runs.length,
-      recall: runs.reduce((n, r) => n + r.recall, 0) / runs.length,
-      falsePositives: runs.reduce((n, r) => n + r.falsePositives.length, 0),
-      costCents: runs.reduce((n, r) => n + r.costCents, 0),
-    }))
-    .sort((a, b) => b.recall - a.recall);
+  return (
+    [...byVersion.entries()]
+      .map(([playbookVersionId, runs]) => ({
+        playbookVersionId,
+        runs: runs.length,
+        // Averaged over the runs that HAVE a ratio. Folding an undefined in as zero drags
+        // a version's score down for fixtures that never asked the question.
+        precision: mean(runs.map((r) => r.precision)),
+        recall: mean(runs.map((r) => r.recall)),
+        falsePositives: runs.reduce((n, r) => n + r.falsePositives.length, 0),
+        costCents: runs.reduce((n, r) => n + r.costCents, 0),
+      }))
+      // A version with no measurable recall sorts last rather than first, which is where
+      // `undefined` in a numeric comparison would otherwise leave it.
+      .sort((a, b) => (b.recall ?? -1) - (a.recall ?? -1))
+  );
 }
