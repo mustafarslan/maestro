@@ -255,6 +255,18 @@ store-driver contract on both runtimes, the binary build, and the MCP protocol a
 binary. `scripts/gate.sh` is the local equivalent, plus the clean-checkout property CI gets for
 free from `actions/checkout`.
 
+The daemon's recurring work and what each costs:
+
+| runs | cost |
+| --- | --- |
+| job queue poll | local SQLite only |
+| lease heartbeat | local SQLite only, per in-flight review |
+| reaction sweep, every 10 min | at most 50 GitHub requests per sweep — 300/hour |
+| pull request poller, every `--poll-interval` | one GitHub request per repository per tick |
+
+`recurring-cost.test.ts` fails if a new recurring job appears without a line here, because the two
+worst defects of this kind were both correct code that simply ran too often.
+
 When touching a security control or a guard, check the tests actually hold it:
 
 ```

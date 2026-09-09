@@ -1630,6 +1630,26 @@ before a release, and either would catch the other side changing under us.
     sweeps and clean-checkout gates all look at whether code is correct, and none of them looks
     at how often it runs multiplied by how long it runs for.
 
+### Recurring cost, now a checked property
+
+Findings 145 and 146 were one kind of defect, and nothing in this repository looked for it. Both
+were correct at every scale they would have been tested at and wrong at the scale they would
+actually run at: the reaction sweep at 6000 GitHub requests an hour against a limit of 5000, the
+poller at 3060. Neither was a logic error, so unit tests said nothing, the mutation sweep said
+nothing, and the clean-checkout gate said nothing — they all ask whether code is correct, and
+none asks how often it runs multiplied by how long it runs for.
+
+`recurring-cost.test.ts` asks it, the same crude way `wiring.test.ts` asks whether configuration
+is read. Every `setInterval` the daemon starts must have a line in a table stating its bound, so
+adding one without costing it fails the suite; the two sweeps that reach GitHub must stay bounded
+independently of data volume — the reaction sweep by an explicit cap, the poller by not fetching
+per pull request at all. Both halves mutation-checked: an undocumented new interval fails with a
+message saying what to do, and reinstating the poller's per-pull-request call fails too.
+
+It does not make the class impossible, and nothing here pretends it does. What it does is make
+the question unavoidable at the moment somebody adds recurring work, which is when it is cheap
+to answer.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
