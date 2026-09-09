@@ -23,6 +23,12 @@
     },
     {
       "path": "../../packages/integrations"
+    },
+    {
+      "path": "../../packages/server"
+    },
+    {
+      "path": "../../packages/mcp"
     }
   ],
   "exclude": ["src/**/*.test.ts"]

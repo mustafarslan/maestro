@@ -3,8 +3,10 @@ import { logger } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
 import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
+import { mcp } from "./commands/mcp.js";
 import { playbook } from "./commands/playbook.js";
 import { review } from "./commands/review.js";
+import { serve } from "./commands/serve.js";
 import { color } from "./ui.js";
 
 const VERSION = "0.1.0";
@@ -21,10 +23,12 @@ ${color.bold("COMMANDS")}
   doctor               check runtime, git, docker, database and playbook health
   llm <sub>            providers, model catalog, conformance tests, API keys
   playbook <sub>       inspect, export, import and activate playbook versions
-  review <path>        review a local checkout in an isolated container
+  review <target>      review a local checkout or a pull request
+  serve                run the daemon: webhooks/poller, workers, admin UI
+  mcp                  stdio MCP server for Claude Code
   version              print the version
 
-${color.dim("Coming in later phases: serve, mcp, eval")}
+${color.dim("eval and studio arrive with the measurement and UI phases")}
 `);
   return 0;
 }
@@ -53,6 +57,10 @@ async function main(): Promise<number> {
       return playbook(rest);
     case "review":
       return review(rest);
+    case "serve":
+      return serve(rest);
+    case "mcp":
+      return mcp(rest);
     default:
       console.error(`unknown command: ${cmd}\n`);
       usage();

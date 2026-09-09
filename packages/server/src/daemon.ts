@@ -15,6 +15,7 @@ import {
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
+import { type RunningAdmin, startAdminServer } from "./admin.js";
 import { DEFAULT_LIMITS, Scheduler, type SchedulerLimits } from "./scheduler.js";
 
 export interface DaemonOptions {
@@ -61,6 +62,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const inFlight = new Map<string, AbortController>();
   let stopping = false;
 
+  const admin: RunningAdmin | undefined =
+    opts.adminPort === undefined
+      ? undefined
+      : await startAdminServer({
+          db,
+          port: opts.adminPort,
+          host: opts.adminHost,
+          token: adminToken,
+        });
+  const notify = (event: string, data: unknown) => admin?.broadcast(event, data);
+
   /** Enqueue rather than review inline: the HTTP handler must return immediately. */
   const enqueueTrigger = (t: ReviewTrigger): void => {
     if (t.kind !== "review") {
@@ -106,6 +118,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         signal: controller.signal,
       });
       if (result.reviewId) inFlight.set(result.reviewId, controller);
+      notify("review", { reviewId: result.reviewId, state: result.state });
     } finally {
       for (const [id, c] of inFlight) if (c === controller) inFlight.delete(id);
     }
@@ -121,6 +134,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             continue;
           }
           try {
+            notify("review", { started: job.id });
             await runOne(job.payload as PullRequestRef);
             queue.complete(job.id);
           } catch (err) {
@@ -214,7 +228,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
 
   return {
     webhookPort,
-    adminPort: opts.adminPort,
+    adminPort: admin?.port ?? opts.adminPort,
     adminToken,
     async stop() {
       stopping = true;
@@ -222,6 +236,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       if (pollTimer) clearInterval(pollTimer);
       for (const c of inFlight.values()) c.abort();
       await new Promise<void>((r) => (webhookServer ? webhookServer.close(() => r()) : r()));
+      await admin?.close();
       await Promise.allSettled(workers);
     },
   };

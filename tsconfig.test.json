@@ -12,5 +12,6 @@
       "@maestro/playbook": ["./packages/playbook/src/index.ts"]
     }
   },
-  "include": ["packages/**/*.test.ts", "apps/**/*.test.ts", "packages/*/src/**/*.ts"]
+  "include": ["packages/**/*.test.ts", "apps/**/*.test.ts", "packages/*/src/**/*.ts"],
+  "exclude": ["packages/ui/**"]
 }

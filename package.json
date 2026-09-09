@@ -8,12 +8,13 @@
   },
   "scripts": {
     "build": "pnpm -r --filter './packages/**' run build",
-    "build:binary": "tsc -b && bun build --compile --outfile dist/maestro apps/cli/dist/index.js",
-    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "build:binary": "pnpm run build:ui && tsc -b && bun build --compile --outfile dist/maestro apps/cli/dist/index.js",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json && tsc -p packages/ui/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "build:ui": "pnpm --filter @maestro/ui build && node scripts/embed-ui.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
@@ -32,6 +33,7 @@
     "@types/picomatch": "4.0.2",
     "ai": "7.0.93",
     "picomatch": "4.0.4",
-    "zod": "4.5.4"
+    "zod": "4.5.4",
+    "@modelcontextprotocol/sdk": "1.30.0"
   }
 }
