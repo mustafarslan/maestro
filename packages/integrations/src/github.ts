@@ -172,14 +172,34 @@ export class GitHubClient {
     };
   }
 
-  async listOpenPullRequests(owner: string, repo: string): Promise<PullRequestRef[]> {
+  /**
+   * Open pull requests, each with the head SHA the list endpoint already returned.
+   *
+   * It used to return only `{owner, repo, number}`, throwing away the `head.sha` that came
+   * back in the same response — and the poller then made one `getPullRequest` call per
+   * pull request to fetch exactly that field again. N+1 requests per repository per tick,
+   * for ever: fifty open pull requests on a sixty-second interval is 3060 requests an hour
+   * against a limit of 5000, for data already in hand.
+   *
+   * Draft state comes back too, so the poller can skip drafts without asking either.
+   */
+  async listOpenPullRequests(
+    owner: string,
+    repo: string,
+  ): Promise<(PullRequestRef & { headSha: string; draft: boolean })[]> {
     const prs = await this.octokit.paginate(this.octokit.rest.pulls.list, {
       owner,
       repo,
       state: "open",
       per_page: 100,
     });
-    return prs.map((pr) => ({ owner, repo, number: pr.number }));
+    return prs.map((pr) => ({
+      owner,
+      repo,
+      number: pr.number,
+      headSha: pr.head.sha,
+      draft: Boolean(pr.draft),
+    }));
   }
 
   /**

@@ -291,3 +291,27 @@ describe("a requested review carries the comment that asked for it", () => {
     expect(comment(undefined)).toMatchObject({ kind: "ignore" });
   });
 });
+
+describe("the poller asks once per repository, not once per pull request", () => {
+  // N+1 per repository per tick, for ever: the head SHA arrives with the listing and the
+  // poller used to discard it, then fetch each pull request individually for exactly that
+  // field. Fifty open pull requests on a sixty-second interval is 3060 requests an hour
+  // against a limit of 5000 — and it degrades as a repository gets busier, which is when
+  // reviews matter most. Verified against the live API: `pulls.list` returns a 40-character
+  // head SHA and a boolean draft for every entry.
+  it("uses the head sha the listing already carried", () => {
+    const state = newPollState();
+    const triggers = diffPoll(state, [
+      { pr: { owner: "acme", repo: "web", number: 7 }, headSha: "a".repeat(40) },
+    ]);
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]).toMatchObject({ kind: "review", headSha: "a".repeat(40) });
+  });
+
+  it("still says nothing when the head has not moved", () => {
+    const state = newPollState();
+    const observed = [{ pr: { owner: "acme", repo: "web", number: 7 }, headSha: "b".repeat(40) }];
+    diffPoll(state, observed);
+    expect(diffPoll(state, observed)).toHaveLength(0);
+  });
+});

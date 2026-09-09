@@ -501,13 +501,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         const [owner, repo] = slug.split("/");
         if (!owner || !repo) continue;
         try {
+          // One request per repository per tick. The head SHA arrives with the listing,
+          // so asking for each pull request individually was N+1 calls for data already
+          // in the response — 3060 an hour at fifty open pull requests on a sixty-second
+          // interval, against a limit of 5000.
           const open = await client.listOpenPullRequests(owner, repo);
-          const observed = await Promise.all(
-            open.map(async (ref) => ({
-              pr: ref,
-              headSha: (await client.getPullRequest(ref)).headSha,
-            })),
-          );
+          const observed = open
+            .filter((pr) => !pr.draft)
+            .map(({ headSha, draft: _draft, ...pr }) => ({ pr, headSha }));
           for (const t of diffPoll(state, observed)) enqueueTrigger(t);
         } catch (err) {
           logger.warn({ slug, err: err instanceof Error ? err.message : err }, "poll failed");

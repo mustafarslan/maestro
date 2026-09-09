@@ -1612,6 +1612,24 @@ before a release, and either would catch the other side changing under us.
     codebase's. Worth noting what nearly hid it: it is correct at every scale I would have tested
     it at, and wrong at the scale it would actually run at.
 
+146. **The poller asked for data it had already been given, once per pull request, for ever.**
+    `pulls.list` returns full pull request objects — verified against the live API: a
+    40-character `head.sha` and a boolean `draft` for all twenty entries of a real listing.
+    `listOpenPullRequests` mapped that down to `{owner, repo, number}` and threw the rest away,
+    and the poller then called `getPullRequest` once per open pull request to fetch exactly the
+    field it had just discarded.
+
+    N+1 requests per repository per tick: fifty open pull requests on a sixty-second interval is
+    3060 an hour against a limit of 5000, and it gets worse as a repository gets busier — which
+    is when its reviews matter most. Now one request per repository per tick, and drafts are
+    filtered from the same response rather than asked about.
+
+    This is the second instance of the class named in 145, found by asking the question that
+    finding produced — *what does this cost per hour, forever?* — of everything that runs on a
+    timer. The first instance was mine; this one predates the session. Unit tests, mutation
+    sweeps and clean-checkout gates all look at whether code is correct, and none of them looks
+    at how often it runs multiplied by how long it runs for.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
