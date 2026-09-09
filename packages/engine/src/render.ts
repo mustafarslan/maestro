@@ -209,6 +209,16 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     );
   }
 
+  if (outcome.diffDegraded) {
+    lines.push(
+      "> **Diff warning:** the fork point of this branch was not reachable, so the agents read a",
+      "> two-point comparison against the tip of the base branch rather than this pull request's",
+      "> change. Anything that landed on the base branch since the fork appears in it, inverted.",
+      "> Findings anchored outside this change should be read with that in mind.",
+      "",
+    );
+  }
+
   if (outcome.setupFailed) {
     lines.push(
       "> **Environment warning:** dependency installation did not complete, so build and test",

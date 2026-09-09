@@ -2127,6 +2127,32 @@ the server never sends fails it, and removing `live` from the server's response 
     because it changes how a mutation result must be read: for anything crossing a package
     boundary, rebuild between applying the mutation and believing the outcome.
 
+172. **Every agent read a diff containing sixty deletions the pull request never made.**
+    `checkoutPullRequest` fetches `--depth 50`. The agents' `git_diff` runs
+    `base...HEAD` — the merge base — with `|| git diff base HEAD` behind it. On a shallow
+    clone the fork point is frequently absent, so the fallback fires, and `pr.baseSha` is
+    the *current tip of the base branch* rather than the fork point: everything that landed
+    on that branch since the fork appears in the diff, inverted, as this pull request's
+    work.
+
+    Measured rather than reasoned about. A local repository built to that shape — a
+    one-line feature branch, sixty unrelated commits on `main` — produced
+    `1 file changed, 1 insertion(+), 60 deletions(-)`. Sixty deletions from a file the
+    branch never touched, handed to every specialist as the change to review.
+
+    Nothing reported it, and nothing could: the fallback is a `||` inside one shell
+    command and both halves exit 0. This is the ordinary state of a branch on an active
+    repository, not an edge case.
+
+    The clone now deepens — 200, then 1000 — until `merge-base` answers, bounded because
+    fetching a large monorepo's full history inside a review is its own outage. When it
+    still cannot, the review says so above the fold instead of quietly reviewing the wrong
+    change.
+
+    The test uses real git, because nothing smaller would have shown it: it builds the
+    repository, runs the real checkout, and asserts on the diff an agent would actually
+    read. Mutation-checked by removing the deepening.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

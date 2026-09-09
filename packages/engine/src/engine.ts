@@ -45,6 +45,12 @@ export interface ReviewRequest {
   changedLines: number;
   context: PromptContext;
   envSpec?: EnvSpec;
+  /**
+   * Set when the fork point could not be found, so `git_diff` compares two points
+   * rather than the change. The findings still stand on their own, but the diff the
+   * agents read includes commits this pull request did not make.
+   */
+  diffDegraded?: boolean;
   signal?: AbortSignal;
 }
 
@@ -153,6 +159,8 @@ export interface ReviewOutcome {
   costKnown?: boolean;
   /** True when a setup step failed, making command output unreliable evidence. */
   setupFailed?: boolean;
+  /** True when the diff the agents read is a two-point comparison, not the change. */
+  diffDegraded?: boolean;
   state: "done" | "failed" | "skipped";
   skipReason?: string;
   route?: RouteDecision;
@@ -238,6 +246,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
         }
       : undefined,
     setupFailed: prepared?.setupResults.some((r) => r.exitCode !== 0) ?? false,
+    diffDegraded: req.diffDegraded,
     cacheHit: prepared?.cacheHit,
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],

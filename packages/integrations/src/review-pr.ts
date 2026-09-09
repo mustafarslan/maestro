@@ -144,7 +144,7 @@ export async function reviewPullRequest(
   try {
     reviews.setState(reviewId, "preparing");
     const token = await client.cloneToken();
-    await checkoutPullRequest(pr, workdir, token, plan.previousHeadSha);
+    const checkout = await checkoutPullRequest(pr, workdir, token, plan.previousHeadSha);
 
     // The ticket is the independent record of what was asked for; the PR description is
     // the author's own account of it. The product agent needs the former to judge the
@@ -169,6 +169,10 @@ export async function reviewPullRequest(
         playbook,
         sourcePath: workdir,
         baseRef: plan.baseRef,
+        // The agents' `git_diff` falls back to a two-point comparison when the fork
+        // point is missing, and both halves of that fallback exit 0 — so without this
+        // the review would read the wrong diff and say nothing.
+        diffDegraded: !checkout.mergeBase,
         changedFiles: pr.changedFiles,
         changedLines: pr.changedLines,
         context: {

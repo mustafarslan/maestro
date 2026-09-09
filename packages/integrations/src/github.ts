@@ -482,7 +482,7 @@ export async function checkoutPullRequest(
   token?: string,
   /** Extra commit to fetch, so an incremental review can diff against the last round. */
   alsoFetch?: string,
-): Promise<void> {
+): Promise<{ mergeBase: boolean }> {
   const url = token
     ? pr.cloneUrl.replace("https://", `https://x-access-token:${token}@`)
     : pr.cloneUrl;
@@ -498,13 +498,99 @@ export async function checkoutPullRequest(
     ...(alsoFetch && alsoFetch !== pr.baseSha ? [alsoFetch] : []),
   ];
   try {
-    await run(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", ...wanted]);
+    await run(["-C", dir, "fetch", "--quiet", "--depth", String(FETCH_DEPTH), "origin", ...wanted]);
   } catch {
     // A previous head may have been force-pushed away; the review still has to happen,
     // so fall back to the base and let the caller's diff degrade to a full review.
-    await run(["-C", dir, "fetch", "--quiet", "--depth", "50", "origin", pr.headSha, pr.baseSha]);
+    await run([
+      "-C",
+      dir,
+      "fetch",
+      "--quiet",
+      "--depth",
+      String(FETCH_DEPTH),
+      "origin",
+      pr.headSha,
+      pr.baseSha,
+    ]);
   }
   await run(["-C", dir, "checkout", "--quiet", pr.headSha]);
+
+  const mergeBase = await ensureMergeBase(run, dir, pr);
+
   // Strip the credential so it cannot leak via .git/config into the container.
   await run(["-C", dir, "remote", "set-url", "origin", pr.cloneUrl]);
+
+  return { mergeBase };
+}
+
+/** Commits fetched initially. Enough for almost every pull request. */
+const FETCH_DEPTH = 50;
+
+/**
+ * How far to deepen when the merge base is not in the shallow clone. Bounded on purpose:
+ * a full history of a large monorepo, fetched inside a review, is its own outage.
+ */
+const DEEPEN_STEPS = [200, 1000];
+
+/**
+ * Makes sure the fork point is actually in the clone, deepening until it is.
+ *
+ * The agents' `git_diff` runs `base...HEAD` — the merge base — and falls back to
+ * `base HEAD` when that fails. On a shallow clone the fork point is often missing, so the
+ * fallback fires, and a two-point diff against the *current tip of the base branch*
+ * attributes everything that landed on that branch since the fork to this pull request,
+ * inverted: on a branch 60 commits behind, a one-line change was presented to every agent
+ * as a one-line addition plus sixty deletions it never made. Measured, not reasoned about
+ * — a local repository built to that shape produced exactly that diff.
+ *
+ * Nothing reported it. The fallback is a `||` inside a shell command; both halves exit 0.
+ *
+ * Returns false when the fork point is still missing after deepening, so the review can
+ * say its diff is unreliable rather than quietly reviewing the wrong change.
+ */
+async function ensureMergeBase(
+  run: (args: string[]) => Promise<unknown>,
+  dir: string,
+  pr: PullRequestContext,
+): Promise<boolean> {
+  const found = async () => {
+    try {
+      await run(["-C", dir, "merge-base", pr.baseSha, pr.headSha]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await found()) return true;
+
+  for (const depth of DEEPEN_STEPS) {
+    try {
+      await run([
+        "-C",
+        dir,
+        "fetch",
+        "--quiet",
+        "--deepen",
+        String(depth),
+        "origin",
+        pr.headSha,
+        pr.baseSha,
+      ]);
+    } catch {
+      // A repository shallower than the step, or already complete. Ask again anyway.
+    }
+    if (await found()) {
+      logger.info({ pr: pr.number, depth }, "deepened the clone to reach the fork point");
+      return true;
+    }
+  }
+
+  logger.warn(
+    { pr: pr.number, deepenedTo: DEEPEN_STEPS.at(-1) },
+    "fork point not found after deepening; the diff will compare two points rather than " +
+      "the change, and will include commits this pull request did not make",
+  );
+  return false;
 }
