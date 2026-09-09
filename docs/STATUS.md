@@ -11,7 +11,7 @@ The gap between those two columns is the honest summary of this project's state.
 
 | Phase | Exit criterion | Built | Verified |
 | --- | --- | --- | --- |
-| 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run |
+| 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run, and the store driver's contract is now checked on **both** runtimes rather than only the one vitest happens to use (128) |
 | 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | Ollama Cloud live, through both the `openai-compatible` and `openai` adapters; `anthropic` and `google` fixtures only |
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
 | 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
@@ -1198,6 +1198,30 @@ before a release, and either would catch the other side changing under us.
     This is half of the "cancel-on-push has never run under real timing" entry, and the half
     that needed no GitHub: what a real delivery would still prove is the timing, not the
     teardown.
+
+128. **The runtime the product ships was never tested.** vitest runs on Node, so every test in
+    this repository exercises `node:sqlite`; the compiled binary runs `bun:sqlite`. Two different
+    implementations behind one interface, and only one of them was ever run — which matters more
+    since the idempotency fix (120) made correctness depend on `run().changes` after
+    `ON CONFLICT DO NOTHING`.
+
+    `scripts/store-contract-check.ts` runs the driver's contract on whichever runtime executes
+    it, and the clean-checkout gate now runs it on both. `changes`, the savepoint nesting that
+    lets `transaction()` compose, and the parameter normalisation all matched. One thing did not:
+    **`node:sqlite` returns `undefined` for a query matching no row and `bun:sqlite` returns
+    `null`**, so the interface's declared `T | undefined` was false on the runtime the product
+    actually ships.
+
+    No live bug today — everything reads results with `if (!row)`, which is true for both. The
+    defect is the trap: `if (row === undefined)` is the natural thing to write given that
+    signature, and it would have passed every test and failed only in the binary. Normalised in
+    the driver so the type is true on both.
+
+    The first version of the gate wiring ran each check through `| tail -1`, and a pipeline's
+    exit status is its last command's — so a failing contract check would have been swallowed by
+    `tail` and the gate would have passed anyway. A gate that cannot fail is the same defect as
+    a test that cannot fail, one layer up. Verified the other way round: breaking the driver
+    deliberately now exits the gate 1.
 
 ### Found by mechanical sweep, still open
 

@@ -67,7 +67,14 @@ function wrap(raw: RawDatabase): SqlDatabase {
       const stmt = raw.prepare(sql);
       return {
         run: (...p) => stmt.run(...normalise(p)),
-        get: <T>(...p: SqlParam[]) => stmt.get(...normalise(p)) as T | undefined,
+        // `?? undefined` is not decoration. `node:sqlite` returns `undefined` when a
+        // query matches no row and `bun:sqlite` returns `null` — the compiled binary runs
+        // the second — so the declared `T | undefined` was false on the runtime the
+        // product actually ships. Nothing compared to `undefined` today, but writing
+        // `if (row === undefined)` is the natural thing to do given that signature, and it
+        // would have passed every test and failed in the binary. Normalised here so the
+        // type is true on both.
+        get: <T>(...p: SqlParam[]) => (stmt.get(...normalise(p)) ?? undefined) as T | undefined,
         all: <T>(...p: SqlParam[]) => stmt.all(...normalise(p)) as T[],
       };
     },
