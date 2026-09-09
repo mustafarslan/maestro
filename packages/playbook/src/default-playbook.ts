@@ -5,6 +5,23 @@ const OPUS = "claude-opus-5";
 const SONNET = "claude-sonnet-5";
 
 /**
+ * Ollama-hosted fallbacks, so a fresh install reviews something without a paid key.
+ *
+ * The registry skips a hosted provider with no resolvable credential, and `resolve()`
+ * walks the declared chain — so with an `ANTHROPIC_API_KEY` present these are never
+ * reached, and without one the install still works instead of failing with "no
+ * configured provider". That was real friction: the shipped default bound every agent to
+ * Anthropic, so `maestro review` on a fresh machine did nothing until a key was set.
+ *
+ * Deliberately different models per agent. Two copies of one model agreeing is one
+ * opinion stated twice, and triage's cross-agent agreement boost only means something
+ * when the agents can actually disagree.
+ */
+const OLLAMA_STRONG = { providerId: "ollama", model: "glm-5.3:cloud" };
+const OLLAMA_MID = { providerId: "ollama", model: "gpt-oss:120b-cloud" };
+const OLLAMA_LIGHT = { providerId: "ollama", model: "gpt-oss:20b-cloud" };
+
+/**
  * The shipped template. These four agents are a DEFAULT, not a hardcoded set — the
  * engine reads whatever the playbook says, so users add a "performance" agent or drop
  * "ui-ux" in the Studio without a code change.
@@ -101,7 +118,7 @@ export function defaultPlaybook(): PlaybookDocument {
           model: SONNET,
           maxSteps: 30,
           costCapCents: 150,
-          fallback: [],
+          fallback: [OLLAMA_MID],
         },
         persona: `You review whether this change actually delivers what was asked for.
 
@@ -133,7 +150,7 @@ say so by returning no findings rather than manufacturing something.`,
           model: OPUS,
           maxSteps: 40,
           costCapCents: 250,
-          fallback: [],
+          fallback: [OLLAMA_STRONG],
         },
         persona: `You review this change for exploitable security defects.
 
@@ -165,7 +182,7 @@ automated review get muted.`,
           model: OPUS,
           maxSteps: 40,
           costCapCents: 250,
-          fallback: [],
+          fallback: [OLLAMA_STRONG],
         },
         persona: `You review this change for correctness and structural soundness.
 
@@ -199,7 +216,7 @@ attach the real output as evidence. A finding backed by a failing command is wor
           model: SONNET,
           maxSteps: 30,
           costCapCents: 150,
-          fallback: [],
+          fallback: [OLLAMA_LIGHT],
         },
         persona: `You review user-facing changes for interface quality and accessibility.
 
@@ -250,12 +267,17 @@ Be specific about which element and which state. "Improve accessibility" is not 
       ],
     },
     triage: {
+      // Not currently resolved: triage is deterministic — dedupe, agreement, thresholds
+      // and caps are mechanical and testable rather than re-litigated by a model on every
+      // run. The binding is kept, with a fallback like the rest, so that the narrative
+      // pass the plan describes has somewhere to attach without a fresh install then
+      // failing for want of a key.
       model: {
         providerId: "anthropic",
         model: OPUS,
         maxSteps: 20,
         costCapCents: 200,
-        fallback: [],
+        fallback: [OLLAMA_STRONG],
       },
       minConfidence: 0.6,
       maxInlineComments: 15,

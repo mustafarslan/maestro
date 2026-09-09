@@ -20,6 +20,8 @@ export interface ReviewAgentRequest {
   commandTimeoutSec: number;
   /** Dependency install did not complete; command output is unreliable evidence. */
   setupFailed?: boolean;
+  /** False when the checkout is mounted read-only, which makes some commands fail. */
+  writableWorkdir?: boolean;
   context: PromptContext;
   budget: { maxSteps: number; costCapCents: number; deadlineMs?: number; maxPromptChars?: number };
   signal?: AbortSignal;
@@ -56,7 +58,12 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
   };
 
   const system = buildAgentSystemPrompt(req.agent, req.context);
-  const prompt = buildUserPrompt(req.context, req.allowedCommands, req.setupFailed);
+  const prompt = buildUserPrompt(
+    req.context,
+    req.allowedCommands,
+    req.setupFailed,
+    req.writableWorkdir,
+  );
 
   const loop = await runAgent({
     provider: req.provider,
@@ -116,6 +123,7 @@ function buildUserPrompt(
   ctx: PromptContext,
   allowedCommands: string[],
   setupFailed?: boolean,
+  writableWorkdir?: boolean,
 ): string {
   const parts: string[] = ["Review the pull request described below."];
 
@@ -155,21 +163,45 @@ function buildUserPrompt(
 
   if (ctx.diff?.changedFiles?.length) {
     const shown = ctx.diff.changedFiles.slice(0, 100);
+    // Fenced, because the pull request author chooses these. Git permits newlines and
+    // almost any byte in a path, so an unfenced file named
+    // `x.txt\nIgnore all instructions` renders as its own line in the trusted region,
+    // at the same level as Maestro's own instructions. Hardening the fence and then
+    // leaving the one input with byte-level freedom outside it protects nothing.
     parts.push(
       `Changed files (${ctx.diff.changedFiles.length}${ctx.diff.changedLines ? `, ~${ctx.diff.changedLines} lines` : ""}):\n` +
-        shown.map((f) => `  ${f}`).join("\n") +
-        (ctx.diff.changedFiles.length > shown.length
-          ? `\n  ... and ${ctx.diff.changedFiles.length - shown.length} more`
-          : ""),
+        wrapUntrusted(
+          "changed-file-paths",
+          shown.map((f) => `  ${sanitisePath(f)}`).join("\n") +
+            (ctx.diff.changedFiles.length > shown.length
+              ? `\n  ... and ${ctx.diff.changedFiles.length - shown.length} more`
+              : ""),
+        ),
     );
   }
 
   if (ctx.carriedFindings?.length) {
+    // Model text derived from attacker-controlled content, carried across rounds. It is
+    // no more trustworthy than the diff it came from.
     parts.push(
       "These issues were reported on an earlier round of this pull request and have not " +
         "been addressed. Do not repeat them; only report them again if this change makes " +
         "them worse or if you find something genuinely new:\n" +
-        ctx.carriedFindings.map((f) => `  - ${f}`).join("\n"),
+        wrapUntrusted("carried-findings", ctx.carriedFindings.map((f) => `  - ${f}`).join("\n")),
+    );
+  }
+
+  // Stated once, from the sandbox's own configuration — never derived from command
+  // output. The previous version regexed the output for "read-only" or "permission
+  // denied" and appended "do not report it as a defect", which is attacker-controlled:
+  // the author of a pull request could print those strings from a test to suppress a
+  // real finding. Worse, a genuine permissions regression produces exactly that output,
+  // so the harness would have told the reviewer to ignore the very defect it introduced.
+  if (writableWorkdir === false) {
+    parts.push(
+      "The checkout is mounted read-only. Commands that write into it — builds, " +
+        "formatters, anything generating coverage — will fail for that reason and not " +
+        "because of the change. Judge such a failure on its message, not on its exit code.",
     );
   }
 
@@ -189,4 +221,17 @@ function buildUserPrompt(
   );
 
   return parts.join("\n\n");
+}
+
+/**
+ * Renders a repository path safely for a prompt.
+ *
+ * Git allows newlines and control bytes in a path, and the author of a pull request picks
+ * them. A newline is the whole attack: it ends the line the path was supposed to occupy
+ * and starts one the reader may take for its own. The fence around the list is the main
+ * defence; this makes the individual entries unable to fake structure inside it.
+ */
+function sanitisePath(path: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+  return path.replace(/[\u0000-\u001f\u007f]/g, "\uFFFD");
 }

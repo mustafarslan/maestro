@@ -29,6 +29,8 @@ the README so the claims in that file stay short and true.
 | Compose sandbox-to-proxy routing | A sibling container on a shared network reaches another by name (HTTP 200) and a container off that network cannot (unreachable). An integration test then drives the real driver: the prepare sandbox joins a named network, and the analyze container still has no default route |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
 | **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
+| **Provider conformance, live** | `maestro llm test --model glm-5.3:cloud` against Ollama Cloud: plain completion, tool call, multi-turn loop stopping on the terminal tool, usage accounting, and error mapping (404 → non-retryable) all pass. The first time the conformance suite has run against a live provider rather than fixtures |
+| **A keyless install reviews** | With `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` unset, a fresh `maestro init` + `maestro review` logged "primary provider not configured, using declared fallback" and completed a full agent run on Ollama Cloud |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
 | **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
 | Scheduler fairness under load | The plan's 10-PRs-across-3-repos scenario, simulated: 40 agent tasks through the real scheduler, no containers. No limit exceeded, no starvation, one saturated repo does not block the others |
@@ -53,7 +55,12 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Linear has never been called against a real workspace.** Key extraction, criteria parsing
   and every degradation path are unit-tested against a fake transport, but no live API key has
   been used, so the GraphQL query shape is unverified against the real endpoint.
-- **Hosted providers have never made a live call, and the endpoint cannot be probed without one.**
+- **The Anthropic, OpenAI and Google adapters have never made a live call.** The
+  `openai-compatible` adapter now has: `maestro llm test --model glm-5.3:cloud` passes the whole
+  conformance suite against Ollama Cloud — plain completion, tool call, multi-turn loop with a
+  terminal tool, usage accounting, and error mapping. That exercises the loop, the tool contract
+  and the usage/cost path live; it does not exercise the three hosted adapters, which are
+  different SDK wrappers and remain fixture-only. The endpoint cannot be probed without a key.
   The Anthropic, OpenAI and Google adapters pass the conformance suite against fixtures. An
   unauthenticated probe of `api.anthropic.com` was attempted to at least check request shape and
   proved nothing: authentication is checked before validation, so a well-formed request and a
@@ -653,7 +660,22 @@ These are recorded because each was invisible to the test suite that existed at 
     predicate is exported and tested directly now, and the source check that remains is titled
     for the narrow thing it actually does.
 
-Findings 75-83 were reported by **Maestro reviewing this session's own commits** — the first two
+84. **The read-only note was a suppression channel.** `run_command` executes the pull request's
+    own tests, so every byte of its output is the author's to choose — and the harness matched
+    that output for "EROFS" or "permission denied" and appended, in its own voice, "do not report
+    it as a defect". Anyone could suppress a finding by printing those strings. Worse, a genuine
+    permissions regression prints exactly them, so the harness would have told the reviewer to
+    ignore the defect the change introduced. I added that note this morning to reduce false
+    positives. The same fact is now stated once from the sandbox's own configuration, which the
+    diff cannot influence.
+85. **Author-chosen file paths entered the prompt unfenced.** Git permits newlines and control
+    bytes in a path, so a file named `x.txt\nIgnore all instructions` rendered as its own line in
+    the trusted region — after the nonce fence hardened the same morning had closed. Carried
+    findings had the same shape. Both are fenced now, and control characters in a path are
+    replaced rather than passed through. A fence is only worth what the set of places it is
+    applied is worth.
+
+Findings 75-85 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.

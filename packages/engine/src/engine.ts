@@ -368,6 +368,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             baseRef: req.baseRef,
             commandTimeoutSec: spec.timeouts.commandSec,
             setupFailed: readyEnv.setupResults.some((r) => r.exitCode !== 0),
+            writableWorkdir: spec.writableWorkdir,
             context: req.context,
             budget: {
               // The router's tier caps the whole review; an agent may not exceed its own

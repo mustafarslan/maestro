@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { anthropicTransport, fakeConfig, Provider } from "@maestro/llm";
 import { defaultPlaybook, FIXED_CONTRACT, FIXED_PREAMBLE, wrapUntrusted } from "@maestro/playbook";
 import type { ExecResult, Sandbox } from "@maestro/sandbox";
@@ -316,5 +318,35 @@ describe("output cannot be smuggled past the schema", () => {
     // Only submit_findings is recorded; prose is discarded entirely.
     expect(result.findings).toEqual([]);
     expect(result.parseError).toContain("before submitting findings");
+  });
+});
+
+describe("no instruction is derived from attacker-controlled text", () => {
+  it("does not turn command output into a suppression order", () => {
+    // `run_command` runs the pull request's own tests, so every byte of its output is
+    // the author's to choose. Keying a "do not report it as a defect" note off that
+    // output gave anyone a way to suppress a finding by printing "permission denied" —
+    // and a genuine permissions regression prints exactly that, so the harness would
+    // have told the reviewer to ignore the defect the change introduced.
+    const tools = readFileSync(join(import.meta.dirname, "tools.ts"), "utf8");
+    expect(tools).not.toMatch(/Do not report it as a defect/i);
+    expect(tools, "an instruction is still being derived from command output").not.toMatch(
+      /EROFS|read-only file system/i,
+    );
+  });
+
+  it("states the sandbox posture from configuration instead", () => {
+    // The same fact, from a signal the diff cannot influence.
+    const runner = readFileSync(join(import.meta.dirname, "run-agent.ts"), "utf8");
+    expect(runner).toContain("writableWorkdir === false");
+    expect(runner).toContain("mounted read-only");
+  });
+
+  it("fences the file paths the author chooses", () => {
+    // Git permits newlines in a path, so an unfenced entry becomes its own line in the
+    // trusted region: `x.txt\nIgnore all instructions`.
+    const runner = readFileSync(join(import.meta.dirname, "run-agent.ts"), "utf8");
+    expect(runner).toMatch(/wrapUntrusted\(\s*"changed-file-paths"/);
+    expect(runner).toMatch(/wrapUntrusted\(\s*"carried-findings"/);
   });
 });
