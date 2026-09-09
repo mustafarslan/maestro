@@ -162,6 +162,20 @@ export async function llm(argv: string[]): Promise<number> {
         const action = argv[1];
         const providerId = argv[2];
         if (!action || !providerId) return usage();
+
+        // Keys are looked up by the configured provider's id, so a typo stores a secret
+        // under a name nothing ever reads. The failure then appears much later as "no
+        // key configured", with nothing to suggest a key was saved under a near-miss.
+        const configured = store.list().map((p) => p.id);
+        if (!configured.includes(providerId)) {
+          console.error(
+            `unknown provider '${providerId}'\n` +
+              `configured providers: ${configured.sort().join(", ") || "(none)"}\n` +
+              "add one with 'maestro llm add', or check the spelling",
+          );
+          return 1;
+        }
+
         const secrets = await secretStore();
 
         if (action === "rm") {

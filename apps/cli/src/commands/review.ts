@@ -80,6 +80,19 @@ export async function review(argv: string[]): Promise<number> {
     // Overrides are applied to the pinned copy only; the stored playbook is untouched,
     // so a one-off `--model` never mutates configuration.
     if (onlyAgents.length) {
+      // A mistyped id would otherwise disable every agent, and the review would complete
+      // with no findings — reading as "nothing wrong with your code" rather than "you
+      // named an agent that does not exist". Silence that looks like a clean review is
+      // the most expensive way to be wrong.
+      const known = new Set(playbook.agents.map((a) => a.id));
+      const unknown = onlyAgents.filter((id) => !known.has(id));
+      if (unknown.length) {
+        console.error(
+          `unknown agent(s): ${unknown.join(", ")}\n` +
+            `this playbook defines: ${[...known].sort().join(", ")}`,
+        );
+        return 1;
+      }
       for (const a of playbook.agents) a.enabled = onlyAgents.includes(a.id);
     }
     for (const a of playbook.agents) {

@@ -384,6 +384,16 @@ These are recorded because each was invisible to the test suite that existed at 
     `ERR_INVALID_STATE` errors from workers polling a database the test had closed. Validation
     now happens before any resource exists.
 
+54. **A mistyped `--agent` disabled every agent instead of erroring.** `maestro review --agent
+    secrity` set `enabled = false` on all four and ran a review with nobody in it, which
+    completed and reported no findings — indistinguishable from "your code is fine". Silence that
+    reads as a clean review is the most expensive way to be wrong. It now names the unknown ids
+    and lists the ones the playbook defines, and exits before starting Docker.
+55. **A mistyped provider in `llm key set` stored the secret under a name nothing reads.** Keys
+    are resolved by the configured provider's id, so the failure appeared much later as "no key
+    configured", with nothing to suggest a key had been saved one character away. Validated
+    against the configured list now.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
