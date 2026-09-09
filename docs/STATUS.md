@@ -20,6 +20,9 @@ the README so the claims in that file stay short and true.
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
+| **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
+| **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
+| Scheduler fairness under load | The plan's 10-PRs-across-3-repos scenario, 40 agent tasks: no limit exceeded, no starvation, one saturated repo does not block the others |
 
 ### The review that proves the point
 
@@ -52,9 +55,6 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
   Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
   admin UI on its first run.
-- **Nothing has ever been posted to a real pull request.** Every GitHub run was `--dry-run`. The
-  posting path, comment updating, and reaction ingestion are unit-tested but not exercised against
-  live GitHub.
 - **The webhook path has not received a real delivery.** Signature verification and event
   interpretation are unit-tested; no GitHub App has been created.
 - **The Compose deployment is unverified and labelled experimental in the file itself.** Sandboxes
@@ -63,9 +63,9 @@ insecure neighbour, so it was not pattern-matching on "API route".
   unit-tested, but running it needs a Linux host with the socket mounted and that has not happened.
 - **Release CI has not run.** `.github/workflows/release.yml` cross-compiles four targets; only the
   host target has actually been built.
-- **Load behaviour is untested at scale.** The scheduler is now actually wired into the daemon and
-  its admission is asserted by engine tests, but the plan's "10 simultaneous PRs across 3 repos"
-  scenario has not been run against real Docker.
+- **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
+  across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
+  found a fairness bug; it does not start 40 real containers.
 
 ## Known limitations
 
@@ -186,7 +186,28 @@ These are recorded because each was invisible to the test suite that existed at 
     lead with a zero (Linear numbers from 1, so `v2-0` is a version), and `LINEAR_TEAM_PREFIXES`
     removes the ambiguity entirely for teams that want it.
 
-Findings 11-20 and 23-25 were reported by **Maestro reviewing its own commits**. It also produced one
+29. **The sandbox never had a working package manager offline.** The first real review of a real
+    pull request showed six allowlisted commands and six failures, every one in 0.1 seconds.
+    Activation ran `corepack prepare <pm> --activate`, which fetches the *latest* release; almost
+    every repo pins `packageManager`, so the shim then wanted a version that was not cached and
+    tried to download it during the analyze phase, which has no network by design. Measured in the
+    image: cache held pnpm 12.4.0, repo pinned 10.26.2. Agents were reviewing repositories they
+    could not build, and the failure reached them as a bare `exit 1` — indistinguishable from a
+    real test failure. Third bug of this shape, after the 127 exit codes and git missing from slim
+    images.
+30. **Scheduler fairness was FIFO in all but name.** Running the plan's own load scenario showed
+    the tenth of ten reviews waiting until the 32nd of 40 admissions. The mechanism kept a list of
+    the N most recently admitted reviews and preferred anything absent from it, with N set to the
+    global concurrency limit — so above N concurrent reviews, a review fell out of the window and
+    took a second slot before reviews that had never run took a first. The anti-starvation
+    mechanism was producing starvation, and only under the load it existed for. Replaced with a
+    per-review admission count; the tenth review's first slot moved from 32 to 11.
+31. **Three MCP tools in the plan were never implemented** — `get_findings`, `trigger_review` and
+    `run_eval`. Invisible because the other ten work and nothing compared the surface to the plan.
+    A test now asserts the full list.
+
+Findings 11-20, 23-25 and 29 were reported by, or found by running, **Maestro against real code —
+its own commits and its own pull request**. It also produced one
 false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
 could not run Bun to check — both spellings are in fact valid), which is roughly the calibration
 you want. Findings 19 and 20 are the sharpest evidence so far: it read a fix that had just been
