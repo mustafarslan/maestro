@@ -195,6 +195,18 @@ export const IN_FLIGHT_STATES = [
 ] as const;
 
 /**
+ * States a review will never leave. Derived, not written out.
+ *
+ * A third copy of this list was hand-written in `pruneTelemetry` within an hour of a
+ * finding about exactly this shape — a canonical list and a hand-maintained duplicate,
+ * correct today and free to diverge the moment somebody adds a state. Deriving it means a
+ * new state must be classified as in-flight or terminal, and cannot silently be neither.
+ */
+export const TERMINAL_STATES = REVIEW_STATES.filter(
+  (s) => !(IN_FLIGHT_STATES as readonly string[]).includes(s),
+);
+
+/**
  * Fails reviews left mid-flight by a process that is no longer running.
  *
  * Nothing reset review state on a crash, so an interrupted review sat in `analyzing`

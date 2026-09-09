@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   IN_FLIGHT_STATES,
+  REVIEW_STATES,
   ReviewStore,
   recoverStaleReviews,
   reviewsForPullRequest,
+  TERMINAL_STATES,
 } from "./reviews.js";
 import { openStore } from "./store/db.js";
 import type { SqlDatabase } from "./store/driver.js";
@@ -296,5 +298,26 @@ describe("creating a review is idempotent under a race, not just in sequence", (
       .prepare("SELECT COUNT(*) AS n FROM repos WHERE owner='acme' AND name='web'")
       .get<{ n: number }>() as { n: number };
     expect(n).toBe(1);
+  });
+});
+
+describe("the review state machine has no unclassified states", () => {
+  // A hand-written copy of the terminal states appeared in `pruneTelemetry` within an hour
+  // of a finding about exactly this shape. Correct on the day, and free to diverge the
+  // moment somebody adds a state — the new one would simply be absent from a list nobody
+  // remembered to update, and a review in it would never be pruned, or never be recovered.
+  it("classifies every state as either in-flight or terminal", () => {
+    const classified = [...IN_FLIGHT_STATES, ...TERMINAL_STATES].sort();
+    expect(classified).toEqual([...REVIEW_STATES].sort());
+  });
+
+  it("classifies no state as both", () => {
+    const both = IN_FLIGHT_STATES.filter((s) => (TERMINAL_STATES as readonly string[]).includes(s));
+    expect(both).toEqual([]);
+  });
+
+  it("treats a review that is finished as finished", () => {
+    // Named explicitly, so a rename that silently drops one from the derived set is loud.
+    expect([...TERMINAL_STATES].sort()).toEqual(["cancelled", "done", "failed", "superseded"]);
   });
 });

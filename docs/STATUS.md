@@ -1714,6 +1714,23 @@ to answer.
     exactly like a guard that holds. The harness prints "anchor missing" for that reason; doing
     it by hand, I had to notice.
 
+151. **I wrote a third copy of the review states within an hour of the finding about copies.**
+    149 was about a canonical ordering that two SQL sites duplicated. `pruneTelemetry`, committed
+    four findings earlier in the same session, hand-wrote
+    `state IN ('done','failed','cancelled','superseded')` while `REVIEW_STATES` and
+    `IN_FLIGHT_STATES` sat in the same package. Correct on the day — I checked, it matches — and
+    free to diverge the moment somebody adds a state, at which point a review in that state would
+    never be pruned, or never be recovered, silently.
+
+    `TERMINAL_STATES` is derived now rather than written: everything in `REVIEW_STATES` that is
+    not in `IN_FLIGHT_STATES`. A new state must be classified as one or the other and cannot be
+    neither, which a test asserts — adding an unclassified `abandoned` state fails it.
+
+    Worth recording as a lesson about method rather than about code. I had just written the
+    finding explaining why hand-maintained duplicates of a canonical list are dangerous, and then
+    wrote one, because the canonical list was in a file I was not looking at while I was thinking
+    about pruning. Knowing the failure mode does not prevent it; only the derived value does.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

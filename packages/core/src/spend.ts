@@ -1,3 +1,4 @@
+import { TERMINAL_STATES } from "./reviews.js";
 import type { SqlDatabase } from "./store/driver.js";
 
 /**
@@ -117,10 +118,10 @@ export function pruneTelemetry(
   const old = db
     .prepare(
       `SELECT id FROM reviews
-        WHERE state IN ('done','failed','cancelled','superseded')
+        WHERE state IN (${TERMINAL_STATES.map(() => "?").join(",")})
           AND COALESCE(finished_at, created_at) < ?`,
     )
-    .all<{ id: string }>(cutoff);
+    .all<{ id: string }>(...TERMINAL_STATES, cutoff);
   if (!old.length) return { spans: 0, llmCalls: 0 };
 
   return db.transaction(() => {
