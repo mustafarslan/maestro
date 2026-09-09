@@ -1549,12 +1549,30 @@ before a release, and either would catch the other side changing under us.
   and chooses not to use the proxy — an author who already has push access. That is a real hole
   in a documented control, and a narrow one.
 
-  The fix is not a patch: enforcing egress means the container must have no route except the
-  proxy, which means an `--internal` Docker network with the proxy attached to it. The proxy
-  currently runs inside the Maestro process, which on the host path is not on any Docker network
-  at all. Doing it properly changes how the proxy is hosted, and interacts with the Compose path,
-  the host path, and Linux versus Docker Desktop — too much to change and verify at the end of a
-  session. Recorded precisely instead, which is the point of this document.
+  **What the fix requires, measured rather than guessed.** Three experiments against the real
+  daemon settle it:
+
+  | | |
+  | --- | --- |
+  | container on a `--internal` network → `1.1.1.1:443` | **blocked**, and DNS blocked too |
+  | same container → the host gateway, where the proxy lives today | **`Network is unreachable`** |
+  | same container → another container on that network | routed and resolved |
+
+  So the enforcement mechanism works, and it rules out the proxy's current home. `--internal` is
+  exactly the containment wanted — no route out, no name resolution — but it also cuts off the
+  host, and the proxy runs *inside the Maestro process*, which on the host path is not on any
+  Docker network at all. The shape that would work is a proxy **sidecar container**, attached to
+  the internal network for sandboxes and to a normal one for the internet.
+
+  That is a redesign, not a patch, and the hard part is not the container: the allowlist is
+  per-review, resolved from the playbook and the repository's own `.maestro.yaml`, so a shared
+  sidecar needs to be told which allowlist applies to which connection, or a sidecar has to be
+  started and torn down per review alongside the existing environment lifecycle. Either is real
+  design work with its own leak surface, and shipping a half-verified change to the containment
+  boundary would be worse than the gap it closes.
+
+  Left as it is, deliberately and with the evidence recorded, so whoever picks it up starts from
+  measurements rather than from the same three experiments.
 
 ### Found by mechanical sweep, still open
 
