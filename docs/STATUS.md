@@ -16,7 +16,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
 | 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
-| 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes |
+| 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, and now against the **compiled binary**: `scripts/mcp-protocol-check.mjs` speaks JSON-RPC to it as a client would and runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment | publish/rollback/pin verified; test connection verified against Ollama |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
@@ -1105,6 +1105,23 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     `comment.body`, `comment.author_association` (`"OWNER"`, confirming the exact casing of the
     trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
     matched. `issue.pull_request` was the one that did not.
+
+### The binary's own surfaces
+
+The tests run against the pieces; the product is a single compiled binary, and three of its
+surfaces existed only there. Two carried defects that nothing else could have seen.
+
+- **The store driver** runs `bun:sqlite` in the binary and `node:sqlite` under vitest. Found 128.
+- **The admin server** only serves the embedded UI once it is embedded. Found 129 — the worst
+  user-facing defect of the session.
+- **The MCP server** only exists as a subprocess with stdout as a pipe, where anything written
+  there that is not a protocol frame corrupts the stream. Checked and clean: 13 tools advertised,
+  two stdout lines, both JSON-RPC, nothing on stderr. `scripts/mcp-protocol-check.mjs` keeps it
+  that way, and asserts the planned tool set is still complete so dropping one is caught here
+  rather than by somebody whose Claude Code session stops being able to trigger a review.
+
+Production code contains no `__dirname` or `import.meta.dirname`, so there is no compiled-bundle
+path resolution to get wrong — checked rather than assumed.
 
 ### Two external contracts, verified without credentials
 

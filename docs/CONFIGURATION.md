@@ -229,7 +229,7 @@ scripts/gate.sh /tmp/maestro-gate
 
 Unpacks the tracked files plus any uncommitted changes into an empty directory and runs
 install, lint, typecheck, the test suite, the store-driver contract **on both runtimes**,
-the binary build and `doctor` — from a tree with no `node_modules` and no stale
+the binary build, the MCP protocol check **against that binary**, and `doctor` — from a tree with no `node_modules` and no stale
 `tsbuildinfo`. That combination is what catches the class of problem where the working
 tree builds only because of state that is not in the repository, and where the suite
 passes on Node while the shipped binary runs Bun.

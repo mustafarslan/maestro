@@ -31,4 +31,11 @@ echo "=== store contract (bun) ==="
 bun scripts/store-contract-check.ts 2>/dev/null | grep -E "passed on|FAIL"
 bun scripts/store-contract-check.ts >/dev/null 2>&1
 echo "=== build ==="    && pnpm run build:binary >/dev/null 2>&1
+# The binary's own surfaces, which no unit test reaches: the MCP server only exists as a
+# subprocess with stdout as a pipe, and the admin server only serves the embedded UI once
+# it is embedded. Both had defects that were invisible until run this way.
+echo "=== mcp protocol ==="
+node scripts/mcp-protocol-check.mjs ./dist/maestro | grep -E "verified|FAIL"
+node scripts/mcp-protocol-check.mjs ./dist/maestro >/dev/null 2>&1
+
 echo "=== smoke ==="    && ./dist/maestro --version && ./dist/maestro doctor 2>&1 | tail -12
