@@ -1116,6 +1116,28 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
     matched. `issue.pull_request` was the one that did not.
 
+### The egress allowlist, probed rather than read
+
+The wall between a stranger's dependency tree and the internet. `prepare` runs `npm install` on
+code from a pull request — arbitrary code execution by design — and the allowlist is what keeps
+it from reaching anywhere it likes. A matching bug there does not fail loudly; it silently
+permits, which is the worst failure shape a security control can have.
+
+Probed with eleven cases against a running proxy rather than reasoned about: exact host,
+subdomain, uppercase, trailing dot, raw IP, an unlisted host, a suffix lookalike
+(`registry.npmjs.org.evil.com`), a prefix lookalike, and the same tricks again over CONNECT,
+which is the path HTTPS actually takes and which bypasses the request handler entirely.
+
+**Every case behaved correctly**, including the one the matcher's own comment names. Case is
+folded, a raw IP is refused, and a trailing dot fails closed. This is one of the two results in
+this whole exercise where a security-critical boundary was already right.
+
+Now pinned by `egress-allowlist.test.ts`, hermetically — every assertion is about a host that is
+either refused before a socket opens or allowlisted and unresolvable, so nothing reaches the real
+internet. Both halves are mutation-checked: replacing the suffix match with `includes` fails four
+tests, and removing the CONNECT gate while leaving the HTTP one fails the test written for
+exactly that asymmetry.
+
 ### The binary's own surfaces
 
 The tests run against the pieces; the product is a single compiled binary, and three of its
