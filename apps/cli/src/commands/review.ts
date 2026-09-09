@@ -13,6 +13,7 @@ import {
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
+import { rejectUnknownFlags } from "../args.js";
 import { color } from "../ui.js";
 
 const exec = promisify(execFile);
@@ -49,6 +50,15 @@ async function git(cwd: string, gitArgs: string[]): Promise<string> {
 }
 
 export async function review(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, [
+    "--base",
+    "--agent",
+    "--provider",
+    "--model",
+    "--json",
+    "--dry-run",
+    "--force",
+  ]);
   const target = argv[0];
   if (!target || target.startsWith("--")) return usage();
 

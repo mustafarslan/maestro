@@ -1,5 +1,5 @@
 import { runStdioServer } from "@maestro/mcp";
-import { arg } from "../args.js";
+import { arg, rejectUnknownFlags } from "../args.js";
 
 /**
  * stdio MCP server.
@@ -9,6 +9,7 @@ import { arg } from "../args.js";
  * client silently disconnects.
  */
 export async function mcp(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--db"]);
   await runStdioServer(arg(argv, "--db"));
   // The transport owns the process lifetime; returning here would close stdin.
   await new Promise(() => {});

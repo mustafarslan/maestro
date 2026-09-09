@@ -2198,6 +2198,28 @@ the server never sends fails it, and removing `live` from the server's response 
     An unreadable filesystem is not a stop. Refusing every review because a volume is
     unusual would be worse than the thing this guards against.
 
+175. **A flag nobody accepts was silently ignored.** `maestro serve --port 7799 --token x`
+    started on the default port with a generated token and reported nothing wrong. This is
+    the same failure as the `=`-form bug already recorded — a deployment that comes up and
+    behaves differently from what was asked, with no error naming the cause — arriving by
+    a different route, and it survived that fix because that fix was about parsing the
+    flags that exist.
+
+    Found by running the compiled binary rather than by reading, which is worth noting:
+    every flag in that command line looked plausible.
+
+    Every command now declares what it accepts and refuses anything else, naming the near
+    miss — `unknown option '--worker'; did you mean '--workers'?`. A bare `--` ends the
+    flags so positionals are untouched, and the `=` spelling is accepted because
+    `docker-compose.yml` passes it: a checker that only understood the space form would
+    have rejected this project's own deployment. That case has a test.
+
+    The obvious way for this to rot is a flag added and not declared, which would make a
+    command refuse its own documented option — fixing one half and leaving the other,
+    which is the failure this project repeats most. So the halves are checked against each
+    other: a test reads every command's source, extracts the flags it reads and the flags
+    it declares, and requires them to agree. Mutation-checked by undeclaring one.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

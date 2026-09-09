@@ -54,3 +54,55 @@ export function numberArg(
   }
   return value;
 }
+
+/**
+ * Refuses a flag no command accepts.
+ *
+ * Silently ignoring one is the same failure the `=`-form bug above produced, arriving by
+ * a different route: `maestro serve --port 7799 --workers 8` started on the default port
+ * with three workers and said nothing, because neither `--port` nor a misspelt
+ * `--workers` exists as written. The daemon then behaves differently from what the
+ * operator asked for, and the only way to find out is to notice.
+ *
+ * A bare `--` ends the flags, so anything after it is a positional argument and is left
+ * alone.
+ */
+export function rejectUnknownFlags(argv: string[], known: readonly string[]): void {
+  const accepted = new Set<string>([...known, "--help", "-h"]);
+  for (const token of argv) {
+    if (token === "--") break;
+    if (!token.startsWith("--")) continue;
+    const name = token.split("=")[0] as string;
+    if (accepted.has(name)) continue;
+
+    // A near miss is almost always a typo, and naming the intended flag is the whole
+    // difference between a useful error and a list to read.
+    const suggestion = [...accepted].find(
+      (f) =>
+        f.length > 3 && (f.startsWith(name) || name.startsWith(f) || editDistance(f, name) <= 2),
+    );
+    throw new Error(
+      `unknown option '${name}'${suggestion ? `; did you mean '${suggestion}'?` : ""}\n` +
+        `accepted here: ${[...accepted].sort().join(", ")}`,
+    );
+  }
+}
+
+/** Small enough that a full matrix is cheaper than being clever. */
+function editDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) =>
+    Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  );
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const row = rows[i] as number[];
+      const previous = rows[i - 1] as number[];
+      row[j] = Math.min(
+        (previous[j] as number) + 1,
+        (row[j - 1] as number) + 1,
+        (previous[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return (rows[a.length] as number[])[b.length] as number;
+}

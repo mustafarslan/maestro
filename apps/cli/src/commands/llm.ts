@@ -8,7 +8,7 @@ import {
   runConformance,
   secretStore,
 } from "@maestro/llm";
-import { arg } from "../args.js";
+import { arg, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 function usage(): number {
@@ -30,6 +30,7 @@ ${color.bold("maestro llm")} <subcommand>
 }
 
 export async function llm(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--base-url", "--kind", "--model", "--provider"]);
   const sub = argv[0];
   if (!sub || sub === "help" || sub === "--help") return usage();
 

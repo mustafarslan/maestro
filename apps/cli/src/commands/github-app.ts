@@ -9,7 +9,7 @@ import {
   setInstallationId,
   storedGitHubApp,
 } from "@maestro/integrations";
-import { arg, has } from "../args.js";
+import { arg, has, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -28,6 +28,7 @@ import { checkLine, color } from "../ui.js";
  * constant length, so a stray request to the callback cannot hand us somebody else's code.
  */
 export async function githubApp(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--force", "--name", "--org", "--webhook-url"]);
   const sub = argv[0];
 
   if (sub === "show") {

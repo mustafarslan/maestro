@@ -1,6 +1,6 @@
 import { statSync } from "node:fs";
 import { dbPath, openStore, pruneTelemetry } from "@maestro/core";
-import { numberArg } from "../args.js";
+import { numberArg, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -16,6 +16,7 @@ import { checkLine, color } from "../ui.js";
  * and the part nobody reads once the question has been answered.
  */
 export async function prune(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--days"]);
   const days = numberArg(argv, "--days", { fallback: 30, min: 1 }) ?? 30;
   const db = await openStore();
   try {

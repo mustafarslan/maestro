@@ -1,7 +1,7 @@
 import { openStore } from "@maestro/core";
 import { storedGitHubApp } from "@maestro/integrations";
 import { startDaemon } from "@maestro/server";
-import { arg, numberArg } from "../args.js";
+import { arg, numberArg, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -24,6 +24,15 @@ export function resolveWebhookSecret(argv: string[]): string | undefined {
 }
 
 export async function serve(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, [
+    "--admin-host",
+    "--admin-port",
+    "--poll",
+    "--poll-interval",
+    "--webhook-port",
+    "--webhook-secret",
+    "--workers",
+  ]);
   if (argv.includes("--help")) {
     console.log(`
 ${color.bold("maestro serve")} [options]

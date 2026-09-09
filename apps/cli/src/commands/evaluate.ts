@@ -19,7 +19,7 @@ import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/i
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
-import { arg } from "../args.js";
+import { arg, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -52,6 +52,7 @@ two pipelines can actually be compared.
 }
 
 export async function evaluate(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--base", "--fixture"]);
   const sub = argv[0];
   if (!sub || sub === "help" || sub === "--help") return usage();
 

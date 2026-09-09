@@ -1,6 +1,6 @@
 import { IN_FLIGHT_STATES, openStore } from "@maestro/core";
 import { DockerSandboxDriver } from "@maestro/sandbox";
-import { arg, has } from "../args.js";
+import { arg, has, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -11,6 +11,7 @@ import { checkLine, color } from "../ui.js";
  * Images are where disk actually fills up, so they are swept alongside containers.
  */
 export async function reap(argv: string[]): Promise<number> {
+  rejectUnknownFlags(argv, ["--all", "--force", "--review"]);
   if (argv.includes("--help")) {
     console.log(`
 ${color.bold("maestro reap")} [options]
