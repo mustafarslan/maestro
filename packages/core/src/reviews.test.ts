@@ -227,3 +227,74 @@ describe("the ticket a review was checked against", () => {
     expect(row?.linear_issue_json).toBeNull();
   });
 });
+
+describe("creating a review is idempotent under a race, not just in sequence", () => {
+  // `unique(repo_id, pr_number, head_sha)` is the idempotency key that covers webhook
+  // redelivery and the poller racing the webhook. It only delivers that if the code
+  // around it is atomic: `SELECT`, then `INSERT` if the select missed, is a check-then-act
+  // across two statements with no transaction, so two workers on the same pull request
+  // both miss, both insert, and the loser takes a constraint violation that fails its job.
+  //
+  // These tests exercise the losing path directly — the row is already there when the
+  // INSERT runs — which is the interleaving the old code could not survive and which no
+  // sequential test reached, because the fast-path SELECT hid it.
+  it("returns the existing review rather than throwing when the row is already there", () => {
+    const first = store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 7,
+      headSha: "e".repeat(40),
+      playbookVersionId: "pv",
+    });
+    const second = store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 7,
+      headSha: "e".repeat(40),
+      playbookVersionId: "pv",
+    });
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+    const { n } = db
+      .prepare("SELECT COUNT(*) AS n FROM reviews WHERE head_sha=?")
+      .get<{ n: number }>("e".repeat(40)) as { n: number };
+    expect(n).toBe(1);
+  });
+
+  it("keeps the winner's row rather than overwriting it with the loser's data", () => {
+    // DO NOTHING, not DO UPDATE: the review already in flight is the one whose id other
+    // rows point at, and rewriting its title or trust level underneath it would change
+    // what a running review believes about itself.
+    store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      title: "the real title",
+      playbookVersionId: "pv",
+    });
+    store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      title: "a racing writer's title",
+      isFork: true,
+      playbookVersionId: "pv",
+    });
+    const row = db
+      .prepare("SELECT title, trust FROM reviews WHERE head_sha=?")
+      .get<{ title: string; trust: string }>("f".repeat(40));
+    expect(row).toMatchObject({ title: "the real title", trust: "trusted" });
+  });
+
+  it("gives both callers the same repository row", () => {
+    const a = store.ensureRepo("acme", "web");
+    const b = store.ensureRepo("acme", "web");
+    expect(a).toBe(b);
+    const { n } = db
+      .prepare("SELECT COUNT(*) AS n FROM repos WHERE owner='acme' AND name='web'")
+      .get<{ n: number }>() as { n: number };
+    expect(n).toBe(1);
+  });
+});

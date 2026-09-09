@@ -32,19 +32,31 @@ export interface ReviewRow {
 export class ReviewStore {
   constructor(private readonly db: SqlDatabase) {}
 
+  /**
+   * The repository row, created if it is not there.
+   *
+   * Insert-then-read rather than read-then-insert. `SELECT`, then `INSERT` if it missed,
+   * is a check-then-act across two statements: with three workers plus a webhook and a
+   * poller all touching the same repository, both can miss and both can insert, and the
+   * loser hits `UNIQUE (owner, name)` and throws. `ON CONFLICT DO NOTHING` makes the
+   * whole thing one atomic statement, and the loser reads the winner's row.
+   */
   ensureRepo(owner: string, name: string): string {
+    const id = newId("rv").replace("rv_", "repo_");
+    const res = this.db
+      .prepare(
+        `INSERT INTO repos (id, owner, name, default_branch, enabled, created_at)
+         VALUES (?,?,?,?,1,?)
+         ON CONFLICT(owner, name) DO NOTHING`,
+      )
+      .run(id, owner, name, "main", new Date().toISOString());
+    if (res.changes > 0) return id;
+
     const existing = this.db
       .prepare("SELECT id FROM repos WHERE owner=? AND name=?")
       .get<{ id: string }>(owner, name);
-    if (existing) return existing.id;
-
-    const id = newId("rv").replace("rv_", "repo_");
-    this.db
-      .prepare(
-        "INSERT INTO repos (id, owner, name, default_branch, enabled, created_at) VALUES (?,?,?,?,1,?)",
-      )
-      .run(id, owner, name, "main", new Date().toISOString());
-    return id;
+    if (!existing) throw new Error(`repo ${owner}/${name} vanished between insert and read`);
+    return existing.id;
   }
 
   /**
@@ -63,20 +75,30 @@ export class ReviewStore {
       .run(issue === undefined || issue === null ? null : JSON.stringify(issue), reviewId);
   }
 
-  /** Returns the existing review when one already covers this exact head SHA. */
+  /**
+   * Returns the existing review when one already covers this exact head SHA.
+   *
+   * `unique(repo_id, pr_number, head_sha)` is the idempotency key the plan names, and it
+   * covers webhook redelivery and the poller racing the webhook — but only if the code
+   * around it is atomic. It was `SELECT`, then `INSERT` if the select missed, which is a
+   * check-then-act across two statements with no transaction: two workers handling the
+   * same pull request both miss, both insert, and the loser gets a constraint violation
+   * that fails its job. The constraint was doing its job; the code above it was turning a
+   * successful deduplication into an error.
+   *
+   * Insert first, with `ON CONFLICT DO NOTHING`, and read the winner's row when the
+   * insert finds one. One statement decides, so there is no window. The id generated on
+   * the losing path is simply discarded, which costs nothing.
+   */
   create(input: CreateReviewInput): { id: string; created: boolean } {
     const repoId = this.ensureRepo(input.repoOwner, input.repoName);
-    const existing = this.db
-      .prepare("SELECT id FROM reviews WHERE repo_id=? AND pr_number=? AND head_sha=?")
-      .get<{ id: string }>(repoId, input.prNumber, input.headSha);
-    if (existing) return { id: existing.id, created: false };
-
     const id = newId("rv");
-    this.db
+    const res = this.db
       .prepare(
         `INSERT INTO reviews (id, repo_id, pr_number, head_sha, base_sha, base_ref, title, author,
                               is_fork, trust, playbook_version_id, state, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued',?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued',?)
+         ON CONFLICT(repo_id, pr_number, head_sha) DO NOTHING`,
       )
       .run(
         id,
@@ -92,7 +114,17 @@ export class ReviewStore {
         input.playbookVersionId,
         new Date().toISOString(),
       );
-    return { id, created: true };
+    if (res.changes > 0) return { id, created: true };
+
+    const existing = this.db
+      .prepare("SELECT id FROM reviews WHERE repo_id=? AND pr_number=? AND head_sha=?")
+      .get<{ id: string }>(repoId, input.prNumber, input.headSha);
+    if (!existing) {
+      throw new Error(
+        `review for ${input.prNumber}@${input.headSha} vanished between insert and read`,
+      );
+    }
+    return { id: existing.id, created: false };
   }
 
   setState(id: string, state: string, extra: { error?: string; costCents?: number } = {}): void {

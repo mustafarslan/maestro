@@ -1015,6 +1015,25 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     so `live-github-check.mjs` was committed unformatted and only the clean-checkout gate said
     so. `pnpm run format` covers the repository and is what to use.
 
+120. **The idempotency key was undone by a race above it.** `unique(repo_id, pr_number,
+    head_sha)` is the key the plan names as covering webhook redelivery and the poller racing the
+    webhook. `create` implemented it as `SELECT`, then `INSERT` if the select missed — a
+    check-then-act across two statements with no transaction. Three workers by default, plus a
+    webhook and a poller and now comment triggers, all touch the same pull request: both miss,
+    both insert, and the loser takes `UNIQUE constraint failed: reviews.repo_id,
+    reviews.pr_number, reviews.head_sha` and fails its job. The constraint was doing exactly
+    what it was for; the code above it turned a successful deduplication into an error.
+
+    Now one statement decides — `INSERT ... ON CONFLICT DO NOTHING`, then read the winner's row
+    when the insert found one — so there is no window at all. `DO NOTHING` rather than
+    `DO UPDATE` on purpose: the review already in flight is the one other rows point at, and
+    rewriting its title or trust level underneath it would change what a running review believes
+    about itself. `ensureRepo` had the identical shape against `UNIQUE (owner, name)`.
+
+    The tests exercise the losing path directly, which no sequential test reached before because
+    the fast-path `SELECT` hid it; removing the conflict clause reproduces the constraint error
+    verbatim.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
