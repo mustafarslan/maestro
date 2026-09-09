@@ -571,6 +571,17 @@ These are recorded because each was invisible to the test suite that existed at 
     queue and clear every floor. A guard asserts no rank map comes back and that the two enums
     that cannot import it still spell the list identically.
 
+74. **The remaining duplicated lists agreed, and nothing was keeping them that way.** Node kinds
+    are written in the registry and again in a zod enum; configurable tool names in the schema and
+    the implementations in another package. Both matched — checked, and reported as matching,
+    because a sweep that only publishes its hits is not a sweep. What was missing was anything to
+    stop them drifting, which is how the three defects above began. Guards now assert the node
+    kinds match both ways, that every configurable tool is actually implemented (the runner
+    silently drops a name it does not recognise, so a playbook naming a nonexistent tool loses it
+    with no error), that the terminal tool is not offered as a configurable one, and that the
+    schema comment documents the states the code writes — including `leaked`, which recovery
+    writes and nobody would know to look for.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
