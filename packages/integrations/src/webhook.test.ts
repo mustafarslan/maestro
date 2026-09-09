@@ -61,7 +61,9 @@ describe("event interpretation", () => {
     const t = interpretEvent("issue_comment", {
       action: "created",
       repository,
-      issue: { number: 12 },
+      // A real `issue_comment` delivery for a pull request carries `issue.pull_request`;
+      // without it this is a comment on a plain issue, which is not reviewable.
+      issue: { number: 12, pull_request: { url: "https://api.github.com/…/pulls/12" } },
       // The association matters now: a comment is anyone's to write, and a review costs
       // money. This test is about the command being recognised, so it comes from someone
       // allowed to ask.
@@ -78,7 +80,9 @@ describe("event interpretation", () => {
     const t = interpretEvent("issue_comment", {
       action: "created",
       repository,
-      issue: { number: 12 },
+      // A real `issue_comment` delivery for a pull request carries `issue.pull_request`;
+      // without it this is a comment on a plain issue, which is not reviewable.
+      issue: { number: 12, pull_request: { url: "https://api.github.com/…/pulls/12" } },
       comment: { body: "looks good to me" },
     });
     expect(t.kind).toBe("ignore");
@@ -130,7 +134,7 @@ describe("triggering a review from a comment", () => {
     interpretEvent("issue_comment", {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
-      issue: { number: 41 },
+      issue: { number: 41, pull_request: { url: "https://api.github.com/…/pulls/41" } },
       comment: { id: 900_002, body: bodyText, author_association: association },
     });
 
@@ -156,12 +160,27 @@ describe("triggering a review from a comment", () => {
   });
 
   it("ignores a comment on an issue that is not a pull request", () => {
+    // A real issue comment, with everything a real one has. The previous version of this
+    // test omitted `issue` entirely, so it passed on a `!number` check that every issue
+    // would have satisfied — it asserted the property in its title and tested a different
+    // one. `issue.pull_request` is the discriminator, confirmed against the live API.
     const t = interpretEvent("issue_comment", {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
-      comment: { body: "@maestro review" },
+      issue: { number: 41 },
+      comment: { id: 1, body: "@maestro review", author_association: "OWNER" },
     });
-    expect(t.kind).toBe("ignore");
+    expect(t).toMatchObject({ kind: "ignore" });
+  });
+
+  it("accepts the same comment when the issue is a pull request", () => {
+    const t = interpretEvent("issue_comment", {
+      action: "created",
+      repository: { name: "web", owner: { login: "acme" } },
+      issue: { number: 41, pull_request: { url: "https://api.github.com/…/pulls/41" } },
+      comment: { id: 1, body: "@maestro review", author_association: "OWNER" },
+    });
+    expect(t).toMatchObject({ kind: "review", pr: { number: 41 } });
   });
 });
 
@@ -202,7 +221,7 @@ describe("who may spend money asking for a review", () => {
     interpretEvent("issue_comment", {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
-      issue: { number: 41 },
+      issue: { number: 41, pull_request: { url: "https://api.github.com/…/pulls/41" } },
       comment: { id: 900_003, body: "@maestro review", author_association: association },
     });
 
@@ -256,7 +275,7 @@ describe("a requested review carries the comment that asked for it", () => {
     interpretEvent("issue_comment", {
       action: "created",
       repository: { name: "web", owner: { login: "acme" } },
-      issue: { number: 41 },
+      issue: { number: 41, pull_request: { url: "https://api.github.com/…/pulls/41" } },
       comment: { id, body: "@maestro review", author_association: "OWNER" },
     });
 

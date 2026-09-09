@@ -106,7 +106,7 @@ describe("manual-only reviews", () => {
   const requested = (id: number) => ({
     action: "created",
     repository: { name: "maestro", owner: { login: "acme" } },
-    issue: { number: 7 },
+    issue: { number: 7, pull_request: { url: "https://api.github.com/…/pulls/7" } },
     comment: { id, body: "@maestro review", author_association: "OWNER" },
   });
 

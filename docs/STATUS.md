@@ -1076,6 +1076,29 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     The endpoint's response shape was confirmed live against the real comment on PR #1 — add a
     reaction, list it, delete it — rather than assumed from documentation.
 
+123. **`@maestro review` on a plain issue queued a review of a pull request that does not
+    exist.** `issue_comment` fires for issues *and* pull requests — GitHub numbers both from one
+    sequence and delivers both through that event — and the only thing telling them apart is
+    `issue.pull_request`, present exactly when the issue is a pull request. The code tested
+    `!number`, which every issue has, under a reason string reading "comment is not on a pull
+    request". So a comment on an issue enqueued a review, `getPullRequest` 404ed, the job burned
+    all five attempts, and the person who asked got silence.
+
+    The fourth check this session that passed for the wrong reason, and the most pointed: a test
+    named `ignores a comment on an issue that is not a pull request` asserted exactly this
+    property and passed because its fixture omitted `issue` altogether. Fixing it failed six
+    more tests in the same file — **none of the comment-trigger fixtures had ever carried
+    `issue.pull_request`**, so the entire comment-trigger suite had been passing against payloads
+    GitHub never sends. All of them are realistic now, and removing the discriminator fails the
+    test that names it.
+
+    Found by doing what I had said the previous commit I would: re-examining the "needs a live
+    GitHub run" list for parts answerable from documentation or a read-only call. Every field the
+    webhook parser reads was checked against real objects from the API — `comment.id`,
+    `comment.body`, `comment.author_association` (`"OWNER"`, confirming the exact casing of the
+    trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
+    matched. `issue.pull_request` was the one that did not.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

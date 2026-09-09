@@ -137,8 +137,21 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
     // `@claude review` works on GitHub; `/maestro review` reads as a bot command. There
     // is no reason to make someone learn which one this tool chose.
     if (/^\s*[/@]maestro\s+review\b/im.test(text)) {
-      const number = (payload as { issue?: { number?: number } }).issue?.number;
-      if (!number) return { kind: "ignore", reason: "comment is not on a pull request" };
+      // `issue_comment` fires for issues AND pull requests — GitHub numbers them from one
+      // sequence and delivers both through this event. The only thing that tells them
+      // apart is `issue.pull_request`, which is present exactly when the issue is a pull
+      // request; verified against the live API rather than assumed.
+      //
+      // This used to test `!number`, which every issue has, under a reason string that
+      // said "comment is not on a pull request" — so `@maestro review` on a plain issue
+      // queued a review of a pull request that does not exist, `getPullRequest` 404ed,
+      // and the job burned all five attempts while the person who asked got silence. The
+      // test covering it passed because its fixture omitted `issue` altogether.
+      const issue = (payload as { issue?: { number?: number; pull_request?: unknown } }).issue;
+      if (!issue?.number || !issue.pull_request) {
+        return { kind: "ignore", reason: "comment is on an issue, not a pull request" };
+      }
+      const number = issue.number;
 
       // A comment is anyone's to write on a public repository, and a review starts
       // containers and spends money on model calls. GitHub states the commenter's
