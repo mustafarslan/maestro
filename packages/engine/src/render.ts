@@ -16,6 +16,77 @@ const SEVERITY_ICON: Record<string, string> = {
  * need feedback that does not exist yet when the comment is written, and printing a
  * number you cannot compute is worse than printing none.
  */
+
+/**
+ * Everything below turns model- and author-written text into markdown that renders as
+ * text.
+ *
+ * The comment is assembled by concatenation, and most of what goes into it originates
+ * with whoever opened the pull request: `evidence` is quoted repository content, a
+ * finding's title and body are a model's description of that content, a command is a
+ * string an agent chose, a Linear title is whoever wrote the ticket. None of it was
+ * escaped. A markdown file in the diff containing a code block was enough to break the
+ * comment by accident; deliberately, it is a forged section inside Maestro's own review —
+ * a "Approved by Maestro" heading below a fence the content closed itself.
+ *
+ * The agents hold no write credential precisely so that the orchestrator is the only
+ * writer. That guarantee is about who posts, and it says nothing about what the posted
+ * bytes mean once GitHub renders them.
+ */
+
+/** A fence longer than the longest backtick run inside, so content cannot close it. */
+function fenced(text: string): string[] {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return [fence, text, fence];
+}
+
+/** Inline code that a backtick in the content cannot escape. */
+function code(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const longest = Math.max(0, ...[...flat.matchAll(/`+/g)].map((m) => m[0].length));
+  const tick = "`".repeat(longest + 1);
+  // A leading or trailing backtick in the content needs the padding space markdown
+  // defines for exactly this case.
+  return longest ? `${tick} ${flat} ${tick}` : `\`${flat}\``;
+}
+
+/** One line, for a heading or a table cell: a newline there ends the construct. */
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, " ").trim();
+}
+
+/** A table cell: a pipe closes the column and a newline ends the row. */
+function cell(text: string): string {
+  return oneLine(text).replace(/\|/g, "\\|");
+}
+
+/** Every line prefixed, or only the first line stays inside the quote. */
+function quote(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => `> ${l}`)
+    .join("\n");
+}
+
+/**
+ * Stops GitHub turning author-written text into notifications.
+ *
+ * `@name` in a comment notifies a real person and `#123` cross-links an issue. Both are
+ * written by whoever opened the pull request — in a code comment an agent then quotes as
+ * evidence — so without this, anyone can make Maestro ping arbitrary people and
+ * back-reference arbitrary issues from a bot account the repository trusts. The HTML
+ * comment is the standard neutraliser: it renders as nothing and breaks the token.
+ */
+function deactivate(text: string): string {
+  return text.replace(/(^|[^\w`])([@#])(?=[\w-])/g, "$1$2<!---->");
+}
+
+/** Author- or model-written prose, rendered as prose and nothing else. */
+function prose(text: string): string {
+  return deactivate(text);
+}
+
 export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = {}): string {
   const lines: string[] = [];
   const t = outcome.triage;
@@ -23,36 +94,38 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
   lines.push(`## ${opts.title ?? "Maestro review"}`, "");
 
   if (outcome.state === "skipped") {
-    lines.push(`Skipped: ${outcome.skipReason}`, "");
+    lines.push(`Skipped: ${prose(oneLine(outcome.skipReason ?? ""))}`, "");
     return lines.join("\n");
   }
   if (outcome.state === "failed") {
-    lines.push(`> Review failed: ${outcome.error}`, "");
+    lines.push(quote(`Review failed: ${prose(oneLine(outcome.error ?? ""))}`), "");
   }
-  if (t?.summary) lines.push(t.summary, "");
+  if (t?.summary) lines.push(prose(t.summary), "");
 
   if (t?.posted.length) {
     for (const f of t.posted) {
       const where = f.file
-        ? `\`${f.file}${f.lineStart ? `:${f.lineStart}${f.lineEnd && f.lineEnd !== f.lineStart ? `-${f.lineEnd}` : ""}` : ""}\``
+        ? code(
+            `${f.file}${f.lineStart ? `:${f.lineStart}${f.lineEnd && f.lineEnd !== f.lineStart ? `-${f.lineEnd}` : ""}` : ""}`,
+          )
         : "_whole PR_";
-      lines.push(`### ${SEVERITY_ICON[f.severity] ?? ""} ${f.title}`);
+      lines.push(`### ${SEVERITY_ICON[f.severity] ?? ""} ${prose(oneLine(f.title))}`);
       lines.push(
-        `${where} · **${f.severity}** · \`${f.category}\` · confidence ${(f.confidence * 100).toFixed(0)}%` +
+        `${where} · **${f.severity}** · ${code(f.category)} · confidence ${(f.confidence * 100).toFixed(0)}%` +
           (f.agreementCount > 1 ? ` · **${f.agreementCount} agents agree**` : "") +
           ` · _${f.agentIds.join(", ")}_`,
       );
-      lines.push("", f.body);
+      lines.push("", prose(f.body));
       // A second agent that described this location differently, kept rather than
       // dropped — one comment per location, but nothing an agent said is lost.
       for (const also of f.alsoReported ?? []) {
         lines.push(
           "",
-          `> **Also reported here** (${also.agentId}) — ${also.title}`,
-          `> ${also.body}`,
+          quote(`**Also reported here** (${also.agentId}) — ${prose(oneLine(also.title))}`),
+          quote(prose(also.body)),
         );
       }
-      if (f.evidence) lines.push("", "```", f.evidence.slice(0, 1500), "```");
+      if (f.evidence) lines.push("", ...fenced(f.evidence.slice(0, 1500)));
       lines.push("");
     }
   } else if (outcome.state === "done") {
@@ -85,8 +158,8 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     );
     for (const n of agentRows) {
       lines.push(
-        `| ${n.agentId} | ${n.state === "skipped" ? `skipped — ${n.error ?? ""}` : n.state}` +
-          ` | ${n.model ?? "—"} | ${n.findings ?? "—"} | ${n.costCents ? `${n.costCents.toFixed(2)}¢` : "—"}` +
+        `| ${cell(n.agentId ?? "")} | ${n.state === "skipped" ? `skipped — ${cell(n.error ?? "")}` : n.state}` +
+          ` | ${cell(n.model ?? "—")} | ${n.findings ?? "—"} | ${n.costCents ? `${n.costCents.toFixed(2)}¢` : "—"}` +
           ` | ${n.durationMs ? `${(n.durationMs / 1000).toFixed(1)}s` : "—"} |`,
       );
     }
@@ -99,8 +172,8 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     for (const c of commands) {
       lines.push(
         c.refused
-          ? `- \`${c.command}\` → **not allowlisted**, so it did not run`
-          : `- \`${c.command}\` → exit ${c.exitCode} (${(c.durationMs / 1000).toFixed(1)}s)`,
+          ? `- ${code(c.command)} → **not allowlisted**, so it did not run`
+          : `- ${code(c.command)} → exit ${c.exitCode} (${(c.durationMs / 1000).toFixed(1)}s)`,
       );
     }
     if (commands.some((c) => c.refused)) {
@@ -136,7 +209,7 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     // verdict deserves, so the reader is told which issue was checked — or that none was.
     ...(outcome.linearIssue
       ? [
-          `**Checked against** — Linear issue \`${outcome.linearIssue.identifier}\`: ${outcome.linearIssue.title}` +
+          `**Checked against** — Linear issue ${code(outcome.linearIssue.identifier)}: ${prose(oneLine(outcome.linearIssue.title))}` +
             (outcome.linearIssue.acceptanceCriteria
               ? " (acceptance criteria included)"
               : " (no acceptance criteria in the issue)"),
