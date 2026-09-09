@@ -30,6 +30,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ document }),
     }),
+  playbookDiff: () => request<PlaybookDiff>("/api/playbook/diff"),
   activate: (versionId: string) =>
     request<{ ok: boolean }>("/api/playbook/activate", {
       method: "POST",
@@ -282,4 +283,17 @@ export interface ProviderTestResponse {
     passed: boolean;
     costCents: number;
   };
+}
+
+/** What changed between two playbook versions. `from`/`to` are null when there is no pair. */
+export interface PlaybookDiff {
+  from: number | null;
+  to: number | null;
+  changes: {
+    path: string;
+    kind: "added" | "removed" | "changed";
+    before?: string;
+    after?: string;
+    lines?: { sign: "+" | "-"; text: string }[];
+  }[];
 }

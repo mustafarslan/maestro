@@ -10,7 +10,7 @@ import {
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
-import { NODE_SPECS, PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
+import { diffPlaybooks, NODE_SPECS, PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 
 export interface ApiContext {
   db: SqlDatabase;
@@ -101,6 +101,38 @@ const routes: Route[] = [
           createdAt: v.createdAt,
         })),
         nodeRegistry: Object.values(NODE_SPECS),
+      };
+    },
+  },
+  {
+    // What publishing this version changed, or what rolling back would undo. The plan
+    // names a diff twice — version management, and the persona editor — and neither
+    // existed: publishing was a one-way door with no way to see what moved.
+    method: "GET",
+    pattern: /^\/api\/playbook\/diff$/,
+    handler: async (ctx, req) => {
+      const store = new PlaybookStore(ctx.db);
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const versions = store.listVersions("default");
+
+      // Defaults to "the active version against the one before it", which is the question
+      // somebody has when they open the page.
+      const toId = url.searchParams.get("to") ?? store.getActive("default")?.id;
+      const to = toId ? store.getVersion(toId) : null;
+      const fromId =
+        url.searchParams.get("from") ??
+        versions.find((v) => v.version === (to?.version ?? 0) - 1)?.id;
+      const from = fromId ? store.getVersion(fromId) : null;
+
+      if (!to || !from) {
+        // A first version has nothing to compare against, and saying so is better than an
+        // empty list that reads as "nothing changed".
+        return { changes: [], from: from?.version ?? null, to: to?.version ?? null };
+      }
+      return {
+        from: from.version,
+        to: to.version,
+        changes: diffPlaybooks(from.doc, to.doc),
       };
     },
   },

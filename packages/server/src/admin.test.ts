@@ -401,3 +401,56 @@ describe("serving the embedded UI", () => {
     expect((await fetch(`${base}/`)).status).toBe(200);
   });
 });
+
+describe("the playbook diff", () => {
+  // The plan names a diff twice — version management, and the persona editor — and neither
+  // existed. Publishing was a one-way door: you could roll back to a version and nothing
+  // anywhere told you what rolling back would change.
+  const publishWith = (mutate: (d: ReturnType<typeof defaultPlaybook>) => void) => {
+    const doc = structuredClone(defaultPlaybook());
+    mutate(doc);
+    return new PlaybookStore(db).publish(doc, { activate: true });
+  };
+
+  it("compares the active version against the one before it by default", async () => {
+    publishWith((d) => {
+      const a = d.agents.find((x) => x.id === "security");
+      if (a) a.persona = `${a.persona}\nAlways check authorisation on every handler.`;
+    });
+
+    const body = (await (await fetch(`${base}/api/playbook/diff`, { headers: auth })).json()) as {
+      from: number;
+      to: number;
+      changes: { path: string }[];
+    };
+    expect(body.to).toBe(body.from + 1);
+    expect(body.changes.some((c) => c.path === "agents.security.persona")).toBe(true);
+  });
+
+  it("says which versions it compared, so the answer is checkable", async () => {
+    publishWith((d) => {
+      d.triage.minConfidence = 0.95;
+    });
+    const body = (await (await fetch(`${base}/api/playbook/diff`, { headers: auth })).json()) as {
+      from: number;
+      to: number;
+    };
+    expect(typeof body.from).toBe("number");
+    expect(typeof body.to).toBe("number");
+  });
+
+  it("reports an empty comparison rather than pretending nothing changed", async () => {
+    // A first version has nothing before it. An empty `changes` with null bounds says that;
+    // an empty `changes` alone would read as "identical".
+    const body = (await (await fetch(`${base}/api/playbook/diff`, { headers: auth })).json()) as {
+      from: number | null;
+      changes: unknown[];
+    };
+    expect(body.changes).toEqual([]);
+    expect(body.from).toBeNull();
+  });
+
+  it("needs the token", async () => {
+    expect((await fetch(`${base}/api/playbook/diff`)).status).toBe(401);
+  });
+});

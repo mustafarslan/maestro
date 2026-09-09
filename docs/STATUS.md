@@ -18,7 +18,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
-| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment | publish/rollback/pin verified; test connection verified against Ollama |
+| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, and **version diff** (160) | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
@@ -1902,6 +1902,31 @@ the server never sends fails it, and removing `live` from the server's response 
     Also confirmed while looking: the store sets `journal_mode=WAL`, `foreign_keys=ON`,
     `busy_timeout=5000` and `synchronous=NORMAL`, and five processes writing the same database
     concurrently completed 1500 transactions with no `SQLITE_BUSY`.
+
+160. **The plan named a version diff twice and neither existed.** Phase 6 lists "version
+    management — publish, diff, roll back" and a persona editor that shows a "diff against the
+    previous version". The only `diff` anywhere in the Studio was the string `git_diff` in a
+    tools list. So publishing was a one-way door: the Versions panel offered a roll back, and
+    nothing anywhere said what rolling back would change.
+
+    It matters most for personas, which is presumably why the plan mentions it there
+    specifically. A persona is prose, edited by hand, and the most frequently changed thing in a
+    playbook — "v7 versus v8" means nothing without the words that moved, and showing the whole
+    persona twice would be worse than useless.
+
+    `diffPlaybooks` compares agents first, since they are what people edit: persona, model
+    binding, enablement, tools, then the router, triage, envSpec, budget and graph. Multi-line
+    prose gets a line diff — common prefix and suffix dropped, the rest reported as removals and
+    additions — and a number or a flag is shown whole, because a line diff of `0.6` → `0.9`
+    obscures rather than reveals. Not a Myers implementation: a persona edit is a paragraph
+    rewritten in place, and a diff library for prose nobody merges would be weight for its own
+    sake.
+
+    `GET /api/playbook/diff` defaults to the active version against the one before it, which is
+    the question somebody opening the page has, and reports `from`/`to` as null when there is no
+    pair — an empty change list on its own would read as "identical" rather than "nothing to
+    compare". Verified live against the compiled binary: edit a persona through MCP, then ask
+    the running daemon, and it answers `v1 -> v2` with the changed lines.
 
 ### Found by mechanical sweep, still open
 

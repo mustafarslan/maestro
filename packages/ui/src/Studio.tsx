@@ -14,6 +14,7 @@ import {
   type AgentDef,
   api,
   type Issue,
+  type PlaybookDiff,
   type PlaybookDoc,
   type PlaybookResponse,
   type ProvidersResponse,
@@ -568,6 +569,8 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
         </div>
       </div>
 
+      <VersionDiff />
+
       <div className="panel">
         <div className="panel-head">Versions</div>
         <table>
@@ -591,6 +594,81 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the active version changed, or what rolling back would undo.
+ *
+ * Publishing was a one-way door before this: the Versions list below offers a roll back and
+ * nothing said what rolling back would do. A persona is prose edited by hand, so the lines
+ * that moved are the answer — "v7 vs v8" on its own is not one.
+ */
+function VersionDiff() {
+  const [diff, setDiff] = useState<PlaybookDiff | null>(null);
+
+  useEffect(() => {
+    api
+      .playbookDiff()
+      .then(setDiff)
+      .catch(() => setDiff(null));
+  }, []);
+
+  if (!diff || diff.from === null || diff.to === null) return null;
+  if (!diff.changes.length) {
+    return (
+      <div className="panel">
+        <div className="panel-head">
+          Changes in v{diff.to}
+          <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+            nothing differs from v{diff.from}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        Changes in v{diff.to}
+        <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+          against v{diff.from}
+        </span>
+      </div>
+      <div className="panel-body" style={{ display: "grid", gap: 12 }}>
+        {diff.changes.map((c) => (
+          <div key={c.path}>
+            <div style={{ fontWeight: 550, fontSize: 13 }}>
+              {c.path} <span className="muted">{c.kind}</span>
+            </div>
+            {c.lines ? (
+              <pre
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 12,
+                  overflowX: "auto",
+                  fontFamily: "ui-monospace, monospace",
+                }}
+              >
+                {c.lines.map((l, i) => (
+                  <div
+                    key={`${l.sign}${i}`}
+                    style={{ color: l.sign === "+" ? "var(--ok, #3fb950)" : "var(--warn)" }}
+                  >
+                    {l.sign} {l.text}
+                  </div>
+                ))}
+              </pre>
+            ) : (
+              <div className="muted" style={{ fontSize: 12, overflowX: "auto" }}>
+                {(c.before ?? "").slice(0, 160)} → {(c.after ?? "").slice(0, 160)}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
