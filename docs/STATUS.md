@@ -29,7 +29,7 @@ the README so the claims in that file stay short and true.
 | Compose sandbox-to-proxy routing | A sibling container on a shared network reaches another by name (HTTP 200) and a container off that network cannot (unreachable). An integration test then drives the real driver: the prepare sandbox joins a named network, and the analyze container still has no default route |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
 | **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
-| **Provider conformance, live** | `maestro llm test --model glm-5.3:cloud` against Ollama Cloud: plain completion, tool call, multi-turn loop stopping on the terminal tool, usage accounting, and error mapping (404 → non-retryable) all pass. The first time the conformance suite has run against a live provider rather than fixtures |
+| **Provider conformance, live — two adapters** | The full suite (plain completion, tool call, multi-turn loop stopping on the terminal tool, usage accounting, error mapping) passes against Ollama Cloud through **both** the `openai-compatible` adapter and the real `openai` adapter, the latter aimed at Ollama's OpenAI-protocol `/v1` endpoint. The first time the suite has run against anything but fixtures |
 | **A keyless install reviews** | With `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` unset, a fresh `maestro init` + `maestro review` logged "primary provider not configured, using declared fallback" and completed a full agent run on Ollama Cloud |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
 | **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
@@ -55,8 +55,12 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Linear has never been called against a real workspace.** Key extraction, criteria parsing
   and every degradation path are unit-tested against a fake transport, but no live API key has
   been used, so the GraphQL query shape is unverified against the real endpoint.
-- **The Anthropic, OpenAI and Google adapters have never made a live call.** The
-  `openai-compatible` adapter now has: `maestro llm test --model glm-5.3:cloud` passes the whole
+- **The Anthropic and Google adapters have never made a live call.** They speak their own
+  protocols and have no local stand-in, so this needs a key for one of those services. The
+  `openai` adapter is no longer in that set: it passes the conformance suite against Ollama's
+  OpenAI-protocol endpoint, which exercises its real request construction and response parsing —
+  though not `api.openai.com`'s own auth handling or error shapes. The `openai-compatible`
+  adapter likewise: `maestro llm test --model glm-5.3:cloud` passes the whole
   conformance suite against Ollama Cloud — plain completion, tool call, multi-turn loop with a
   terminal tool, usage accounting, and error mapping. That exercises the loop, the tool contract
   and the usage/cost path live; it does not exercise the three hosted adapters, which are

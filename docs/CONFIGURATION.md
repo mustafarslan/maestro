@@ -64,6 +64,24 @@ resolves assets through the GitHub API with `grep` and `sed` rather than pulling
 A download that succeeds but produces an empty file is treated as a failure, because otherwise it
 surfaces much later as a confusing exec error rather than a download problem.
 
+### Exercising an adapter without that provider's account
+
+The `openai` adapter can be pointed at any server speaking the OpenAI protocol, which is
+what Ollama's `/v1` endpoint is. That runs the real adapter — request construction,
+tool-call parsing, usage accounting, error mapping — against a live server without an
+OpenAI account:
+
+```sh
+maestro llm add openai-proto --kind openai --base-url http://localhost:11434/v1
+echo "unused-locally" | maestro llm key set openai-proto
+maestro llm test --provider openai-proto --model glm-5.3:cloud
+```
+
+It does not exercise `api.openai.com` itself — auth handling and that service's own error
+shapes are still untested — but it is the difference between an adapter that has run and
+one that has only ever seen fixtures. `anthropic` and `google` speak their own protocols
+and have no equivalent local stand-in.
+
 ## State
 
 | Variable | Default | Purpose |
