@@ -152,6 +152,9 @@ export async function reviewPullRequest(
       title: pr.title,
       body: pr.body,
     });
+    // Kept, not just rendered. Without this the criteria the product agent judged
+    // against existed only inside a prompt that is discarded when the review ends.
+    if (issue) reviews.setLinearIssue(reviewId, issue);
 
     const outcome = await runReview(
       { ...opts.deps, db },

@@ -175,14 +175,50 @@ export interface AgentQuality {
   acceptanceRate?: number;
 }
 
-/** Per-agent acceptance, which is what noise tuning should actually be driven by. */
-export function agentQuality(db: SqlDatabase): AgentQuality[] {
+/**
+ * Findings per agent and status, with cross-agent findings credited to each agent.
+ *
+ * `findings.agent_id` holds `agentIds.join(",")`, because triage merges what several
+ * agents reported into one finding. Grouping on that column in SQL therefore invented an
+ * agent called `security,architecture` and credited the finding to it — so exactly the
+ * findings the design values most, the ones two agents independently raised, were the
+ * ones missing from every per-agent number. Three places grouped this way; the split
+ * happens here, once.
+ */
+export function findingCountsByAgent(
+  db: SqlDatabase,
+  opts: { includeSuppressed?: boolean } = {},
+): { agentId: string; status: string; n: number }[] {
   const rows = db
     .prepare(
-      `SELECT agent_id AS agentId, status, COUNT(*) AS n
-       FROM findings WHERE status <> 'suppressed' GROUP BY agent_id, status`,
+      `SELECT agent_id AS agentId, status, COUNT(*) AS n FROM findings
+       ${opts.includeSuppressed ? "" : "WHERE status <> 'suppressed'"}
+       GROUP BY agent_id, status`,
     )
-    .all<{ agentId: string; status: string; n: number }>();
+    .all<{ agentId: string | null; status: string; n: number }>();
+
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    // A finding with no agent recorded is still a finding; attributing it to "" would
+    // silently drop it from the table it is supposed to appear in.
+    const agents = (row.agentId ?? "unknown")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    for (const agentId of agents.length ? agents : ["unknown"]) {
+      const key = `${agentId}\u0000${row.status}`;
+      totals.set(key, (totals.get(key) ?? 0) + row.n);
+    }
+  }
+  return [...totals].map(([key, n]) => {
+    const [agentId, status] = key.split("\u0000");
+    return { agentId: agentId as string, status: status as string, n };
+  });
+}
+
+/** Per-agent acceptance, which is what noise tuning should actually be driven by. */
+export function agentQuality(db: SqlDatabase): AgentQuality[] {
+  const rows = findingCountsByAgent(db);
 
   const byAgent = new Map<string, AgentQuality>();
   for (const row of rows) {

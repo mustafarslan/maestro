@@ -28,6 +28,7 @@ const finding = (over: Partial<TriagedFinding> = {}): TriagedFinding => ({
   title: "t",
   body: "b",
   agentIds: ["security"],
+  dedupeGroup: "a.ts@1#0",
   agreementCount: 1,
   ...over,
 });

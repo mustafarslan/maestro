@@ -9,6 +9,16 @@ export interface AgentFindings {
 
 export interface TriagedFinding extends Finding {
   agentIds: string[];
+  /**
+   * Identifies the merge group this finding is.
+   *
+   * Assigned when the group is opened, so it is a record of what triage actually did.
+   * The recorder previously recomputed a key as `file:category`, which stopped matching
+   * the grouping rule the moment dedupe became proximity-based and category-independent:
+   * two agents' different words for one defect got different groups, and two unrelated
+   * defects of the same category in one file shared a group.
+   */
+  dedupeGroup: string;
   /** How many independent agents raised the same defect. Agreement is evidence. */
   agreementCount: number;
   /**
@@ -57,7 +67,12 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
       const existing = groups.find((g) => sameDefect(g, finding) && !g.agentIds.includes(agentId));
 
       if (!existing) {
-        const group: TriagedFinding = { ...finding, agentIds: [agentId], agreementCount: 1 };
+        const group: TriagedFinding = {
+          ...finding,
+          agentIds: [agentId],
+          dedupeGroup: `${finding.file ?? "repo"}@${finding.lineStart ?? "none"}#${groups.length}`,
+          agreementCount: 1,
+        };
         groups.push(group);
         leadAgent.set(group, agentId);
         continue;

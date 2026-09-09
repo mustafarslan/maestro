@@ -9,7 +9,7 @@ import {
   type SqlDatabase,
 } from "@maestro/core";
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
-import { parsePullRequestRef } from "@maestro/integrations";
+import { findingCountsByAgent, parsePullRequestRef } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -246,9 +246,9 @@ export function buildServer(deps: McpDeps): McpServer {
     async () =>
       text({
         byState: db.prepare("SELECT state, COUNT(*) AS n FROM reviews GROUP BY state").all(),
-        findingsByAgent: db
-          .prepare("SELECT agent_id, status, COUNT(*) AS n FROM findings GROUP BY agent_id, status")
-          .all(),
+        // Same splitter the admin API uses. A raw GROUP BY on `agent_id` reports an
+        // agent called `security,architecture` for every finding two agents raised.
+        findingsByAgent: findingCountsByAgent(db, { includeSuppressed: true }),
         spend: db
           .prepare(
             "SELECT provider_id, model, SUM(cost_cents) AS cost_cents, COUNT(*) AS calls FROM llm_calls GROUP BY provider_id, model",

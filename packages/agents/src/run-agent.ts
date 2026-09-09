@@ -1,4 +1,4 @@
-import { logger } from "@maestro/core";
+import { taskLogger } from "@maestro/core";
 import { type LoopResult, type Provider, runAgent } from "@maestro/llm";
 import {
   type Agent,
@@ -23,6 +23,14 @@ export interface ReviewAgentRequest {
   /** False when the checkout is mounted read-only, which makes some commands fail. */
   writableWorkdir?: boolean;
   context: PromptContext;
+  /**
+   * Trace correlation. Without the review id an agent's log lines cannot be tied to the
+   * review they belong to, which is precisely the question asked when one goes wrong —
+   * and with three agents running concurrently across several reviews, `agentId` alone
+   * matches lines from all of them.
+   */
+  reviewId?: string;
+  nodeId?: string;
   budget: { maxSteps: number; costCapCents: number; deadlineMs?: number; maxPromptChars?: number };
   signal?: AbortSignal;
   onStep?: (step: { index: number; costCents: number }) => void;
@@ -46,7 +54,11 @@ export interface ReviewAgentResult {
  * a chatty model from smuggling unstructured claims into a PR comment.
  */
 export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAgentResult> {
-  const log = logger.child({ agentId: req.agent.id, model: req.model });
+  const log = taskLogger({
+    reviewId: req.reviewId,
+    nodeId: req.nodeId,
+    agentId: req.agent.id,
+  }).child({ model: req.model });
   const commandLog: ToolContext["commandLog"] = [];
 
   const ctx: ToolContext = {
@@ -66,6 +78,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
   );
 
   const loop = await runAgent({
+    log,
     provider: req.provider,
     model: req.model,
     system,

@@ -13,10 +13,6 @@ export function dbPath(): string {
   return process.env.MAESTRO_DB ?? join(maestroHome(), "maestro.db");
 }
 
-export function socketPath(): string {
-  return process.env.MAESTRO_SOCKET ?? join(maestroHome(), "maestro.sock");
-}
-
 export function workspacesDir(): string {
   return join(maestroHome(), "workspaces");
 }

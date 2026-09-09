@@ -111,8 +111,8 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## The one recurring bug class, and what now stops it
 
-Six separate defects in this project shared a single shape: configuration declared at one end and
-read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
+Fifteen separate defects in this project shared a single shape: configuration declared at one end
+and read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
 loop and no caller could reach it. Linear context was rendered into the prompt and never populated.
 `thinkingBudget` was dead — then still dead after the fix that was supposed to revive it, because
 the provider learned the right shape while nothing passed the value in.
@@ -124,9 +124,15 @@ router was written (finding 91).
 None produced a type error. Every field is optional, so a consumer that simply never mentions one
 compiles perfectly. Every one of them was caught by a person noticing, which is not a control.
 
+A mechanical sweep for it — exported symbols with no callers, schema columns with no writer,
+class methods nobody calls — found nine more in one pass after twenty-odd rounds of reading had
+not (findings 96-104 and the open list below). Reading finds bugs in code you are looking at;
+this class is invisible precisely because both halves look right on their own.
+
 `packages/playbook/src/wiring.test.ts` now asserts the property directly: every tunable in the
 model schema and every field of the router schema is read by something that runs, every `MAESTRO_` variable the code reads appears in
-the configuration reference, and the loop carries each setting through to the provider. It is crude
+the configuration reference and nothing in that reference is read by nothing, and the loop
+carries each setting through to the provider. It is crude
 — it reads source text — because the property is about the repository rather than any one module.
 Both historical bugs were reintroduced to confirm it fails on them, and it does.
 
@@ -759,6 +765,94 @@ These are recorded because each was invisible to the test suite that existed at 
     had no consumer contained the string `router.model` — so the guard passed on the very field
     it was added to catch. Both guards now strip comments before searching. Second time in this
     session that a check passed for the wrong reason; the first was `severity-copies.test.ts`.
+
+96. **Cross-agent agreement corrupted the signal it exists to improve.** Triage merges what
+    several agents reported into one finding, and the recorder writes `agentIds.join(",")` into
+    `findings.agent_id`. Three places then did `GROUP BY agent_id` — the admin API, the MCP
+    `review_stats` tool and `agentQuality` — so a finding both security and architecture raised
+    was credited to an agent called `security,architecture`, and the findings the design values
+    most were the ones missing from every per-agent number. Per-agent acceptance is what noise
+    tuning is supposed to be driven by. One shared `findingCountsByAgent` now splits the list and
+    credits each agent; findings with no agent recorded land under `unknown` rather than being
+    dropped.
+
+97. **`dedupe_group` was a recomputation that had stopped matching the rule.** The recorder
+    wrote `${file}:${category}`, which was the dedupe key until dedupe became proximity-based
+    and category-independent. After that it was wrong in both directions: two agents' different
+    words for one defect got different groups, and two unrelated defects of the same category in
+    one file shared one. Triage now assigns the group when it opens it, so the column records
+    what actually happened instead of guessing at it afterwards.
+
+98. **A documented unix socket that was never built.** `MAESTRO_SOCKET` was listed in the
+    configuration reference as "the unix socket the MCP server bridges over". The MCP server
+    opens the store directly — which is what WAL and `BEGIN IMMEDIATE` are for, and means it
+    works with no daemon running. `socketPath()` had no callers at all. Documented configuration
+    that does nothing is worse than undocumented configuration: someone sets it, sees no effect,
+    and cannot tell whether the tool or their value is wrong. The wiring guard now checks the
+    reverse direction too — every `MAESTRO_` variable in the reference must be read somewhere.
+
+99. **Log lines could not be tied to the review they came from.** `taskLogger` exists to attach
+    `reviewId`/`taskId`/`agentId`, its own comment says "every task-scoped log should use one",
+    and nothing called it; six places hand-rolled `logger.child` with whatever fields were to
+    hand. The agent runner logged `agentId` without `reviewId`, and the model loop logged
+    neither — so with three agents running across several reviews, a retry or a context-window
+    warning could not be attributed to anything. The ids are threaded through the agent runner
+    into the loop now.
+
+100. **`maestro doctor` never checked the GitHub credential.** It checks Docker, git, the
+    database, the playbook, snapshots and Linear. A wrong or expired token produced no signal
+    until a review failed several minutes in, having already built a container — which is
+    precisely what `doctor` exists to prevent. It reports the identity too, since reviewing as
+    the wrong account looks like nothing at all. The check branches on the credential: `GET
+    /user` identifies a personal token and an installation token is refused it with 403, so
+    asking every credential for a user login would have reported the *preferred* configuration,
+    a GitHub App, as broken. Both token paths were run against the compiled binary: a real
+    token reports `authenticated as user mustafarslan`, an invalid one reports `credential
+    rejected: Bad credentials` and exits in half a second — the 10s guard timer is cleared
+    rather than left pending, which would otherwise have held the process open after it had
+    finished printing. **The App branch is written against the documented endpoints and has not
+    been run** — there is still no App to run it against.
+
+101. **The cost table's age was invisible.** Every PR comment quotes a cost computed from prices
+    cached by hand into `PRICING.ts`. `PRICING_FETCHED_AT` recorded when, and nothing read it,
+    so a figure that had drifted looked exactly like a current one. `doctor` prints the date and
+    warns past six months.
+
+102. **`maestro llm add` had no `remove`.** `ProviderConfigStore.remove` was written and never
+    called, so a provider added by mistake, or a self-hosted endpoint that no longer exists,
+    could only be got rid of by editing the database by hand.
+
+103. **The ticket a review was judged against was never kept.** `reviews.linear_issue_json` was
+    in the first migration and nothing ever wrote it, so the acceptance criteria the product
+    agent used lived only inside a prompt that is discarded when the review ends. "Why did it
+    say that on PR 412?" is the question the version-pinning design exists to answer, and this
+    was the half of the answer nobody was keeping. Written at resolution time; both the admin
+    API and the MCP `get_review` tool already `SELECT *`, so it comes back with the review.
+
+104. **A guard that would have failed only in the clean checkout.** The new reverse env-var
+    check listed source files with `git ls-files`, and the gate unpacks tracked files into a
+    directory with no `.git`, where that exits 128. Passing locally and failing there is the
+    exact shape the gate exists to catch, so it must not be the shape of the gate's own tests.
+    It walks the filesystem now, pruning `node_modules` — `readdirSync(recursive)` descends into
+    it and exceeds the test timeout.
+
+### Found by mechanical sweep, still open
+
+Recorded rather than fixed, because each is a decision rather than an oversight:
+
+- **`findings.task_id` is never written.** A finding cannot be traced to the agent run that
+  produced it. `agent_id` covers most of what that is wanted for; the task link would matter for
+  Phase 8's "click a failed task" once findings are shown beside the waterfall.
+- **`tasks.lease_until`, `worker_id` and `started_at` are never written.** The plan gave tasks
+  their own leases for crash recovery. What exists is job-level leasing plus `recoverStaleReviews`,
+  which recovers at the review granularity. That is a legitimate simplification — a review is the
+  unit that gets requeued — but it was undocumented, so the columns read as a feature.
+- **`environments.volume_ids` is never written**, because no named volumes are created: the
+  dependency cache is an image, and everything else is tmpfs or a bind mount. The plan's "the
+  reaper must sweep volumes" has nothing to sweep.
+- **`repos.config_json`, `repos.installation_id` and the whole `installations` table are unused**,
+  since no GitHub App exists yet.
+- **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
 
 Findings 75-87 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are

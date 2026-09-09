@@ -190,3 +190,40 @@ describe("the tenant boundary on cancellation", () => {
     expect(reviewsForPullRequest(db, [a, "rv_gone"], { repoId: repoA, number: 7 })).toEqual([a]);
   });
 });
+
+describe("the ticket a review was checked against", () => {
+  // `linear_issue_json` sat in the schema from the first migration and nothing wrote it,
+  // so the acceptance criteria the product agent judged the diff by lived only inside a
+  // prompt that is discarded when the review ends. "Why did it say that on PR 412?" is
+  // the question the whole version-pinning design exists to answer.
+  it("is stored on the review and comes back with it", () => {
+    const { id } = store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 7,
+      headSha: "c".repeat(40),
+      playbookVersionId: "pv",
+    });
+    store.setLinearIssue(id, { identifier: "ENG-42", acceptanceCriteria: ["logs out"] });
+
+    const row = db
+      .prepare("SELECT linear_issue_json FROM reviews WHERE id=?")
+      .get<{ linear_issue_json: string | null }>(id);
+    expect(JSON.parse(row?.linear_issue_json ?? "null")).toMatchObject({ identifier: "ENG-42" });
+  });
+
+  it("stores null rather than the string 'null' when there is no ticket", () => {
+    const { id } = store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 8,
+      headSha: "d".repeat(40),
+      playbookVersionId: "pv",
+    });
+    store.setLinearIssue(id, undefined);
+    const row = db
+      .prepare("SELECT linear_issue_json FROM reviews WHERE id=?")
+      .get<{ linear_issue_json: string | null }>(id);
+    expect(row?.linear_issue_json).toBeNull();
+  });
+});

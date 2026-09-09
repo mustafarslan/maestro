@@ -54,8 +54,13 @@ export interface InlineComment {
  */
 export class GitHubClient {
   private readonly octokit: Octokit;
+  /** Which credential this client holds. The two have different permissions. */
+  readonly authKind: GitHubAuth["kind"];
+  private readonly installationId?: number;
 
   constructor(auth: GitHubAuth, baseUrl?: string) {
+    this.authKind = auth.kind;
+    this.installationId = auth.kind === "app" ? auth.app.installationId : undefined;
     this.octokit =
       auth.kind === "token"
         ? new Octokit({ auth: auth.token, baseUrl })
@@ -90,9 +95,32 @@ export class GitHubClient {
     return null;
   }
 
-  async viewer(): Promise<string> {
-    const { data } = await this.octokit.rest.users.getAuthenticated();
-    return data.login;
+  /**
+   * Who this credential is, for `maestro doctor`.
+   *
+   * Branches on the credential because the two cannot call the same endpoint. `GET /user`
+   * is what identifies a personal token, and an installation token is refused it with
+   * 403 "Resource not accessible by integration" — so asking every credential for a user
+   * login would report the *preferred* configuration, a GitHub App, as broken. An
+   * installation is identified by what it can reach instead.
+   */
+  async identity(): Promise<string> {
+    if (this.authKind === "token") {
+      const { data } = await this.octokit.rest.users.getAuthenticated();
+      return `user ${data.login}`;
+    }
+    if (this.installationId) {
+      const { data } = await this.octokit.rest.apps.listReposAccessibleToInstallation({
+        per_page: 1,
+      });
+      return `app installation ${this.installationId}, ${data.total_count} repositor${
+        data.total_count === 1 ? "y" : "ies"
+      }`;
+    }
+    // No installation id: the strategy issues an app JWT rather than an installation
+    // token, and that one may ask about the app itself.
+    const { data } = await this.octokit.rest.apps.getAuthenticated();
+    return `app ${data?.slug ?? data?.name ?? "(unnamed)"} (no installation id set)`;
   }
 
   async getPullRequest(ref: PullRequestRef): Promise<PullRequestContext> {

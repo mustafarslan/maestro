@@ -126,8 +126,13 @@ and have no equivalent local stand-in.
 | --- | --- | --- |
 | `MAESTRO_HOME` | `~/.maestro` | Database, workspaces, fixtures, the file secret store |
 | `MAESTRO_DB` | `$MAESTRO_HOME/maestro.db` | Override the SQLite path alone |
-| `MAESTRO_SOCKET` | `$MAESTRO_HOME/maestro.sock` | Unix socket the MCP server bridges over |
 | `MAESTRO_LOG_LEVEL` | `info` | `trace`…`fatal`. Logs go to **stderr**, so stdout stays parseable |
+
+`maestro mcp` opens the same SQLite database directly rather than bridging to the daemon
+over a socket. That is what WAL mode and `BEGIN IMMEDIATE` are for, and it means the MCP
+server works with no daemon running. An earlier socket-path variable documented here
+described a bridge that was never built; it is gone rather than left as configuration that
+reads well and does nothing.
 
 ## Sandbox networking
 

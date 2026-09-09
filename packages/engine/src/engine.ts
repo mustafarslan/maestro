@@ -370,6 +370,11 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             setupFailed: readyEnv.setupResults.some((r) => r.exitCode !== 0),
             writableWorkdir: spec.writableWorkdir,
             context: req.context,
+            // So an agent's log lines can be tied back to the review and the graph node
+            // they came from. Three agents run concurrently across several reviews, and
+            // `agentId` alone matches lines from all of them.
+            reviewId: req.reviewId,
+            nodeId: node.id,
             budget: {
               // The router's tier caps the whole review; an agent may not exceed its own
               // binding either, so the tighter of the two wins.

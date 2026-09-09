@@ -24,6 +24,7 @@ ${color.bold("maestro llm")} <subcommand>
   key rm <provider>
   add <id> --kind <kind> [--base-url <url>]
                               register another provider instance (e.g. a vLLM server)
+  remove <id>                 unregister one
 `);
   return 1;
 }
@@ -203,6 +204,22 @@ export async function llm(argv: string[]): Promise<number> {
         if (!id || !kind) return usage();
         store.upsert({ id, kind, baseUrl: arg(argv, "--base-url"), enabled: true });
         console.log(checkLine("ok", "registered", `${id} (${kind})`));
+        return 0;
+      }
+
+      // The other half of `add`, which was missing: `ProviderConfigStore.remove` was
+      // written for this and had no caller, so a provider added by mistake — or a
+      // self-hosted endpoint that no longer exists — could only be got rid of by editing
+      // the database by hand.
+      case "remove": {
+        const id = argv[1];
+        if (!id) return usage();
+        if (!store.list().some((p) => p.id === id)) {
+          console.log(checkLine("fail", "unknown provider", id));
+          return 1;
+        }
+        store.remove(id);
+        console.log(checkLine("ok", "removed", id));
         return 0;
       }
 

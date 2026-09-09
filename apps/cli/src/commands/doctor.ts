@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { dbPath, detectRuntime, maestroHome, migrationState, openStore } from "@maestro/core";
+import { GitHubClient } from "@maestro/integrations";
+import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
 import { checkLine, color } from "../ui.js";
 
@@ -140,6 +142,53 @@ export async function doctor(): Promise<number> {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Whether the GitHub credential works, which nothing checked. A wrong or expired token
+  // produced no signal until a review failed several minutes in, having already built a
+  // container — and `doctor` is the command people run precisely to avoid that. The
+  // identity is worth printing too: reviewing as the wrong account is a configuration
+  // mistake that looks like nothing at all.
+  const gh = GitHubClient.fromEnv();
+  if (!gh) {
+    checks.push({
+      status: "warn",
+      label: "github",
+      detail:
+        "no credential - set GITHUB_TOKEN, or the GITHUB_APP_* variables. " +
+        "'maestro review <local-path>' works without one; pull requests do not",
+    });
+  } else {
+    // Bounded like every other external call here: doctor must not hang on a wedged
+    // network when it is being run because something is already broken. The timer is
+    // cleared rather than left pending — an unreferenced 10s timeout keeps the event loop
+    // alive, so a doctor that answered in 300ms would sit there for another ten seconds.
+    let timer: NodeJS.Timeout | undefined;
+    const identity = await Promise.race([
+      gh.identity().catch((err: unknown) => (err instanceof Error ? `!${err.message}` : "!failed")),
+      new Promise<string>((r) => {
+        timer = setTimeout(() => r("!timed out after 10s"), 10_000);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    checks.push(
+      identity.startsWith("!")
+        ? { status: "fail", label: "github", detail: `credential rejected: ${identity.slice(1)}` }
+        : { status: "ok", label: "github", detail: `authenticated as ${identity}` },
+    );
+  }
+
+  // Cost figures in every PR comment come from a table cached by hand. Nothing said how
+  // old it was, so a number that had drifted looked exactly like a current one.
+  const cachedDays = Math.floor(
+    (Date.now() - Date.parse(PRICING_FETCHED_AT)) / (24 * 60 * 60 * 1000),
+  );
+  checks.push({
+    status: cachedDays > 180 ? "warn" : "info",
+    label: "pricing",
+    detail:
+      cachedDays > 180
+        ? `model prices cached ${cachedDays} days ago (${PRICING_FETCHED_AT}) - costs may be wrong`
+        : `model prices cached ${PRICING_FETCHED_AT}`,
+  });
 
   // Optional integration: its absence is information, not a problem. Saying nothing at
   // all is worse — a product agent reviewing against no acceptance criteria looks the

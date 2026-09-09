@@ -75,6 +75,13 @@ export interface RunAgentOptions {
   thinkingBudget?: number;
   signal?: AbortSignal;
   onStep?: (step: LoopStep) => void | Promise<void>;
+  /**
+   * Logger to hang this run's lines off, so they carry the review, node and agent they
+   * belong to. Without it the loop logged only provider and model, and a retry or a
+   * context-window warning could not be attributed to any particular agent — with
+   * several reviews in flight, that is most of what the logs are for.
+   */
+  log?: Logger;
   /** Retry policy for transient provider failures. */
   maxRetriesPerStep?: number;
   /** Base for exponential backoff; lowered in tests to keep them fast. */
@@ -99,7 +106,7 @@ const DEFAULT_RETRIES = 3;
  */
 export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   const { provider, model, budget, terminalTool } = opts;
-  const log = logger.child({ providerId: provider.id, model });
+  const log = (opts.log ?? logger).child({ providerId: provider.id, model });
   const startedAt = Date.now();
 
   const messages: Message[] = [{ role: "user", content: opts.prompt }];

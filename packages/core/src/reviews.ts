@@ -47,6 +47,22 @@ export class ReviewStore {
     return id;
   }
 
+  /**
+   * Records the ticket this review was checked against.
+   *
+   * `reviews.linear_issue_json` was in the schema from the first migration and nothing
+   * ever wrote it, so the acceptance criteria a product agent judged the diff by were
+   * held only in the prompt and thrown away with it. "Why did it say that on PR 412?"
+   * is the question the whole pinning design exists to answer, and this was the half of
+   * the answer that was not being kept. Resolved after the row is created, because the
+   * lookup is a network call the review must survive without.
+   */
+  setLinearIssue(reviewId: string, issue: unknown): void {
+    this.db
+      .prepare("UPDATE reviews SET linear_issue_json=? WHERE id=?")
+      .run(issue === undefined || issue === null ? null : JSON.stringify(issue), reviewId);
+  }
+
   /** Returns the existing review when one already covers this exact head SHA. */
   create(input: CreateReviewInput): { id: string; created: boolean } {
     const repoId = this.ensureRepo(input.repoOwner, input.repoName);

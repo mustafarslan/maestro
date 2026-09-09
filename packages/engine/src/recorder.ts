@@ -168,7 +168,9 @@ export class ReviewRecorder {
         f.title,
         f.body,
         f.evidence ? JSON.stringify({ evidence: f.evidence }) : null,
-        `${f.file ?? "repo"}:${f.category}`,
+        // The group triage actually formed, not a key recomputed from two fields that
+        // stopped being the grouping rule.
+        f.dedupeGroup,
         f.agreementCount,
         f.suppressedReason ?? null,
         status,

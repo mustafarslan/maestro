@@ -146,6 +146,26 @@ describe("agent quality", () => {
     seedFinding("security", 401, "suppressed");
     expect(agentQuality(db).find((q) => q.agentId === "security")).toBeUndefined();
   });
+
+  it("credits a finding two agents raised to both of them", () => {
+    // Triage merges what several agents reported into one row, and `agent_id` then holds
+    // `"security,architecture"`. Grouping on that column in SQL invented an agent by that
+    // name and credited the finding to it — so the findings the design values most, the
+    // ones two agents independently found, were the ones missing from every per-agent
+    // number, and cross-agent agreement corrupted exactly the signal it should improve.
+    seedFinding("security,architecture", 501);
+    ingestReaction(db, 501, "+1", "alice");
+
+    const quality = Object.fromEntries(agentQuality(db).map((q) => [q.agentId, q]));
+    expect(quality.security?.accepted).toBe(1);
+    expect(quality.architecture?.accepted).toBe(1);
+    expect(quality["security,architecture"]).toBeUndefined();
+  });
+
+  it("keeps a finding with no agent recorded rather than dropping it", () => {
+    seedFinding("", 601);
+    expect(agentQuality(db).find((q) => q.agentId === "unknown")?.posted).toBe(1);
+  });
 });
 
 describe("dismissal is sticky", () => {

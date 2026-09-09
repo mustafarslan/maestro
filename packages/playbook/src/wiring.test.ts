@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ModelBindingSchema, RouterSchema } from "./schema.js";
@@ -28,6 +28,25 @@ const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
  * guard, which is the second time a check in this repository passed for the wrong
  * reason. Crude on purpose; a `//` inside a string literal is the known cost.
  */
+/**
+ * Every source file in the repository, pruning as it walks.
+ *
+ * Not `git ls-files`: the clean-checkout gate unpacks tracked files into a directory with
+ * no `.git`, where that command exits 128 and takes the test with it — a check that
+ * passes here and fails there is the shape the gate exists to catch, so it must not be
+ * the shape of the gate's own tests. Not `readdirSync(recursive)` either: that descends
+ * into node_modules and takes longer than the test timeout.
+ */
+function sourceFiles(dir = ROOT, out: string[] = []): string[] {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".")) continue;
+    const full = join(dir, e.name);
+    if (e.isDirectory()) sourceFiles(full, out);
+    else if (/\.(ts|tsx|sh|yml|yaml|mjs|json)$/.test(e.name)) out.push(full);
+  }
+  return out;
+}
+
 const code = (rel: string) =>
   read(rel)
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -100,6 +119,27 @@ describe("environment variables are discoverable", () => {
       undocumented,
       `read by the code and documented nowhere: ${undocumented.join(", ")}`,
     ).toEqual([]);
+  });
+
+  it("documents nothing the code does not read", () => {
+    // The other direction, and the one that had a live example: CONFIGURATION.md listed
+    // `MAESTRO_SOCKET` as "the unix socket the MCP server bridges over" while the MCP
+    // server opened the store directly and nothing anywhere read the variable. Documented
+    // configuration that does nothing is worse than undocumented configuration — someone
+    // sets it, sees no effect, and cannot tell whether the tool or their value is wrong.
+    const docs = read("docs/CONFIGURATION.md");
+    const documented = new Set([...docs.matchAll(/MAESTRO_[A-Z_]+/g)].map((m) => m[0]));
+    // Walked from the filesystem, not `git ls-files`: the clean-checkout gate unpacks
+    // tracked files into a directory with no `.git`, where that command exits 128 and
+    // takes the test with it — a check that passes here and fails there is the shape the
+    // gate exists to catch, so it must not be the shape of the gate's own tests.
+    const everything = sourceFiles()
+      .filter((f) => !f.endsWith("wiring.test.ts"))
+      .map((f) => readFileSync(f, "utf8"))
+      .join("\n");
+
+    const inert = [...documented].filter((v) => !everything.includes(v)).sort();
+    expect(inert, `documented and read by nothing: ${inert.join(", ")}`).toEqual([]);
   });
 
   it("documents the credential variables a fresh install needs", () => {

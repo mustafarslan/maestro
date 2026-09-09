@@ -12,6 +12,7 @@ const finding = (over: Partial<TriagedFinding> = {}): TriagedFinding => ({
   title: "Endpoint trusts a client-supplied userId",
   body: "No authentication; userId comes straight from the body.",
   agentIds: ["security"],
+  dedupeGroup: "a.ts@1#0",
   agreementCount: 1,
   ...over,
 });

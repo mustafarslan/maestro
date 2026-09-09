@@ -81,8 +81,8 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
   },
 };
 
-/**
- * Teardown is intentionally absent from this registry. It is a guaranteed finalizer the
- * engine runs on every terminal state, so no drawable graph can leak containers.
- */
-export const FINALIZER = "teardown" as const;
+// Teardown is intentionally absent from this registry. It is a guaranteed finalizer the
+// engine runs on every terminal state, so no drawable graph can leak containers, and the
+// registry is a closed enum — a "teardown" node cannot be drawn in the first place. A
+// `FINALIZER = "teardown"` constant used to sit here as if something dispatched on it;
+// nothing ever did, and a named constant nobody reads reads like wiring that exists.
