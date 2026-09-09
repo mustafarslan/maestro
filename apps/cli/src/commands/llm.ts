@@ -11,7 +11,15 @@ import {
 import { arg, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
-function usage(): number {
+/**
+ * `code` is the process exit status, and it is a parameter because this text is printed
+ * for two different reasons. Somebody asking `--help` got what they asked for and must
+ * see 0; somebody who typed the command wrong must see 1. Returning 1 for both made
+ * `maestro playbook --help && ...` fail in a shell, and a CI step that probes a command
+ * with `--help` read the tool as broken. `reap` already returned 0 and the others did
+ * not, so the two spellings disagreed with each other as well.
+ */
+function usage(code = 1): number {
   console.log(`
 ${color.bold("maestro llm")} <subcommand>
 
@@ -26,13 +34,14 @@ ${color.bold("maestro llm")} <subcommand>
                               register another provider instance (e.g. a vLLM server)
   remove <id>                 unregister one
 `);
-  return 1;
+  return code;
 }
 
 export async function llm(argv: string[]): Promise<number> {
   rejectUnknownFlags(argv, ["--base-url", "--kind", "--model", "--provider"]);
   const sub = argv[0];
-  if (!sub || sub === "help" || sub === "--help") return usage();
+  if (sub === "help" || sub === "--help" || sub === "-h") return usage(0);
+  if (!sub) return usage();
 
   const db = await openStore();
   const store = new ProviderConfigStore(db);

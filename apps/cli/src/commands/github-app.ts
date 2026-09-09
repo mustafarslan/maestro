@@ -83,7 +83,9 @@ ${color.bold("maestro github-app")} <subcommand>
   installed <installation-id> record which installation to act as
   show                        what is configured
 `);
-    return 1;
+    // Asked for, or got wrong: the same text, two different exit statuses. This command
+    // had no `--help` at all, so asking for help was an unknown subcommand.
+    return sub === "help" || sub === "--help" || sub === "-h" ? 0 : 1;
   }
 
   if (storedGitHubApp() && !has(argv, "--force")) {

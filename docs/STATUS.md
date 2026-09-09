@@ -2220,6 +2220,20 @@ the server never sends fails it, and removing `live` from the server's response 
     other: a test reads every command's source, extracts the flags it reads and the flags
     it declares, and requires them to agree. Mutation-checked by undeclaring one.
 
+176. **Asking for help was reported as a failure.** `usage()` returned 1 unconditionally,
+    and it is printed for two different reasons: somebody asked for it, or somebody got
+    the command wrong. So `maestro playbook --help && …` failed in a shell, and a CI step
+    that probes a command with `--help` read the tool as broken.
+
+    `reap` returned 0 and `playbook`, `llm` and `eval` returned 1, so the spellings also
+    disagreed with each other — which is how this was noticed, running the binary rather
+    than reading it. `github-app` had no `--help` at all: asking for help was an unknown
+    subcommand.
+
+    `usage(code)` now separates the two, and the whole matrix is asserted — `--help` is 0,
+    a subcommand that does not exist is 1, and no subcommand at all is 1, because an
+    incomplete command is not a request for help.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
