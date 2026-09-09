@@ -267,3 +267,27 @@ describe("finding schema", () => {
     }
   });
 });
+
+describe("a refused command is recorded, not just answered", () => {
+  it("appears in the command log so the metrics block can report it", async () => {
+    // Only the agent was told. Nothing else saw it, so a repository whose allowlist was
+    // detected wrongly produced review after review with no commands run and no reason
+    // given — the failure looks identical to an agent that chose not to run anything.
+    const log: { command: string; exitCode: number; durationMs: number; refused?: boolean }[] = [];
+    const dispatch = buildDispatch({
+      sandbox: {
+        exec: async () => {
+          throw new Error("must not reach the sandbox");
+        },
+      } as never,
+      allowedCommands: ["npm test"],
+      baseRef: "main",
+      commandTimeoutSec: 10,
+      commandLog: log,
+    });
+
+    const res = await dispatch({ name: "run_command", input: { command: "pnpm test" } });
+    expect(res.isError).toBe(true);
+    expect(log).toEqual([{ command: "pnpm test", exitCode: -1, durationMs: 0, refused: true }]);
+  });
+});

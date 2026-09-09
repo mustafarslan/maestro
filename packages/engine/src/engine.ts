@@ -140,7 +140,7 @@ export interface NodeOutcome {
   costCents: number;
   error?: string;
   findings?: number;
-  commandsRun?: { command: string; exitCode: number; durationMs: number }[];
+  commandsRun?: { command: string; exitCode: number; durationMs: number; refused?: boolean }[];
   model?: string;
   stopKind?: string;
 }
@@ -161,6 +161,15 @@ export interface ReviewOutcome {
   costCents: number;
   durationMs: number;
   toolchain?: string;
+  /**
+   * Whether the dependency install reused the cached layer.
+   *
+   * The sandbox driver has computed this from the first day — it is the single biggest
+   * lever on how long a review takes — and nothing read it, so the one number that says
+   * whether the cache is working was measured and discarded. An operator asking "why is
+   * every review taking four minutes" had no way to see that it never hits.
+   */
+  cacheHit?: boolean;
   allowedCommands: string[];
   egressLog: { host: string; allowed: boolean }[];
   error?: string;
@@ -229,6 +238,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
         }
       : undefined,
     setupFailed: prepared?.setupResults.some((r) => r.exitCode !== 0) ?? false,
+    cacheHit: prepared?.cacheHit,
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],
     ...over,
@@ -250,7 +260,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
         signal: req.signal,
       });
       log.info(
-        { toolchain: env.toolchain.kind, commands: env.allowedCommands },
+        { toolchain: env.toolchain.kind, commands: env.allowedCommands, cacheHit: env.cacheHit },
         "environment ready",
       );
       return env;

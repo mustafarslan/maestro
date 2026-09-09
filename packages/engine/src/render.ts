@@ -97,7 +97,19 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
   if (commands.length) {
     lines.push("**Commands executed**", "");
     for (const c of commands) {
-      lines.push(`- \`${c.command}\` → exit ${c.exitCode} (${(c.durationMs / 1000).toFixed(1)}s)`);
+      lines.push(
+        c.refused
+          ? `- \`${c.command}\` → **not allowlisted**, so it did not run`
+          : `- \`${c.command}\` → exit ${c.exitCode} (${(c.durationMs / 1000).toFixed(1)}s)`,
+      );
+    }
+    if (commands.some((c) => c.refused)) {
+      lines.push(
+        "",
+        "> An agent asked for a command that is not on this repository's allowlist. That",
+        "> usually means the toolchain was detected wrongly; set `envSpec.allowedCommands`",
+        "> in the playbook, or `.maestro.yaml` on the base branch.",
+      );
     }
     lines.push("");
   }
@@ -133,6 +145,15 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
       : []),
     `**Environment** — toolchain \`${outcome.toolchain ?? "unknown"}\`, ` +
       `${outcome.allowedCommands.length} allowlisted command(s), analyzed with no network access.` +
+      // Whether the dependency layer was reused. It is the difference between a review
+      // that starts in seconds and one that reinstalls the world, and it was measured
+      // and thrown away. Omitted entirely when the driver did not say, rather than
+      // guessed at as a miss.
+      (outcome.cacheHit === undefined
+        ? ""
+        : outcome.cacheHit
+          ? " Dependency cache hit."
+          : " Dependency cache miss — dependencies were installed from scratch.") +
       (blocked.length
         ? ` ${blocked.length} egress attempt(s) blocked during dependency install.`
         : ""),

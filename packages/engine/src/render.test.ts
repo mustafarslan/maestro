@@ -66,3 +66,49 @@ describe("a partial review says so before the details", () => {
     expect(out.split("<details>")[0] ?? "").not.toContain("Partial review");
   });
 });
+
+describe("what the metrics block says about the environment", () => {
+  const withEnv = (over: Partial<ReviewOutcome>): ReviewOutcome =>
+    ({ ...outcome([{ agentId: "security", state: "done" }]), ...over }) as ReviewOutcome;
+
+  it("says whether the dependency cache was used", () => {
+    // The single biggest lever on how long a review takes. The driver has computed it
+    // from the first day and nothing read it, so "why does every review take four
+    // minutes" had no answer visible anywhere.
+    expect(renderReview(withEnv({ cacheHit: true }), { title: "t" })).toContain(
+      "Dependency cache hit",
+    );
+    expect(renderReview(withEnv({ cacheHit: false }), { title: "t" })).toContain(
+      "Dependency cache miss",
+    );
+  });
+
+  it("says nothing when the driver did not report it, rather than guessing at a miss", () => {
+    expect(renderReview(withEnv({}), { title: "t" })).not.toContain("Dependency cache");
+  });
+
+  it("reports a command the agent was refused, and why that matters", () => {
+    // A refusal used to be recorded nowhere: an agent asking for `pnpm test` in a repo
+    // whose allowlist detected only `npm test` produced a review with no commands run and
+    // no explanation, which is a misdetected toolchain degrading every review silently.
+    const md = renderReview(
+      withEnv({
+        nodes: [
+          {
+            nodeId: "n-1",
+            kind: "agent",
+            agentId: "security",
+            state: "done",
+            durationMs: 1,
+            costCents: 0,
+            commandsRun: [{ command: "pnpm test", exitCode: -1, durationMs: 0, refused: true }],
+          },
+        ],
+      }),
+      { title: "t" },
+    );
+    expect(md).toContain("not allowlisted");
+    expect(md).toContain("envSpec.allowedCommands");
+    expect(md).not.toContain("exit -1");
+  });
+});

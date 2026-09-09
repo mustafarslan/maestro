@@ -111,7 +111,7 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## The one recurring bug class, and what now stops it
 
-Fifteen separate defects in this project shared a single shape: configuration declared at one end
+Seventeen separate defects in this project shared a single shape: configuration declared at one end
 and read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
 loop and no caller could reach it. Linear context was rendered into the prompt and never populated.
 `thinkingBudget` was dead — then still dead after the fix that was supposed to revive it, because
@@ -125,8 +125,8 @@ None produced a type error. Every field is optional, so a consumer that simply n
 compiles perfectly. Every one of them was caught by a person noticing, which is not a control.
 
 A mechanical sweep for it — exported symbols with no callers, schema columns with no writer,
-class methods nobody calls — found nine more in one pass after twenty-odd rounds of reading had
-not (findings 96-104 and the open list below). Reading finds bugs in code you are looking at;
+class methods nobody calls — found eleven more in two passes after twenty-odd rounds of reading
+had not (findings 96-106 and the open list below). Reading finds bugs in code you are looking at;
 this class is invisible precisely because both halves look right on their own.
 
 `packages/playbook/src/wiring.test.ts` now asserts the property directly: every tunable in the
@@ -835,6 +835,22 @@ These are recorded because each was invisible to the test suite that existed at 
     exact shape the gate exists to catch, so it must not be the shape of the gate's own tests.
     It walks the filesystem now, pruning `node_modules` — `readdirSync(recursive)` descends into
     it and exceeds the test timeout.
+
+105. **Whether the dependency cache worked was measured and thrown away.** The sandbox driver
+    has set `PreparedEnvironment.cacheHit` from the first day — snapshot reuse when the lockfile
+    hash is unchanged is described in the plan as the single biggest lever on how long a review
+    takes — and nothing read it. An operator asking "why does every review take four minutes"
+    had no way to see that it never hits. It is in the metrics block now, and in the "environment
+    ready" log line. Omitted rather than reported as a miss when the driver did not say.
+
+106. **A command an agent was refused was recorded nowhere.** The tool answered the agent and
+    logged nothing, so an agent asking repeatedly for `pnpm test` in a repository whose allowlist
+    was detected as `npm test` produced a review with no commands run and no explanation —
+    indistinguishable from an agent that chose not to run any. That is a misdetected toolchain
+    silently degrading every review of that repository. Refusals are in the command log and the
+    metrics block now, with a note saying where to fix the allowlist. `ExecResult.refused`,
+    which was declared for this and never set by anything, is gone: the refusal happens in the
+    tool, before the sandbox is reached, so the flag belonged on the log entry.
 
 ### Found by mechanical sweep, still open
 

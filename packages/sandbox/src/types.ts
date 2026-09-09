@@ -8,8 +8,6 @@ export interface ExecResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
-  /** True when the command was refused because it is not on the allowlist. */
-  refused?: boolean;
 }
 
 export interface PrepareRequest {
