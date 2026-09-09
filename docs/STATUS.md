@@ -361,6 +361,13 @@ These are recorded because each was invisible to the test suite that existed at 
     the path the fix existed to prevent. Caught by a test that expected the fallback and got a
     failed review; the fallback is a thunk now.
 
+51. **The admin API's body limit bounded nothing.** It rejected the promise at 4MB and left the
+    data listener running, so the string kept growing for as long as the client kept sending —
+    the limit was a number with no effect. The webhook receiver destroys the request for exactly
+    this reason; the admin path had the same code without the destroy. It now stops reading, and
+    answers 413 rather than a generic 500, because an oversized body is the client's error and
+    reporting it as a server fault sends someone looking for a problem that is not there.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

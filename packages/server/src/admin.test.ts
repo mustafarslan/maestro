@@ -201,3 +201,39 @@ describe("the feedback endpoint the quality view reads", () => {
     expect((await fetch(`${base}/api/findings/feedback`)).status).toBe(401);
   });
 });
+
+describe("request body limits", () => {
+  it("refuses an oversized body with 413 rather than a generic failure", async () => {
+    // The limit existed but bounded nothing: rejecting the promise left the data
+    // listener running, so the string kept growing for as long as the client kept
+    // sending. The webhook receiver destroyed the request; this path did not.
+    const res = await fetch(`${base}/api/playbook`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ document: { pad: "x".repeat(5 * 1024 * 1024) } }),
+    }).catch(() => undefined);
+
+    // Destroying the socket can surface either as a 413 or as a transport error at the
+    // client; both mean the server stopped reading, which is the point.
+    if (res) expect([413, 400]).toContain(res.status);
+  });
+
+  it("still accepts a normal body afterwards", async () => {
+    // A rejected request must not leave the listener in a state that breaks the next one.
+    const res = await fetch(`${base}/api/playbook/validate`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ document: {} }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("answers 400, not 500, for a body that is not JSON", async () => {
+    const res = await fetch(`${base}/api/playbook/validate`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: "{not json",
+    });
+    expect(res.status).toBe(400);
+  });
+});

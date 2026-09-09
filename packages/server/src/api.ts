@@ -185,7 +185,17 @@ export async function handleApi(
 
     let body: unknown;
     if (req.method === "POST") {
-      const raw = await readBody(req);
+      let raw: string;
+      try {
+        raw = await readBody(req);
+      } catch (err) {
+        // An oversized body is the client's error, not ours; answering 500 sends someone
+        // looking for a server fault that is not there.
+        const tooLarge = err instanceof BodyTooLargeError;
+        res.writeHead(tooLarge ? 413 : 400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: tooLarge ? "request body too large" : "unreadable body" }));
+        return true;
+      }
       try {
         body = raw ? JSON.parse(raw) : {};
       } catch {
@@ -211,14 +221,44 @@ export async function handleApi(
   return true;
 }
 
+export const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** Thrown rather than a plain Error so the caller can answer 413 instead of 500. */
+export class BodyTooLargeError extends Error {
+  constructor() {
+    super(`request body exceeds ${MAX_BODY_BYTES} bytes`);
+    this.name = "BodyTooLargeError";
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let settled = false;
     req.on("data", (c) => {
+      if (settled) return;
       raw += c;
-      if (raw.length > 4 * 1024 * 1024) reject(new Error("body too large"));
+      if (raw.length > MAX_BODY_BYTES) {
+        settled = true;
+        // Rejecting alone does not stop the stream: the data listener keeps firing and
+        // the string keeps growing for as long as the client keeps sending, so the limit
+        // bounds nothing. Destroying the request is what actually stops it — the webhook
+        // receiver already did this; the admin API had the same code without the destroy.
+        raw = "";
+        req.destroy();
+        reject(new BodyTooLargeError());
+      }
     });
-    req.on("end", () => resolve(raw));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!settled) {
+        settled = true;
+        resolve(raw);
+      }
+    });
+    req.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
   });
 }
