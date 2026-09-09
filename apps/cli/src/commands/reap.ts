@@ -17,9 +17,11 @@ ${color.bold("maestro reap")} [options]
 
   --review <id>    only sweep resources belonging to one review
   --all            also remove cached dependency layers (maestro/deps:*)
+  --force          include containers belonging to reviews still in flight
 
 Removes Maestro's containers and snapshot images. Cached dependency layers are kept
-by default because they are what makes later reviews fast.
+by default because they are what makes later reviews fast, and containers belonging to
+reviews that are still running are left alone unless --force is given.
 `);
     return 0;
   }
@@ -41,7 +43,33 @@ by default because they are what makes later reviews fast.
   }
 
   console.log(color.bold("\nmaestro reap\n"));
-  const swept = await driver.reap(reviewId ? { reviewId } : {});
+
+  // A sweep matches every Maestro-labelled container, which includes the ones a running
+  // daemon is using right now. Reaping those destroys a review in progress, and `doctor`
+  // used to count them as leaked and recommend exactly this command.
+  const db = await openStore();
+  const active = has(argv, "--force")
+    ? []
+    : db
+        .prepare(
+          `SELECT id FROM reviews WHERE state IN ('queued','preparing','analyzing','triaging','posting')`,
+        )
+        .all<{ id: string }>()
+        .map((r) => r.id);
+
+  const swept = await driver.reap({
+    ...(reviewId ? { reviewId } : {}),
+    protectReviewIds: active,
+  });
+  if (swept.protected) {
+    console.log(
+      checkLine(
+        "info",
+        "in flight",
+        `${swept.protected} container(s) left alone; pass --force to include them`,
+      ),
+    );
+  }
   const sweptAnything = swept.containers > 0 || swept.images > 0;
   console.log(
     checkLine(
@@ -53,7 +81,7 @@ by default because they are what makes later reviews fast.
     ),
   );
 
-  if (argv.includes("--all")) {
+  if (has(argv, "--all")) {
     // Deliberately opt-in: dropping the dependency cache makes the next review of every
     // repository slow again.
     const cached = await driver.reapDependencyCache();
@@ -62,7 +90,6 @@ by default because they are what makes later reviews fast.
 
   // Mark environments the database still believes are alive, so the UI stops showing
   // containers that no longer exist.
-  const db = await openStore();
   try {
     const orphaned = db
       .prepare(

@@ -439,15 +439,41 @@ export class DockerSandboxDriver implements SandboxDriver {
     return ids.length;
   }
 
-  async reap(opts: { reviewId?: string; olderThanMs?: number } = {}): Promise<{
+  async reap(
+    opts: {
+      reviewId?: string;
+      olderThanMs?: number;
+      /**
+       * Review ids whose containers must be left alone.
+       *
+       * An unscoped sweep matched every Maestro-labelled container, which includes the
+       * ones a running daemon is using right now — so `maestro reap` during a review
+       * destroyed it. Worse, `doctor` counted those same live containers as "leaked" and
+       * told the operator to run exactly that command.
+       */
+      protectReviewIds?: Iterable<string>;
+    } = {},
+  ): Promise<{
     containers: number;
     images: number;
+    protected: number;
   }> {
     const filters = [`label=${LABEL_MANAGED}=true`];
     if (opts.reviewId) filters.push(`label=${LABEL_REVIEW}=${opts.reviewId}`);
     const filterArgs = filters.flatMap((f) => ["--filter", f]);
 
-    const containers = await listIds(["ps", "-aq", ...filterArgs]);
+    const protectedIds = new Set(opts.protectReviewIds ?? []);
+    const allContainers = await listIds(["ps", "-aq", ...filterArgs]);
+    const containers: string[] = [];
+    let skipped = 0;
+    for (const c of allContainers) {
+      const owner = await containerReviewId(c);
+      if (owner && protectedIds.has(owner)) {
+        skipped++;
+        continue;
+      }
+      containers.push(c);
+    }
     for (const c of containers) await docker(["rm", "-f", c], { timeoutMs: 60_000 });
 
     // Snapshot images are where disk actually fills up; a reaper that only sweeps
@@ -463,8 +489,18 @@ export class DockerSandboxDriver implements SandboxDriver {
     );
     for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
 
-    return { containers: containers.length, images: images.length };
+    return { containers: containers.length, images: images.length, protected: skipped };
   }
+}
+
+/** Which review a container belongs to, from the label the driver stamps on it. */
+async function containerReviewId(containerId: string): Promise<string | undefined> {
+  const res = await docker(
+    ["inspect", "--format", `{{index .Config.Labels "${LABEL_REVIEW}"}}`, containerId],
+    { timeoutMs: 20_000 },
+  );
+  const value = res.stdout.trim();
+  return value && value !== "<no value>" ? value : undefined;
 }
 
 /**

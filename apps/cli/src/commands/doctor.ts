@@ -78,12 +78,25 @@ export async function doctor(): Promise<number> {
   });
 
   if (docker) {
-    const out = await probeLines("docker", ["ps", "-aq", "--filter", "label=maestro.managed=true"]);
-    const strays = out?.filter(Boolean).length ?? 0;
+    // Running containers are not strays. Counting them as leaked told an operator to run
+    // `maestro reap` while a review was in flight, and reaping is what destroys it —
+    // advice that damages the very thing it claims to diagnose.
+    const count = async (args: string[]) =>
+      (await probeLines("docker", args))?.filter(Boolean).length ?? 0;
+    const all = await count(["ps", "-aq", "--filter", "label=maestro.managed=true"]);
+    const live = await count(["ps", "-q", "--filter", "label=maestro.managed=true"]);
+    const strays = Math.max(0, all - live);
+
     checks.push({
       status: strays === 0 ? "ok" : "warn",
       label: "sandboxes",
-      detail: strays === 0 ? "no strays" : `${strays} leaked container(s) - run 'maestro reap'`,
+      detail:
+        strays === 0
+          ? live === 0
+            ? "no strays"
+            : `no strays (${live} container(s) in flight)`
+          : `${strays} stopped container(s) left behind - run 'maestro reap'` +
+            (live ? `; ${live} in flight will be left alone` : ""),
     });
   }
 

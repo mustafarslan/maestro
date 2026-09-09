@@ -89,6 +89,28 @@ describe("prepare phase", () => {
 });
 
 describe("analyze phase security posture", () => {
+  itDocker(
+    "leaves a protected review's containers alone when reaping",
+    async () => {
+      // An unscoped sweep matches every Maestro-labelled container, which includes the ones
+      // a running daemon is using right now — so `maestro reap` during a review destroyed
+      // it, and `doctor` counted those same live containers as leaked and recommended
+      // exactly that command.
+      const sandbox = await driver.analyze(env!, { spec });
+      try {
+        const result = await driver.reap({ protectReviewIds: [REVIEW_ID] });
+        expect(result.protected).toBeGreaterThan(0);
+
+        // Still alive: the container must actually survive, not merely be counted.
+        const alive = await sandbox.exec("echo still-here");
+        expect(alive.stdout).toContain("still-here");
+      } finally {
+        await sandbox.destroy();
+      }
+    },
+    180_000,
+  );
+
   itDocker("keeps the package-manager cache outside the tmpfs that shadows /tmp", async () => {
     // The analyze phase mounts a tmpfs over /tmp, which shadows anything prepare baked in
     // there. With corepack's download under /tmp it was invisible by analyze time, so

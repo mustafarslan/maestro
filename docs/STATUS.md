@@ -414,6 +414,18 @@ These are recorded because each was invisible to the test suite that existed at 
     rather than in `init`, because the daemon, the CLI and the MCP server all open the store
     directly and a rule enforced at one entry point is a rule with holes.
 
+58. **`doctor` recommended the command that would destroy a review in progress.** Its stray count
+    matched every Maestro-labelled container, live ones included, so during a review it reported
+    "3 leaked container(s) - run 'maestro reap'" — and an unscoped reap matches those same
+    containers and removes them. Advice that damages the thing it claims to diagnose. `doctor` now
+    counts only stopped containers as strays and says how many are in flight; `reap` skips
+    containers belonging to reviews in `queued`/`preparing`/`analyzing`/`triaging`/`posting`
+    unless `--force` is given, and reports how many it left alone. Asserted against real
+    containers: a protected review's sandbox survives a sweep and is still executable afterwards.
+59. **`reap --all` used a raw `argv.includes`** rather than the shared `has()` helper added
+    earlier that day, so `--all=true` was silently ignored — the same `--flag=value` gap that had
+    made the whole Compose deployment do nothing.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
