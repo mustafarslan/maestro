@@ -15,7 +15,7 @@ the README so the claims in that file stay short and true.
 | Per-agent isolation | Two agents ran concurrently in separate containers off one shared snapshot image |
 | Dependency cache | Second run of the same lockfile skipped install entirely: no setup commands, no egress |
 | Real review quality | Reviewed a real PR and reported two genuine defects, both confirmed by hand against the source (see below) |
-| GitHub integration | PR fetch, fork detection and downgrade, base-branch-only config read, checkout, dry-run review, idempotency refusing a duplicate SHA |
+| GitHub integration | PR fetch, fork detection and downgrade, checkout, dry-run review, idempotency refusing a duplicate SHA. The base-branch config read is wired and unit-tested as of finding 68, but has not been exercised against a real repository carrying a `.maestro.yaml` |
 | MCP server | Real MCP client handshake: 10 tools, resources, and `set_agent_model` publishing a new playbook version |
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
@@ -491,6 +491,22 @@ These are recorded because each was invisible to the test suite that existed at 
 
     Found by a mechanical sweep of every schema column for reads without writes, run after the
     exported-function sweep had already proved more productive than reading.
+
+67. **Per-repo playbooks did not work.** `PlaybookStore.resolveForRepo` implements exactly the
+    assignment the design describes — a repo's own playbook, else the global default — and only
+    its own test called it. The daemon used `getActive("default")` unconditionally, so a
+    playbook assigned to a repository was silently ignored and every repo got the default.
+68. **`.maestro.yaml` was never read.** `getBaseBranchConfig` had no callers, so the per-repo
+    config the design describes did not exist. The *safety* property held trivially — nothing was
+    read from the PR head because nothing was read at all — while this document listed
+    "base-branch-only config read" among the verified capabilities. That entry was wrong and is
+    corrected above.
+
+    Now read from the base branch and applied by **intersection only**. Base-branch-only is not
+    sufficient by itself: anyone with write access could otherwise raise their own limits, and a
+    compromised branch could widen the egress allowlist. A repo may ask for less CPU, a shorter
+    timeout, fewer commands and fewer egress hosts; asking for more has no effect. Tested with the
+    attack the file exists to prevent — a "test command" that is really `curl … | sh`.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

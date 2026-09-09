@@ -175,7 +175,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const runOne = async (pr: PullRequestRef): Promise<void> => {
     const client = GitHubClient.fromEnv();
     if (!client) throw new Error("no GitHub credential configured");
-    const record = playbooks.getActive("default");
+    // Per-repo playbook assignment: a mobile repo and a backend repo want different
+    // personas and env specs, which is the reason `repos.playbook_id` exists.
+    // `resolveForRepo` was written for this and only its own test called it, so every
+    // repository silently got the global default no matter what was assigned.
+    const repoId = reviews.ensureRepo(pr.owner, pr.repo);
+    const record = playbooks.resolveForRepo(repoId);
     if (!record) throw new Error("no active playbook");
 
     const controller = new AbortController();

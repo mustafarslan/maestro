@@ -16,6 +16,8 @@ import {
   runReview,
 } from "@maestro/engine";
 import type { EnvSpec, PlaybookDocument } from "@maestro/playbook";
+import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import {
   checkoutPullRequest,
   type GitHubClient,
@@ -128,7 +130,12 @@ export async function reviewPullRequest(
     );
   }
 
-  const envSpec = resolveEnvSpec(playbook.envSpec, pr);
+  // A repository may narrow its own sandbox from its base branch, never widen it.
+  // `getBaseBranchConfig` existed for this and nothing called it, so `.maestro.yaml` was
+  // never read at all: the safety property held trivially while the capability did not
+  // exist, and STATUS recorded it as verified.
+  const repoOverride = await readRepoConfig(client, pr);
+  const envSpec = resolveEnvSpec(narrowEnvSpec(playbook.envSpec, repoOverride, log), pr);
   const workdir = mkdtempSync(join(tmpdir(), `maestro-${pr.repo}-`));
 
   try {
@@ -247,4 +254,85 @@ export function resolveEnvSpec(base: EnvSpec, pr: PullRequestContext): EnvSpec {
     allowedCommands: [],
     egressAllowlist: [],
   };
+}
+
+/** The subset of an env spec a repository may state for itself. */
+const RepoConfigSchema = z.object({
+  envSpec: z
+    .object({
+      cpus: z.number().positive().optional(),
+      timeouts: z
+        .object({
+          prepareSec: z.number().positive().optional(),
+          analyzeSec: z.number().positive().optional(),
+          commandSec: z.number().positive().optional(),
+        })
+        .optional(),
+      allowedCommands: z.array(z.string()).optional(),
+      egressAllowlist: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+type RepoConfig = z.infer<typeof RepoConfigSchema>;
+
+async function readRepoConfig(
+  client: GitHubClient,
+  pr: PullRequestContext,
+): Promise<RepoConfig | undefined> {
+  const raw = await client.getBaseBranchConfig(pr).catch(() => null);
+  if (!raw) return undefined;
+  const parsed = RepoConfigSchema.safeParse(parseYaml(raw));
+  if (!parsed.success) {
+    logger.warn({ pr: pr.number }, ".maestro.yaml is not valid; ignoring it");
+    return undefined;
+  }
+  return parsed.data;
+}
+
+/**
+ * Applies a repository's own config, in the narrowing direction only.
+ *
+ * Reading from the base branch stops a pull request altering the environment it will be
+ * analysed in, but that alone is not enough: anyone with write access could still raise
+ * their own limits, and a compromised branch could widen the egress allowlist. So every
+ * field is intersected rather than replaced. A repo may ask for less CPU, a shorter
+ * timeout, fewer commands and fewer egress hosts; asking for more has no effect.
+ */
+export function narrowEnvSpec(
+  base: EnvSpec,
+  override: RepoConfig | undefined,
+  log: { info: (obj: object, msg: string) => void },
+): EnvSpec {
+  const spec = override?.envSpec;
+  if (!spec) return base;
+
+  const narrowed: EnvSpec = {
+    ...base,
+    cpus: spec.cpus !== undefined ? Math.min(base.cpus, spec.cpus) : base.cpus,
+    timeouts: {
+      prepareSec: Math.min(
+        base.timeouts.prepareSec,
+        spec.timeouts?.prepareSec ?? Number.MAX_SAFE_INTEGER,
+      ),
+      analyzeSec: Math.min(
+        base.timeouts.analyzeSec,
+        spec.timeouts?.analyzeSec ?? Number.MAX_SAFE_INTEGER,
+      ),
+      commandSec: Math.min(
+        base.timeouts.commandSec,
+        spec.timeouts?.commandSec ?? Number.MAX_SAFE_INTEGER,
+      ),
+    },
+    // Intersections: an entry the playbook did not already permit cannot be added here.
+    allowedCommands: spec.allowedCommands
+      ? base.allowedCommands.filter((c) => spec.allowedCommands?.includes(c))
+      : base.allowedCommands,
+    egressAllowlist: spec.egressAllowlist
+      ? base.egressAllowlist.filter((h) => spec.egressAllowlist?.includes(h))
+      : base.egressAllowlist,
+  };
+
+  log.info({ from: ".maestro.yaml" }, "applied repository config, narrowing only");
+  return narrowed;
 }
