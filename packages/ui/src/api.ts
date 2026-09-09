@@ -37,6 +37,7 @@ export const api = {
     }),
   providers: () => request<ProvidersResponse>("/api/providers"),
   stats: () => request<StatsResponse>("/api/stats"),
+  feedback: () => request<FeedbackResponse>("/api/findings/feedback"),
 };
 
 export interface Issue {
@@ -201,4 +202,9 @@ export interface StatsResponse {
   reviews: { state: string; n: number }[];
   environments: { state: string; n: number }[];
   spend: { provider_id: string; model: string; cost_cents: number; calls: number }[];
+}
+
+/** Accepted-vs-dismissed per agent: the post-hoc signal precision is measured from. */
+export interface FeedbackResponse {
+  byAgent: { agent_id: string; status: string; n: number }[];
 }

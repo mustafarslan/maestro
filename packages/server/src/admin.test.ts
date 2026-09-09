@@ -162,3 +162,42 @@ describe("admin API", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 });
+
+describe("the feedback endpoint the quality view reads", () => {
+  it("groups findings by agent and status, which is what precision is measured from", async () => {
+    // Phase 9's whole point: the comment never claims its own accuracy, because that
+    // needs human judgement that has not happened when it is written. It is gathered
+    // afterwards and shown only here. The endpoint existed and served this from the
+    // first day; nothing in the UI called it, so the loop was invisible.
+    const reviewId = (db.prepare("SELECT id FROM reviews LIMIT 1").get() as { id: string }).id;
+    const now = new Date().toISOString();
+    const insert = db.prepare(
+      `INSERT INTO findings (id, review_id, agent_id, category, severity, confidence,
+                             title, body, status, created_at)
+       VALUES (?, ?, ?, 'c', 'high', 0.9, 't', 'b', ?, ?)`,
+    );
+    insert.run("q1", reviewId, "security", "accepted", now);
+    insert.run("q2", reviewId, "security", "dismissed", now);
+    insert.run("q3", reviewId, "product", "suppressed", now);
+
+    const res = await fetch(`${base}/api/findings/feedback`, { headers: auth });
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      byAgent: { agent_id: string; status: string; n: number }[];
+    };
+    const find = (a: string, st: string) =>
+      body.byAgent.find((r) => r.agent_id === a && r.status === st)?.n ?? 0;
+
+    expect(find("security", "accepted")).toBe(1);
+    expect(find("security", "dismissed")).toBe(1);
+    // Suppressed findings were never shown to anyone, so they must stay distinguishable
+    // from a human verdict rather than being folded into one.
+    expect(find("product", "suppressed")).toBe(1);
+    expect(find("product", "accepted")).toBe(0);
+  });
+
+  it("requires a token, like every other admin route", async () => {
+    expect((await fetch(`${base}/api/findings/feedback`)).status).toBe(401);
+  });
+});

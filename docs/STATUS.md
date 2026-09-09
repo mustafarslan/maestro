@@ -269,6 +269,22 @@ These are recorded because each was invisible to the test suite that existed at 
     everywhere. Only the prepare phase joins; analyze still runs with `--network none`, asserted
     by an integration test in the same commit.
 
+40. **`thinkingBudget` was still dead after being "fixed".** The provider learned the correct
+    per-model shape, and nothing ever passed the value in: the agent runner forwarded temperature
+    and maxTokens and dropped the rest. Every model setting is optional, so no type error catches
+    a knob wired at one end only. Found by a deliberate sweep for this bug class after it had
+    already produced four separate defects (the scheduler, `maxPromptChars`, Linear, and this).
+    The test now asserts that *every* configured setting arrives, rather than naming them one at
+    a time.
+41. **Phase 9's quality loop was computed, served and invisible.** `/api/findings/feedback`
+    returned accepted-versus-dismissed per agent from the first day and no UI ever called it —
+    so the exit criterion "the UI shows accepted-vs-dismissed by agent over time" was not met
+    despite the data being right there. Now a Quality tab. Suppressed findings are kept
+    distinguishable from human verdicts: they were never shown to anyone, and folding them in
+    would make a quiet agent look accurate.
+42. **Seven environment variables were read by code and documented nowhere**, which for a
+    self-hosted tool means undiscoverable. `docs/CONFIGURATION.md` now covers them.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
