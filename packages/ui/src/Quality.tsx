@@ -31,6 +31,10 @@ export function Quality() {
 
   // Only findings a human actually ruled on. Suppressed ones never reached anybody, and
   // counting them as anything would make a quiet agent look accurate.
+  //
+  // The rate comes from the server rather than being recomputed here: two implementations
+  // of one number is how they end up disagreeing.
+  const rateOf = (agent: string) => data.quality?.find((q) => q.agentId === agent)?.acceptanceRate;
   const judged = (agent: string) => count(agent, "accepted") + count(agent, "dismissed");
 
   if (!agents.length) {
@@ -70,12 +74,12 @@ export function Quality() {
                   </td>
                 ))}
                 <td>
-                  {total === 0 ? (
+                  {rateOf(a) === undefined || total === 0 ? (
                     // A rate over zero judgements is not a small number, it is no number.
                     <span className="muted">no verdicts yet</span>
                   ) : (
                     <>
-                      {Math.round((count(a, "accepted") / total) * 100)}%
+                      {Math.round((rateOf(a) as number) * 100)}%
                       <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>
                         of {total}
                       </span>

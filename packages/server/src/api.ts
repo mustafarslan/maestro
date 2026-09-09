@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { JobQueue, type SqlDatabase } from "@maestro/core";
+import { agentQuality } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore } from "@maestro/llm";
 import { NODE_SPECS, PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 
@@ -161,6 +162,11 @@ const routes: Route[] = [
       byAgent: ctx.db
         .prepare(`SELECT agent_id, status, COUNT(*) AS n FROM findings GROUP BY agent_id, status`)
         .all(),
+      // The same numbers reduced to a per-agent acceptance rate. `agentQuality` was
+      // written for this and had no callers, while this endpoint reimplemented half of
+      // it — two answers to one question, and the one with the careful "no data is not
+      // 0%" handling was the dead one.
+      quality: agentQuality(ctx.db),
     }),
   },
 ];

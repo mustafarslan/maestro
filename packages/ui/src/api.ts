@@ -207,4 +207,13 @@ export interface StatsResponse {
 /** Accepted-vs-dismissed per agent: the post-hoc signal precision is measured from. */
 export interface FeedbackResponse {
   byAgent: { agent_id: string; status: string; n: number }[];
+  /** Per-agent acceptance, computed server-side so the UI and the API agree. */
+  quality: {
+    agentId: string;
+    posted: number;
+    accepted: number;
+    dismissed: number;
+    open: number;
+    acceptanceRate?: number;
+  }[];
 }

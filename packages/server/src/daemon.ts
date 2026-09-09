@@ -5,6 +5,7 @@ import { JobQueue, logger, ReviewStore, SpanRecorder, type SqlDatabase } from "@
 import {
   diffPoll,
   GitHubClient,
+  ingestLineChanges,
   ingestReaction,
   interpretEvent,
   LinearClient,
@@ -97,6 +98,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         });
   const notify = (event: string, data: unknown) => admin?.broadcast(event, data);
 
+  /**
+   * Records which of the previous review's findings point at code that has since changed.
+   *
+   * Best-effort and never on the critical path: this is measurement, and failing to
+   * measure must not stop a review from being queued.
+   */
+  const recordLineChanges = async (pr: PullRequestRef): Promise<void> => {
+    try {
+      const client = GitHubClient.fromEnv();
+      if (!client) return;
+      const repoId = reviews.ensureRepo(pr.owner, pr.repo);
+      const last = db
+        .prepare(
+          `SELECT id FROM reviews WHERE repo_id=? AND pr_number=? AND state='done'
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get<{ id: string }>(repoId, pr.number);
+      if (!last) return;
+
+      const changed = await ingestLineChanges(db, client, pr, last.id);
+      if (changed) logger.info({ reviewId: last.id, changed }, "findings whose file changed");
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : err }, "line-change ingest failed");
+    }
+  };
+
   /** Enqueue rather than review inline: the HTTP handler must return immediately. */
   const enqueueTrigger = (t: ReviewTrigger): void => {
     // Reactions are the feedback signal precision is measured from, not review triggers.
@@ -117,6 +144,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const key = `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@${t.headSha || "latest"}`;
     const id = queue.enqueue({ kind: "review-pr", payload: t.pr, dedupeKey: key });
     logger.info({ key, reason: t.reason, enqueued: Boolean(id) }, "review trigger");
+
+    // A push is the moment to ask whether the last review's findings were acted on.
+    // `ingestLineChanges` existed for this from the beginning and nothing ever called
+    // it, so the strongest available quality signal — the only one needing no human
+    // action — was never gathered, while STATUS described its granularity as a known
+    // limitation, which implied it ran.
+    void recordLineChanges(t.pr);
 
     // A new head SHA makes any in-flight review of this PR unpostable; cancel it so it
     // stops holding a container and a scheduler slot.

@@ -197,6 +197,35 @@ describe("the feedback endpoint the quality view reads", () => {
     expect(find("product", "accepted")).toBe(0);
   });
 
+  it("returns a per-agent acceptance rate the UI does not have to recompute", async () => {
+    // `agentQuality` was written for this and had no callers, while the endpoint
+    // reimplemented half of it — two answers to one question, and the dead one was the
+    // one with the careful "no data is not 0%" handling.
+    const reviewId = (db.prepare("SELECT id FROM reviews LIMIT 1").get() as { id: string }).id;
+    const now = new Date().toISOString();
+    const insert = db.prepare(
+      `INSERT INTO findings (id, review_id, agent_id, category, severity, confidence,
+                             title, body, status, created_at)
+       VALUES (?, ?, ?, 'c', 'high', 0.9, 't', 'b', ?, ?)`,
+    );
+    insert.run("r1", reviewId, "security", "accepted", now);
+    insert.run("r2", reviewId, "security", "accepted", now);
+    insert.run("r3", reviewId, "security", "dismissed", now);
+    insert.run("r4", reviewId, "ui-ux", "posted", now);
+
+    const res = await fetch(`${base}/api/findings/feedback`, { headers: auth });
+    const body = (await res.json()) as {
+      quality: { agentId: string; acceptanceRate?: number }[];
+    };
+
+    const security = body.quality.find((q) => q.agentId === "security");
+    expect(security?.acceptanceRate).toBeCloseTo(2 / 3, 5);
+
+    // An agent nobody has ruled on has no rate at all, rather than 0%.
+    const uiux = body.quality.find((q) => q.agentId === "ui-ux");
+    expect(uiux?.acceptanceRate).toBeUndefined();
+  });
+
   it("requires a token, like every other admin route", async () => {
     expect((await fetch(`${base}/api/findings/feedback`)).status).toBe(401);
   });

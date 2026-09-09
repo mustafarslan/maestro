@@ -93,7 +93,10 @@ insecure neighbour, so it was not pattern-matching on "API route".
   daemon. Agent containers never receive it, but run the daemon on a host you would trust with
   that.
 - **The line-changed feedback signal is file-level**, not line-level: computing the latter needs the
-  patch of every intermediate commit, and a file being edited is already meaningful evidence.
+  patch of every intermediate commit, and a file being edited is already meaningful evidence. It is
+  gathered on a push, so it needs the daemon running; a one-off `maestro review` does not collect
+  it. (Until finding 64 below, it was not gathered at all — this entry described the granularity of
+  something that never ran.)
 
 ## The one recurring bug class, and what now stops it
 
@@ -461,6 +464,20 @@ These are recorded because each was invisible to the test suite that existed at 
     five re-claims. The idempotency key on `(repo, pr, head_sha)` bounded the damage — the second
     review skips rather than posting twice — but the job accounting was still wrong. The worker
     now renews at a third of the lease and clears the timer in a `finally`.
+
+64. **The line-changed quality signal was never gathered.** `ingestLineChanges` — which the plan
+    names as one of the two post-hoc signals, and the only one needing no human action — was
+    exported and called by nothing, anywhere. Worse, this document described its *granularity* as
+    a known limitation, which reads as a statement that it runs; and earlier the same day I fixed
+    a status-matching bug inside it and recorded that fix here, without noticing that nothing
+    invoked the function I had just repaired. Found by a mechanical sweep for exported functions
+    with no callers, after "built but unwired" had already produced five separate defects. It now
+    runs on a push, best-effort, off the critical path.
+65. **Two implementations of per-agent acceptance, and the dead one was the careful one.**
+    `agentQuality` had no callers while the feedback endpoint reimplemented half of it inline —
+    including, in the live version, the "0% and no data are different" distinction that
+    `agentQuality` handles and the inline SQL did not. The endpoint now returns `agentQuality`'s
+    result and the UI displays it rather than recomputing.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
