@@ -275,7 +275,11 @@ export function buildDispatch(ctx: ToolContext) {
 
         return {
           output: [
-            `exit=${res.exitCode}${res.timedOut ? " (timed out)" : ""}`,
+            // "cancelled" and "timed out" mean opposite things to an agent: one says the
+            // repository's command hung, the other says Maestro is shutting this review
+            // down. Telling it the first when the second happened invites a finding about
+            // a slow build that nobody ran.
+            `exit=${res.exitCode}${res.aborted ? " (cancelled)" : res.timedOut ? " (timed out)" : ""}`,
             res.stdout && `stdout:\n${tail(res.stdout)}`,
             res.stderr && `stderr:\n${tail(res.stderr)}`,
           ]

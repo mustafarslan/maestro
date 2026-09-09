@@ -1180,6 +1180,25 @@ before a release, and either would catch the other side changing under us.
     This is the "auth handling and error shapes" half of the hosted-provider gap, and it turned
     out to need no key: the SDK's own error classes answer it, and they are on disk.
 
+127. **Cancel-on-push released nothing after the first command.** An `abort` event fires once,
+    at abort time — adding a listener to a signal that has *already* aborted never fires it,
+    which is documented behaviour and takes four lines of Node to confirm. The docker helper
+    only ever added a listener. So every command started after a review was cancelled ran to
+    completion: each subsequent pull, run, commit and copy went ahead, holding exactly the
+    containers and disk the cancellation existed to release. The feature worked for whatever
+    command happened to be in flight at that instant and for nothing after it.
+
+    Alongside it: an aborted command reported exit code 124, the timeout convention, and set
+    `timedOut`. Those mean opposite things to whoever reads the review — a timeout is a
+    statement about the repository's command, a cancellation is a statement about Maestro — so
+    a review superseded by a push told the agent, the metrics block and the reader that the
+    build had hung. `aborted` is now its own field with exit 130, and the agent is told
+    "cancelled" rather than "timed out".
+
+    This is half of the "cancel-on-push has never run under real timing" entry, and the half
+    that needed no GitHub: what a real delivery would still prove is the timing, not the
+    teardown.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

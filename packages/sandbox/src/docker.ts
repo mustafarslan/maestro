@@ -46,12 +46,31 @@ async function docker(args: string[], opts: Partial<RunOptions> = {}): Promise<E
   const timeoutMs = opts.timeoutMs ?? 120_000;
   const maxBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
 
+  // Checked before spawning, not only listened for. An `abort` event fires once, at abort
+  // time — adding a listener to a signal that has already aborted never fires it, which is
+  // Node's documented behaviour and easy to confirm. So every docker command started after
+  // a review was cancelled ran to completion: the whole point of cancel-on-push is that
+  // the containers stop, and each subsequent pull, run, commit and copy went ahead
+  // regardless, holding exactly the resources the cancellation was meant to release.
+  if (opts.signal?.aborted) {
+    return {
+      command: `docker ${args.join(" ")}`,
+      exitCode: 130,
+      stdout: "",
+      stderr: "cancelled before the command started",
+      durationMs: 0,
+      timedOut: false,
+      aborted: true,
+    };
+  }
+
   return new Promise((resolve) => {
     const child = spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let outBytes = 0;
     let timedOut = false;
+    let aborted = false;
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -59,7 +78,7 @@ async function docker(args: string[], opts: Partial<RunOptions> = {}): Promise<E
     }, timeoutMs);
 
     const onAbort = () => {
-      timedOut = true;
+      aborted = true;
       child.kill("SIGKILL");
     };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
@@ -82,11 +101,15 @@ async function docker(args: string[], opts: Partial<RunOptions> = {}): Promise<E
       }
       resolve({
         command: `docker ${args.join(" ")}`,
-        exitCode: timedOut ? 124 : (code ?? 1),
+        // 124 is the timeout convention and 130 is "terminated by the operator"; a
+        // cancelled command reported 124, so a review cancelled by a push looked to
+        // everyone downstream like the repository's build had hung.
+        exitCode: aborted ? 130 : timedOut ? 124 : (code ?? 1),
         stdout,
         stderr,
         durationMs: Date.now() - started,
         timedOut,
+        aborted,
       });
     });
     child.on("error", (err) => {

@@ -8,6 +8,15 @@ export interface ExecResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+  /**
+   * The caller cancelled this, rather than the command running out of time.
+   *
+   * Distinct from `timedOut` because they mean opposite things to whoever reads the
+   * review: a timeout is a statement about the repository's command, and a cancellation
+   * is a statement about Maestro. Conflating them told a reviewer their build had hung
+   * when in fact somebody had pushed a new commit.
+   */
+  aborted?: boolean;
 }
 
 export interface PrepareRequest {
