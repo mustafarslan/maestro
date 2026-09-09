@@ -48,6 +48,22 @@ orchestrator is the only writer.
 | `LINEAR_API_KEY` | Enables issue lookup; absent means reviews run without ticket context |
 | `LINEAR_TEAM_PREFIXES` | e.g. `ENG,DES`. Restricts which key-shaped strings are treated as issues — `fix/utf-8-encoding` otherwise looks exactly like issue `UTF-8` |
 
+## Installing
+
+`install.sh` reads these. It depends on nothing but `curl`, which is why the private-release path
+resolves assets through the GitHub API with `grep` and `sed` rather than pulling in a JSON parser.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAESTRO_INSTALL_DIR` | `~/.maestro/bin` | Where the binary is written. The installer never edits a shell profile; it prints the `PATH` line for you to add |
+| `MAESTRO_VERSION` | `latest` | A release tag, e.g. `v0.1.0` |
+| `MAESTRO_REPO` | `mustafarslan/maestro` | Source repository, for a fork |
+| `MAESTRO_BASE_URL` | — | Fetch the binary from a mirror or internal artifact store instead of GitHub releases. The asset filename is appended, e.g. `.../maestro-linux-x64` |
+| `MAESTRO_TOKEN` | — | Read a **private** release. Required for a private repo: the public `releases/latest/download` URL returns 404 there even with a token, so the installer resolves the asset through the API instead |
+
+A download that succeeds but produces an empty file is treated as a failure, because otherwise it
+surfaces much later as a confusing exec error rather than a download problem.
+
 ## State
 
 | Variable | Default | Purpose |

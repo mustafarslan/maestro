@@ -31,11 +31,18 @@ case "$(uname -m)" in
 esac
 
 ASSET="maestro-${OS}-${ARCH}"
-if [ "$VERSION" = "latest" ]; then
+# MAESTRO_BASE_URL serves a mirror or an internal artifact store; MAESTRO_TOKEN adds an
+# Authorization header for a private release. Without either this is a plain public
+# download, which is the case that must stay dependency-free.
+BASE_URL="${MAESTRO_BASE_URL:-}"
+if [ -n "$BASE_URL" ]; then
+  URL="${BASE_URL%/}/${ASSET}"
+elif [ "$VERSION" = "latest" ]; then
   URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 else
   URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
 fi
+
 
 bold "Installing Maestro (${OS}-${ARCH})"
 dim "  from ${URL}"
@@ -44,9 +51,52 @@ mkdir -p "$INSTALL_DIR"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-if ! curl -fsSL "$URL" -o "$TMP"; then
-  red "Download failed. Check that a release exists at:"
-  red "  https://github.com/${REPO}/releases"
+DOWNLOAD_OK=0
+if [ -n "${MAESTRO_TOKEN:-}" ] && [ -z "$BASE_URL" ]; then
+  # A private GitHub release cannot be fetched from the browser download URL even with a
+  # token: that path 404s. The asset must be requested through the API by its id, with
+  # Accept: application/octet-stream. Resolved with grep and sed so the installer keeps
+  # its only dependency being curl.
+  if [ "$VERSION" = "latest" ]; then
+    API="https://api.github.com/repos/${REPO}/releases/latest"
+  else
+    API="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
+  fi
+  ASSET_URL="$(curl -fsSL -H "Authorization: Bearer ${MAESTRO_TOKEN}" \
+      -H "Accept: application/vnd.github+json" "$API" 2>/dev/null \
+    | tr ',' '\n' \
+    | grep -A0 "\"url\": \"https://api.github.com/repos/${REPO}/releases/assets/" \
+    | sed -n "s/.*\(https:\/\/api.github.com\/repos\/[^\"]*\).*/\1/p" \
+    | while read -r candidate; do
+        name="$(curl -fsSL -H "Authorization: Bearer ${MAESTRO_TOKEN}" \
+          -H "Accept: application/vnd.github+json" "$candidate" 2>/dev/null \
+          | sed -n 's/.*"name": "\([^"]*\)".*/\1/p' | head -1)"
+        [ "$name" = "$ASSET" ] && { echo "$candidate"; break; }
+      done)"
+
+  if [ -n "$ASSET_URL" ]; then
+    curl -fsSL -H "Authorization: Bearer ${MAESTRO_TOKEN}" \
+      -H "Accept: application/octet-stream" "$ASSET_URL" -o "$TMP" && DOWNLOAD_OK=1
+  fi
+elif [ -n "${MAESTRO_TOKEN:-}" ]; then
+  curl -fsSL -H "Authorization: Bearer ${MAESTRO_TOKEN}" "$URL" -o "$TMP" && DOWNLOAD_OK=1
+else
+  curl -fsSL "$URL" -o "$TMP" && DOWNLOAD_OK=1
+fi
+
+if [ "$DOWNLOAD_OK" -ne 1 ]; then
+  red "Download failed from:"
+  red "  ${URL}"
+  if [ -z "${MAESTRO_TOKEN:-}" ]; then
+    red "If this is a private repository, set MAESTRO_TOKEN to a token that can read it."
+  fi
+  exit 1
+fi
+
+# A download that "succeeds" but produced nothing is a broken install that only shows up
+# later, as a confusing exec error rather than a download problem.
+if [ ! -s "$TMP" ]; then
+  red "Downloaded file is empty: ${URL}"
   exit 1
 fi
 

@@ -20,6 +20,7 @@ the README so the claims in that file stay short and true.
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
+| **The documented install path** | `install.sh` run in clean Linux containers against a real GitHub release (`v0.1.0`): correct platform and arch detection, download, `chmod`, install to `~/.maestro/bin`, the binary-runs verification step, and then `maestro --version` and `maestro init` working from the installed binary. The private-release and empty-download paths were tested too |
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
 | **The Compose deployment, end to end** | `docker compose up` starts, both listeners bind and are reachable through their published ports, the admin API is 200 with a token and 401 without, a correctly signed webhook returns 202 and is logged as a review trigger while an unsigned one returns 401, and a sibling container on the sandbox network reaches Maestro **by hostname** — the exact path a sandbox uses to reach the egress proxy. Only driving a full model review through it is outstanding, which needs provider credentials |
@@ -319,6 +320,14 @@ These are recorded because each was invisible to the test suite that existed at 
     though the operator were at fault. One shared parser now accepts both spellings, refuses to
     read a following flag as a value — `reap --review --all` must not treat `--all` as a review id,
     because the unscoped sweep is destructive — and keeps `=` inside values intact.
+
+44. **`install.sh` — the primary documented install path — had never been run.** It works, and
+    running it surfaced two gaps: a private repository could not be installed from at all, because
+    GitHub's `releases/latest/download` URL returns 404 for private releases even with a token
+    (the asset has to be resolved through the API), and a download that succeeded while producing
+    an empty file installed a broken binary that would surface much later as a confusing exec
+    error. This is a self-hosted code-review tool, so private forks are the expected case, not an
+    edge one.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

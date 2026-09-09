@@ -65,6 +65,9 @@ describe("environment variables are discoverable", () => {
     "packages/sandbox/src/docker.ts",
     "packages/sandbox/src/egress-proxy.ts",
     "apps/cli/src/commands/serve.ts",
+    // The installer too: its variables are the first configuration anyone meets, and
+    // MAESTRO_BASE_URL and MAESTRO_TOKEN were undocumented the moment they were added.
+    "install.sh",
   ];
 
   it("documents every MAESTRO_ variable the code reads", () => {
