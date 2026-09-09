@@ -262,14 +262,28 @@ export function buildDispatch(ctx: ToolContext) {
         const res = await ctx.sandbox.exec(command, { timeoutSec: ctx.commandTimeoutSec });
         ctx.commandLog.push({ command, exitCode: res.exitCode, durationMs: res.durationMs });
         const tail = (s: string, n = 8000) => (s.length > n ? `...\n${s.slice(-n)}` : s);
+
+        // A command that failed because the sandbox is read-only failed for OUR reason,
+        // not the code's. An agent handed a bare `exit=1` has previously reported that as
+        // a defect in the pull request, which is the most expensive kind of false
+        // positive: confident, specific, and completely wrong.
+        const combined = `${res.stdout}\n${res.stderr}`;
+        const posture = /EROFS|read-only file system|EACCES.*\/work|permission denied/i.test(
+          combined,
+        )
+          ? "\nNOTE: this failed because the analysis sandbox mounts the checkout read-only, " +
+            "not because of anything in the diff. Do not report it as a defect."
+          : "";
+
         return {
-          output: [
-            `exit=${res.exitCode}${res.timedOut ? " (timed out)" : ""}`,
-            res.stdout && `stdout:\n${tail(res.stdout)}`,
-            res.stderr && `stderr:\n${tail(res.stderr)}`,
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          output:
+            [
+              `exit=${res.exitCode}${res.timedOut ? " (timed out)" : ""}`,
+              res.stdout && `stdout:\n${tail(res.stdout)}`,
+              res.stderr && `stderr:\n${tail(res.stderr)}`,
+            ]
+              .filter(Boolean)
+              .join("\n") + posture,
         };
       }
 

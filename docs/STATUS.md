@@ -20,6 +20,7 @@ the README so the claims in that file stay short and true.
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
+| **Agents executing the repo's real commands** | `pnpm run lint → exit 0 (0.3s)` in a posted comment, with real timings. Every command previously failed in 0.1s; this is the plan's "read + execute the existing suite" decision working live for the first time |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
 | **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
 | Scheduler fairness under load | The plan's 10-PRs-across-3-repos scenario, simulated: 40 agent tasks through the real scheduler, no containers. No limit exceeded, no starvation, one saturated repo does not block the others |
@@ -217,6 +218,20 @@ These are recorded because each was invisible to the test suite that existed at 
 33. **`trigger_review` reported a fabricated worker signal.** `daemonRunning` came from a
     `COUNT(*)`, which always returns a row, so the boolean was always true — the same defect as
     printing a cost of 0.00 for an unpriced provider, in output someone acts on.
+
+34. **The package manager was shadowed by the analyze tmpfs.** Fixing the corepack *version*
+    (29) was necessary and not sufficient: a fresh review still showed every command failing in
+    0.1s. `XDG_CACHE_HOME` pointed at `/tmp/maestro-cache`, so corepack downloaded the binary
+    under `/tmp` during prepare — and the analyze phase mounts a tmpfs over `/tmp`, which shadows
+    everything committed beneath it. The binary prepare had just fetched was invisible to the
+    agent that needed it. `COREPACK_HOME` now sits at `/opt/maestro-corepack`, outside the
+    shadowed path. Two bugs, one symptom, and the first fix hid the second — "the command still
+    fails" after a plausible fix means the diagnosis was incomplete, not that the fix was wrong.
+35. **A read-only sandbox made build commands look like code defects.** `typecheck` and `test`
+    fail when they write into a checkout the analyze phase mounts read-only, and the agent saw a
+    bare `exit=1` — the shape of a genuine failure. That is the most expensive false positive:
+    confident, specific and entirely an artefact of our own posture. Such failures are now
+    labelled in the tool result.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
