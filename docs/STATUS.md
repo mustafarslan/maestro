@@ -479,6 +479,19 @@ These are recorded because each was invisible to the test suite that existed at 
     `agentQuality` handles and the inline SQL did not. The endpoint now returns `agentQuality`'s
     result and the UI displays it rather than recomputing.
 
+66. **Nothing ever wrote an `environments` row.** The admin API read the table and `reap` updated
+    it; no code path inserted into it. So the environments view was permanently empty, reap's
+    "stale environment row(s) closed" never fired, and the lease-and-TTL record the design
+    describes as what prevents leaks did not exist. Containers were not in fact leaking — the
+    engine's finalizer and the reaper's label sweep both work and were verified against real
+    Docker — but there was no record to reconcile the two against after a crash, which is the
+    situation the table exists for. The engine now records each sandbox on creation and closes it
+    on teardown, marking one that would not destroy as `leaked` rather than `destroyed`, because
+    those must not look the same to whoever is chasing disk usage.
+
+    Found by a mechanical sweep of every schema column for reads without writes, run after the
+    exported-function sweep had already proved more productive than reading.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

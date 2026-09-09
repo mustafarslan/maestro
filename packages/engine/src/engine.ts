@@ -185,6 +185,31 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
 
   let prepared: PreparedEnvironment | undefined;
   const sandboxes: Sandbox[] = [];
+
+  // Environment rows exist so a crash can be reconciled against Docker afterwards, and
+  // so the admin UI can show what is running. Nothing wrote them until now, which left
+  // the environments view permanently empty and reap's row-closing a no-op.
+  const envRecorder = deps.db
+    ? new (await import("./recorder.js")).ReviewRecorder(deps.db)
+    : undefined;
+  const recordEnv = (
+    id: string,
+    kind: "prepare" | "analyze",
+    over: { agentId?: string; containerId?: string; imageId?: string } = {},
+  ) => {
+    try {
+      envRecorder?.recordEnvironment(req.reviewId, {
+        id,
+        kind,
+        ...over,
+        ttlMs: (spec.timeouts.prepareSec + spec.timeouts.analyzeSec) * 1000,
+        spec,
+      });
+    } catch (err) {
+      // Bookkeeping must never fail a review.
+      log.warn({ err: err instanceof Error ? err.message : err }, "environment record failed");
+    }
+  };
   let totalCost = 0;
   let modelSteps = 0;
 
@@ -329,6 +354,11 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           // running builds would otherwise clobber one another's working directory.
           const sandbox = await deps.driver.analyze(readyEnv, { agentId: agent.id, spec });
           sandboxes.push(sandbox);
+          recordEnv(sandbox.id, "analyze", {
+            agentId: agent.id,
+            containerId: sandbox.containerId,
+            imageId: readyEnv.imageId,
+          });
 
           const result = await runReviewAgent({
             agent,
@@ -487,7 +517,19 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     return finish({ state: "failed", error: message });
   } finally {
     // Guaranteed finalizer: runs on success, failure and abort alike.
-    await Promise.allSettled(sandboxes.map((s) => s.destroy()));
+    const outcomes = await Promise.allSettled(sandboxes.map((s) => s.destroy()));
+    // A sandbox that would not destroy is exactly what the record is for: it is marked
+    // leaked rather than destroyed, so the next reap has something to reconcile against.
+    sandboxes.forEach((sandbox, i) => {
+      try {
+        envRecorder?.closeEnvironment(
+          sandbox.id,
+          outcomes[i]?.status === "fulfilled" ? "destroyed" : "leaked",
+        );
+      } catch {
+        // Already logged by the recorder; teardown must complete regardless.
+      }
+    });
     if (prepared) {
       await deps.driver.reap({ reviewId: req.reviewId }).catch((err) => {
         logger.error({ reviewId: req.reviewId, err }, "reap failed; run 'maestro doctor'");

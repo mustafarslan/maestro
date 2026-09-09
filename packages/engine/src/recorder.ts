@@ -20,6 +20,60 @@ export class ReviewRecorder {
    * On a re-review the upsert keeps the ORIGINAL row and its id; returning the freshly
    * generated one made every subsequent llm_calls insert fail its foreign key.
    */
+  /**
+   * Records a sandbox the engine created.
+   *
+   * The `environments` table was read by the admin API and updated by `reap`, and
+   * nothing ever inserted a row — so the environments view was permanently empty, reap's
+   * "stale rows closed" never fired, and the lease-and-TTL leak record the design
+   * describes did not exist. Containers were not actually leaking, because the engine's
+   * finalizer and the reaper's label sweep both work; what was missing was the record
+   * that lets anyone reconcile the two after a crash.
+   */
+  recordEnvironment(
+    reviewId: string,
+    env: {
+      id: string;
+      kind: "prepare" | "analyze";
+      agentId?: string;
+      containerId?: string;
+      imageId?: string;
+      workdir?: string;
+      ttlMs: number;
+      spec: unknown;
+    },
+  ): void {
+    const now = new Date();
+    this.db
+      .prepare(
+        `INSERT INTO environments (id, review_id, kind, agent_id, container_id, image_id,
+                                   workdir, state, spec_json, lease_until, ttl_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           container_id=excluded.container_id, image_id=excluded.image_id, state='running'`,
+      )
+      .run(
+        env.id,
+        reviewId,
+        env.kind,
+        env.agentId ?? null,
+        env.containerId ?? null,
+        env.imageId ?? null,
+        env.workdir ?? null,
+        JSON.stringify(env.spec ?? {}),
+        new Date(now.getTime() + env.ttlMs).toISOString(),
+        new Date(now.getTime() + env.ttlMs).toISOString(),
+        now.toISOString(),
+      );
+  }
+
+  /** Closes an environment row when its sandbox is torn down. */
+  closeEnvironment(id: string, state: "destroyed" | "leaked" = "destroyed"): void {
+    this.db
+      .prepare("UPDATE environments SET state=?, destroyed_at=? WHERE id=?")
+      .run(state, new Date().toISOString(), id);
+  }
+
   recordNode(reviewId: string, node: NodeOutcome): string {
     const id = newId("tk");
     const now = new Date().toISOString();

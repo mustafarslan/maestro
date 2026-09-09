@@ -127,3 +127,63 @@ describe("ReviewRecorder", () => {
     expect(rows[1]?.suppressed_reason).toBe("below threshold");
   });
 });
+
+describe("environment records", () => {
+  it("records a sandbox and then closes it", () => {
+    // The table was read by the admin API and updated by reap while nothing ever
+    // inserted a row, so the environments view was permanently empty and reap's "stale
+    // rows closed" never fired. Containers were not leaking — the finalizer and the
+    // label sweep both work — but there was no record to reconcile them against.
+    recorder.recordEnvironment(reviewId, {
+      id: "env-1",
+      kind: "analyze",
+      agentId: "security",
+      containerId: "c1",
+      imageId: "maestro/snapshot:x",
+      ttlMs: 60_000,
+      spec: { cpus: 2 },
+    });
+
+    const running = db
+      .prepare("SELECT state, kind, agent_id, container_id FROM environments WHERE id=?")
+      .get<{ state: string; kind: string; agent_id: string; container_id: string }>("env-1");
+    expect(running).toMatchObject({
+      state: "running",
+      kind: "analyze",
+      agent_id: "security",
+      container_id: "c1",
+    });
+
+    recorder.closeEnvironment("env-1");
+    const closed = db
+      .prepare("SELECT state, destroyed_at FROM environments WHERE id=?")
+      .get<{ state: string; destroyed_at: string | null }>("env-1");
+    expect(closed?.state).toBe("destroyed");
+    expect(closed?.destroyed_at).toBeTruthy();
+  });
+
+  it("marks a sandbox that would not destroy as leaked, not destroyed", () => {
+    // The distinction is the whole point: "destroyed" and "we could not destroy it" must
+    // not look the same to whoever is chasing disk usage.
+    recorder.recordEnvironment(reviewId, {
+      id: "env-2",
+      kind: "prepare",
+      ttlMs: 60_000,
+      spec: {},
+    });
+    recorder.closeEnvironment("env-2", "leaked");
+    const row = db
+      .prepare("SELECT state FROM environments WHERE id=?")
+      .get<{ state: string }>("env-2");
+    expect(row?.state).toBe("leaked");
+  });
+
+  it("gives every row a lease and a ttl, which is what a later sweep reconciles against", () => {
+    recorder.recordEnvironment(reviewId, { id: "env-3", kind: "prepare", ttlMs: 1000, spec: {} });
+    const row = db
+      .prepare("SELECT lease_until, ttl_at, created_at FROM environments WHERE id=?")
+      .get<{ lease_until: string; ttl_at: string; created_at: string }>("env-3");
+    expect(new Date(row!.ttl_at).getTime()).toBeGreaterThan(new Date(row!.created_at).getTime());
+    expect(row?.lease_until).toBeTruthy();
+  });
+});
