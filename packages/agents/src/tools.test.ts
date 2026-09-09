@@ -291,3 +291,43 @@ describe("a refused command is recorded, not just answered", () => {
     expect(log).toEqual([{ command: "pnpm test", exitCode: -1, durationMs: 0, refused: true }]);
   });
 });
+
+describe("read_file is bounded", () => {
+  // The clamp is the fix for an agent losing its whole run to a context-window rejection:
+  // an unbounded read of a lockfile or a generated file is what exceeded a model's window
+  // in practice. Mutation showed removing it failed nothing, so the original defect could
+  // have come back silently.
+  it("never reads more lines than the cap, however many are asked for", async () => {
+    const seen: string[] = [];
+    const dispatch = buildDispatch({
+      sandbox: {
+        exec: async (command: string) => {
+          seen.push(command);
+          return {
+            command,
+            exitCode: 0,
+            stdout: "1\tx",
+            stderr: "",
+            durationMs: 1,
+            timedOut: false,
+          };
+        },
+      } as never,
+      allowedCommands: [],
+      baseRef: "main",
+      commandTimeoutSec: 10,
+      commandLog: [],
+    });
+
+    await dispatch({
+      name: "read_file",
+      input: { path: "pnpm-lock.yaml", startLine: 1, endLine: 100000 },
+    });
+
+    // The command carries the clamped range, not the one the agent asked for.
+    const range = /(\d+),(\d+)p/.exec(seen[0] ?? "");
+    expect(range, `no line range in: ${seen[0]}`).toBeTruthy();
+    const [, from, to] = range as RegExpExecArray;
+    expect(Number(to) - Number(from)).toBeLessThanOrEqual(300);
+  });
+});

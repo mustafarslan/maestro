@@ -1122,10 +1122,9 @@ The fence work ended with seven of my own tests passing for the wrong reason. Th
 measurable property, not a feeling, so `scripts/mutation-check.sh` measures it: break a guard on
 purpose, run the suite, and see whether anything notices. Fifteen controls, one mutation each.
 
-Fourteen were load-bearing — the webhook signature, the association gate, the command allowlist,
-path traversal, the egress suffix match, triage's confidence floor, the spend cap, the review
-idempotency conflict clause, the docker id dedupe, and the fork cache-write rule all fail the
-suite when broken.
+Twenty-five controls are covered now, across the security guards, the fork downgrade, the
+correctness guards, the admin surface, trigger routing, and the sandbox and reaper. Every one of
+them fails the suite when broken. Three did not when the sweep started.
 
 133. **The fork trust downgrade had no test at all.** The plan calls it a blocking security rule
     and the function's own comment states the stakes — "a reviewer reading code is useful; a
@@ -1148,6 +1147,20 @@ suite when broken.
     when `packages/` or `apps/` is dirty, because that revert would otherwise throw away
     uncommitted work. A tool that edits source in place needs the same care as the code it is
     checking, and the first version had none.
+
+135. **Two more guards nothing tested, found by widening the same sweep.** The `read_file` line
+    clamp — the fix for an agent losing its entire run to a context-window rejection, because an
+    unbounded read of a lockfile is what exceeded a model's window in practice — could be removed
+    with nothing failing, so that defect could have come back silently. And in `supersedes`, the
+    "a person asking supersedes nothing" check was deletable: it overlaps with the empty-SHA
+    check for every real comment trigger, which always carries `headSha: ""`. Overlap is not
+    coverage — the check encodes an intent the coincidence does not — so it is pinned with a
+    comment trigger that carries a SHA.
+
+    The widened sweep also caught a bad mutation of my own: the admin-token anchor did not match
+    the source, and the harness reported "anchor missing" rather than passing. A mutation that
+    cannot be applied must not look like a guard that holds, which is the same failure the whole
+    exercise is about, one level further out.
 
 ### The prompt fence, attacked rather than read
 

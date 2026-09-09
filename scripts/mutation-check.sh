@@ -93,6 +93,35 @@ run "docker id listing deduplicated" packages/sandbox/src/docker.ts \
   '...new Set(' '...('
 
 echo
+echo "the admin surface"
+run "admin token compared at all" packages/server/src/api.ts \
+  'return a.length === b.length && timingSafeEqual(a, b);' 'return true;'
+run "UI routes are not cached immutable" packages/server/src/admin.ts \
+  'const immutable = exact !== undefined && assetPath !== "/index.html";' 'const immutable = true;'
+run "missing hashed assets 404" packages/server/src/admin.ts \
+  'if (!exact && assetPath.startsWith("/assets/")) {' 'if (false) {'
+
+echo
+echo "trigger routing"
+run "issue vs pull request discriminator" packages/integrations/src/webhook.ts \
+  '!issue.pull_request' 'false'
+run "only Maestro's own comment is updated" packages/integrations/src/github.ts \
+  'if (self.login) return c.user?.login === self.login;' 'if (self.login) return true;'
+run "manual-only mode honoured" packages/server/src/daemon.ts \
+  'active.doc.router.automaticTriggers === false' 'false'
+run "a request is not treated as a supersede" packages/server/src/daemon.ts \
+  'if (t.source !== "lifecycle") return false;' 'if (false) return false;'
+
+echo
+echo "the sandbox and the reaper"
+run "reap fails closed on an undatable image" packages/sandbox/src/docker.ts \
+  'if (cutoff !== undefined && (createdAt === undefined || createdAt > cutoff)) {' 'if (false) {'
+run "an aborted command does not start" packages/sandbox/src/docker.ts \
+  'if (opts.signal?.aborted) {' 'if (false) {'
+run "read_file line clamp" packages/agents/src/tools.ts \
+  'const end = Math.min(requestedEnd, start + MAX_READ_LINES);' 'const end = requestedEnd;'
+
+echo
 if [ "$survivors" -gt 0 ]; then
   echo "$survivors guard(s) that nothing tests"
   exit 1

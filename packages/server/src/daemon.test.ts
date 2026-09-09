@@ -295,6 +295,22 @@ describe("what cancels a review already running", () => {
     expect(supersedes(t as never, "same")).toBe(false);
   });
 
+  it("never a person asking, even if their trigger somehow carried a sha", () => {
+    // The `source` check and the empty-sha check overlap for real comment triggers, which
+    // always carry `headSha: ""` — so mutation showed the source check could be deleted
+    // with nothing failing. It encodes an intent the sha coincidence does not: a person
+    // asking supersedes nothing, whatever else is on the trigger. Pinned directly.
+    const t = {
+      kind: "review",
+      pr,
+      headSha: "different-from-the-running-one",
+      reason: "requested by a maestro review comment",
+      source: "comment",
+      commentId: 11,
+    };
+    expect(supersedes(t as never, "old")).toBe(false);
+  });
+
   it("never a person asking for a review", () => {
     // This is the bug the helper exists for. A comment has no head SHA, so the old
     // inline comparison was false for every running review and aborted all of them:
