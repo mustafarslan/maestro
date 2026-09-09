@@ -1,3 +1,4 @@
+import { bySeverity } from "./severity.js";
 import type { SqlDatabase } from "./store/driver.js";
 
 /**
@@ -21,6 +22,8 @@ export interface CarriedFinding {
   lineStart: number | null;
   category: string;
   severity: string;
+  /** Secondary sort within a severity: the surer finding is the better one to carry. */
+  confidence: number;
   title: string;
   agentIds: string;
 }
@@ -56,15 +59,29 @@ export function previousReview(
  * Deliberately excludes suppressed ones: something below the reporting threshold last
  * time should not be resurrected simply because the author pushed again.
  */
+/** How many carried findings a prompt will take. Beyond this they are noise in context. */
+const MAX_CARRIED = 40;
+
 export function unresolvedFindings(db: SqlDatabase, reviewId: string): CarriedFinding[] {
-  return db
-    .prepare(
-      `SELECT file, line_start AS lineStart, category, severity, title, agent_id AS agentIds
+  return (
+    db
+      .prepare(
+        `SELECT file, line_start AS lineStart, category, severity, confidence, title, agent_id AS agentIds
        FROM findings
-       WHERE review_id=? AND status IN ('open','posted')
-       ORDER BY severity, confidence DESC`,
-    )
-    .all<CarriedFinding>(reviewId);
+       WHERE review_id=? AND status IN ('open','posted')`,
+      )
+      .all<CarriedFinding>(reviewId)
+      // Sorted here, not in SQL. `ORDER BY severity` orders a TEXT column alphabetically —
+      // critical, high, info, low, medium — so `medium` came back *below* `info`, which is
+      // exactly backwards for the two levels most easily confused. The canonical ordering
+      // lives in `severityRank`; this was one of two places still spelling its own.
+      .sort((a, b) => bySeverity(a, b) || b.confidence - a.confidence)
+      // Capped before it reaches a prompt. Every one of these becomes a line in every
+      // agent's context on the next review, and nothing bounded how many a noisy round
+      // could produce — while the changed-file list two lines away in the same prompt has
+      // been capped at 100 all along. Most serious first, so a cap keeps what matters.
+      .slice(0, MAX_CARRIED)
+  );
 }
 
 export interface IncrementalPlan {

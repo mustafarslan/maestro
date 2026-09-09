@@ -1691,6 +1691,29 @@ to answer.
     storage changed. It sums the counts now and reports both: attempts and distinct hosts. Both
     halves mutation-checked, including that one.
 
+149. **`ORDER BY severity` sorted `medium` below `info`.** Severity is a TEXT column, so SQL
+    ordered it alphabetically — critical, high, **info, low, medium** — putting the middle of
+    five levels last, beneath the least serious one. In two places: the findings carried into the
+    next review's prompt, and the admin API's findings list, which is the order the UI shows a
+    reviewer.
+
+    An earlier finding in this session collapsed six duplicated severity orderings into one
+    `severityRank`. It missed these two because they are in SQL rather than TypeScript, and
+    because `severityRank` lived in `@maestro/agents` — which neither `core` nor the admin API
+    can import. A canonical value in a layer its callers cannot reach is not canonical, so it
+    now lives in `core`, with `agents` re-exporting it so no call site moved.
+
+150. **Carried findings entered every agent's prompt unbounded.** Each becomes a line of context
+    on the next review, and nothing limited how many a noisy round could produce — while the
+    changed-file list, two lines away in the same prompt, has been capped at 100 since it was
+    written. Capped at forty, most serious first, so the cap keeps what matters. Fifth instance
+    of the recurring-cost question, this time about a quantity a *model* chooses.
+
+    Both are mutation-checked, and the cap's check needed two attempts: the first mutation did
+    not apply — the formatter had moved a semicolon — and a mutation that fails to apply looks
+    exactly like a guard that holds. The harness prints "anchor missing" for that reason; doing
+    it by hand, I had to notice.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

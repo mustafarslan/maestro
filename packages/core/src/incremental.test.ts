@@ -211,3 +211,44 @@ describe("carry-forward across a real posting cycle", () => {
     ).toHaveLength(0);
   });
 });
+
+describe("what gets carried into the next review's prompt", () => {
+  // Every carried finding becomes a line in every agent's context on the next review.
+  // Nothing bounded how many a noisy round could produce, while the changed-file list two
+  // lines away in the same prompt has been capped at 100 all along — and the ordering that
+  // decides which survive a cap was `ORDER BY severity` on a TEXT column, which is
+  // alphabetical.
+  it("orders by real severity, not alphabetically", () => {
+    const review = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 1,
+      headSha: "sev",
+      playbookVersionId: pbVersionId,
+    }).id;
+    for (const severity of ["info", "medium", "critical", "low", "high"]) {
+      addFinding(db, review, { severity, title: severity });
+    }
+
+    const carried = unresolvedFindings(db, review);
+    expect(carried.map((c) => c.severity)).toEqual(["critical", "high", "medium", "low", "info"]);
+    // Alphabetically, `medium` would be last of these five — below `info`.
+    expect(carried.at(-1)?.severity).not.toBe("medium");
+  });
+
+  it("caps how many reach the prompt, keeping the most serious", () => {
+    const review = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 2,
+      headSha: "cap",
+      playbookVersionId: pbVersionId,
+    }).id;
+    for (let i = 0; i < 60; i++) addFinding(db, review, { severity: "info", title: `noise ${i}` });
+    addFinding(db, review, { severity: "critical", title: "the one that matters" });
+
+    const carried = unresolvedFindings(db, review);
+    expect(carried.length).toBeLessThanOrEqual(40);
+    expect(carried[0]?.title).toBe("the one that matters");
+  });
+});

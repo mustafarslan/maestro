@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { JobQueue, maestroHome, type SqlDatabase } from "@maestro/core";
+import { bySeverity, JobQueue, maestroHome, type SqlDatabase } from "@maestro/core";
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
@@ -64,9 +64,12 @@ const routes: Route[] = [
       return {
         review: ctx.db.prepare("SELECT * FROM reviews WHERE id=?").get(id),
         tasks: ctx.db.prepare("SELECT * FROM tasks WHERE review_id=? ORDER BY created_at").all(id),
+        // Sorted here for the same reason as the carried findings: `ORDER BY severity` on
+        // a TEXT column is alphabetical, so the UI listed `medium` below `info`.
         findings: ctx.db
-          .prepare("SELECT * FROM findings WHERE review_id=? ORDER BY severity")
-          .all(id),
+          .prepare("SELECT * FROM findings WHERE review_id=?")
+          .all<{ severity: string }>(id)
+          .sort(bySeverity),
         spans: ctx.db.prepare("SELECT * FROM spans WHERE review_id=? ORDER BY started_at").all(id),
         llmCalls: ctx.db
           .prepare(

@@ -4,6 +4,7 @@ export * from "./logger.js";
 export * from "./paths.js";
 export * from "./queue.js";
 export * from "./reviews.js";
+export * from "./severity.js";
 export * from "./spans.js";
 export * from "./spend.js";
 export * from "./store/db.js";
