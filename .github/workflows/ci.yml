@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: oven-sh/setup-bun@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+      # The Docker integration suite asserts the sandbox security posture against real
+      # containers. It runs here because a typo in a `docker run` flag is otherwise
+      # completely silent, and that posture is what makes it safe to review a
+      # stranger's code at all.
+      - run: pnpm test
+      - run: pnpm run build:binary
+      - name: Smoke-test the compiled binary
+        run: |
+          ./dist/maestro --version
+          MAESTRO_HOME=$(mktemp -d) ./dist/maestro init
+          MAESTRO_HOME=$(mktemp -d) ./dist/maestro playbook nodes

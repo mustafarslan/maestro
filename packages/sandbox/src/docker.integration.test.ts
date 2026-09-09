@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EnvSpecSchema } from "@maestro/playbook";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DockerSandboxDriver } from "./docker.js";
+import { DockerSandboxDriver, dockerCommand } from "./docker.js";
 import { startEgressProxy } from "./egress-proxy.js";
 import type { PreparedEnvironment, Sandbox } from "./types.js";
 
@@ -176,6 +176,27 @@ describe("analyze phase security posture", () => {
       }
     },
     180_000,
+  );
+});
+
+describe("dependency cache", () => {
+  itDocker(
+    "survives teardown, otherwise the whole caching feature is useless",
+    async () => {
+      // Regression: the cache tag points at the SAME image id as the review snapshot,
+      // so reaping by review label destroyed it on every teardown and no review ever
+      // got a cache hit.
+      const cachedTag = "maestro/deps:integration-probe";
+      await dockerCommand(["tag", env!.imageId, cachedTag], { timeoutMs: 30_000 });
+      try {
+        await driver.reap({ reviewId: REVIEW_ID });
+        const inspect = await dockerCommand(["image", "inspect", cachedTag], { timeoutMs: 20_000 });
+        expect(inspect.exitCode).toBe(0);
+      } finally {
+        await dockerCommand(["rmi", "-f", cachedTag], { timeoutMs: 30_000 });
+      }
+    },
+    240_000,
   );
 });
 

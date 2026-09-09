@@ -1,6 +1,7 @@
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect as netConnect } from "node:net";
+import { networkInterfaces } from "node:os";
 import { logger } from "@maestro/core";
 
 /**
@@ -18,6 +19,8 @@ import { logger } from "@maestro/core";
 
 export interface EgressProxy {
   port: number;
+  /** Address the proxy is bound to; containers must reach it at this host. */
+  host: string;
   /** Every host asked for, allowed or not — attached to the review for auditing. */
   readonly log: { host: string; allowed: boolean; at: string }[];
   close(): Promise<void>;
@@ -31,6 +34,29 @@ function hostAllowed(host: string, allowlist: string[]): boolean {
     // let "registry.npmjs.org.evil.com" through.
     return bare === e || bare.endsWith(`.${e}`);
   });
+}
+
+/**
+ * Where to bind the proxy.
+ *
+ * Binding 0.0.0.0 would leave an open proxy to the allowlisted hosts on the local
+ * network for the duration of every prepare phase. Docker Desktop reaches host loopback
+ * through host.docker.internal, so macOS binds 127.0.0.1; on Linux the container reaches
+ * the host over the bridge gateway, so bind that specific address rather than everything.
+ */
+function bindAddress(): string {
+  if (process.env.MAESTRO_PROXY_BIND) return process.env.MAESTRO_PROXY_BIND;
+  if (process.platform === "darwin") return "127.0.0.1";
+
+  // Linux: prefer the docker0 gateway; fall back to loopback and let the caller's
+  // --add-host=host-gateway mapping decide.
+  const interfaces = networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    if (!name.startsWith("docker")) continue;
+    const ipv4 = interfaces[name]?.find((a) => a.family === "IPv4" && !a.internal);
+    if (ipv4) return ipv4.address;
+  }
+  return "127.0.0.1";
 }
 
 export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy> {
@@ -94,12 +120,14 @@ export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy
     clientSocket.on("error", () => upstream.destroy());
   });
 
-  await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
+  const host = bindAddress();
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   const port = (server.address() as AddressInfo).port;
-  logger.debug({ port, allowlist }, "egress proxy listening");
+  logger.debug({ host, port, allowlist }, "egress proxy listening");
 
   return {
     port,
+    host,
     log,
     close: () =>
       new Promise<void>((resolve) => {

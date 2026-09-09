@@ -378,6 +378,16 @@ export class DockerSandboxDriver implements SandboxDriver {
     };
   }
 
+  /**
+   * Removes cached dependency layers. Separate from reap() on purpose: dropping the
+   * cache makes the next review of every repository slow again, so it is opt-in.
+   */
+  async reapDependencyCache(): Promise<number> {
+    const ids = await listIds(["images", "-q", "maestro/deps"]);
+    for (const id of ids) await docker(["rmi", "-f", id], { timeoutMs: 60_000 });
+    return ids.length;
+  }
+
   async reap(opts: { reviewId?: string; olderThanMs?: number } = {}): Promise<{
     containers: number;
     images: number;
@@ -391,7 +401,15 @@ export class DockerSandboxDriver implements SandboxDriver {
 
     // Snapshot images are where disk actually fills up; a reaper that only sweeps
     // containers leaves the layers behind.
-    const images = await listIds(["images", "-q", ...filterArgs]);
+    //
+    // The dependency cache is tagged onto the SAME image id as the review's snapshot,
+    // so deleting by id would destroy the cache on every teardown - which silently made
+    // the whole caching feature useless. Skip any image that is also a cache entry;
+    // `reapDependencyCache()` is the deliberate way to remove those.
+    const cacheIds = new Set(await listIds(["images", "-q", "maestro/deps"]));
+    const images = (await listIds(["images", "-q", ...filterArgs])).filter(
+      (id) => !cacheIds.has(id),
+    );
     for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
 
     return { containers: containers.length, images: images.length };

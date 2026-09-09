@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14,     target: darwin-arm64, bun: bun-darwin-aarch64 }
+          - { os: macos-13,     target: darwin-x64,   bun: bun-darwin-x64 }
+          - { os: ubuntu-latest, target: linux-x64,   bun: bun-linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, bun: bun-linux-aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: oven-sh/setup-bun@v2
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:ui
+      - run: pnpm exec tsc -b
+      # --target makes the build explicit rather than relying on the runner's arch.
+      - run: bun build --compile --target=${{ matrix.bun }} --outfile dist/maestro-${{ matrix.target }} apps/cli/dist/index.js
+      - run: ./dist/maestro-${{ matrix.target }} --version || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maestro-${{ matrix.target }}
+          path: dist/maestro-${{ matrix.target }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/maestro-*
+          generate_release_notes: true

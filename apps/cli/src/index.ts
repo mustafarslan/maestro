@@ -6,6 +6,7 @@ import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { mcp } from "./commands/mcp.js";
 import { playbook } from "./commands/playbook.js";
+import { reap } from "./commands/reap.js";
 import { review } from "./commands/review.js";
 import { serve } from "./commands/serve.js";
 import { color } from "./ui.js";
@@ -28,6 +29,7 @@ ${color.bold("COMMANDS")}
   serve                run the daemon: webhooks/poller, workers, admin UI
   mcp                  stdio MCP server for Claude Code
   eval <sub>           score reviews against golden-PR fixtures
+  reap                 sweep leaked containers and snapshot images
   version              print the version
 
 
@@ -57,6 +59,8 @@ async function main(): Promise<number> {
       return llm(rest);
     case "playbook":
       return playbook(rest);
+    case "reap":
+      return reap(rest);
     case "review":
       return review(rest);
     case "serve":

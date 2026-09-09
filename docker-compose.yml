@@ -1,0 +1,41 @@
+# Deployment wrapper around the same binary the installer gives you.
+#
+# Maestro is a single executable; Compose only supplies a place to run it, a volume for
+# its SQLite database and workspaces, and the Docker socket it needs to create sandboxes.
+services:
+  maestro:
+    build: .
+    restart: unless-stopped
+    environment:
+      # Provider credentials. Only the ones you actually use are needed.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      # GitHub App (preferred) or a PAT for a single-user setup.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set a webhook secret}
+      MAESTRO_ADMIN_TOKEN: ${MAESTRO_ADMIN_TOKEN:?set an admin token}
+      MAESTRO_HOME: /data
+    volumes:
+      - maestro-data:/data
+      # Sandboxes are sibling containers on the host daemon. This grants Maestro
+      # control of that daemon: run it on a host you would trust with that, and note
+      # that agent containers themselves never receive the socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      # Webhooks: the only port that needs to be reachable from GitHub.
+      - "8080:8080"
+      # Admin UI: bound to loopback on the host, because it is not authenticated by
+      # anything other than the token and has no business on a public interface.
+      - "127.0.0.1:7777:7777"
+    command:
+      - serve
+      - --webhook-port=8080
+      - --admin-port=7777
+      - --admin-host=0.0.0.0
+
+volumes:
+  maestro-data:
