@@ -22,6 +22,7 @@ the README so the claims in that file stay short and true.
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
 | **The documented install path** | `install.sh` run in clean Linux containers against a real GitHub release (`v0.1.0`): correct platform and arch detection, download, `chmod`, install to `~/.maestro/bin`, the binary-runs verification step, and then `maestro --version` and `maestro init` working from the installed binary. The private-release and empty-download paths were tested too |
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
+| Webhook authentication is mandatory | The daemon refuses to start a listener without a secret, asserted in tests, rather than warning and starting anyway |
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
 | **The Compose deployment, end to end** | `docker compose up` starts, both listeners bind and are reachable through their published ports, the admin API is 200 with a token and 401 without, a correctly signed webhook returns 202 and is logged as a review trigger while an unsigned one returns 401, and a sibling container on the sandbox network reaches Maestro **by hostname** — the exact path a sandbox uses to reach the egress proxy. Only driving a full model review through it is outstanding, which needs provider credentials |
 | **Linear's query against the live schema** | Linear validates GraphQL *before* authentication: a query naming a nonexistent field returns 400 `GRAPHQL_VALIDATION_FAILED` unauthenticated, while Maestro's query returns 401. Every field it selects therefore provably exists on the live `Issue` type. Its real 401 and 400 bodies are now the test fixtures |
@@ -367,6 +368,21 @@ These are recorded because each was invisible to the test suite that existed at 
     this reason; the admin path had the same code without the destroy. It now stops reading, and
     answers 413 rather than a generic 500, because an oversized body is the client's error and
     reporting it as a server fault sends someone looking for a problem that is not there.
+
+52. **The webhook listener accepted unverified deliveries when no secret was configured.** It
+    binds 0.0.0.0 by necessity — GitHub has to reach it — and signature verification was wrapped
+    in `if (opts.webhookSecret)`, so omitting the flag skipped it entirely. Anyone who could
+    reach the port could start reviews, each spawning containers. The only mitigation was a log
+    line, which is warning about something and then doing it anyway. The daemon now refuses to
+    start such a listener, the way the admin API already refuses to bind beyond loopback without
+    a token, and the error names both the flag and the environment variable so a Compose user
+    does not look in the wrong place.
+53. **A failed start-up leaked the whole daemon.** `startDaemon` created the worker pool, the
+    timers and the admin server before the checks that can reject a configuration, so throwing
+    left all of it running with no handle to stop it — the caller never received one. Every
+    startup failure had that shape; the new secret check merely made it visible, as nine
+    `ERR_INVALID_STATE` errors from workers polling a database the test had closed. Validation
+    now happens before any resource exists.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

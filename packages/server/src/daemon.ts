@@ -51,6 +51,25 @@ export interface RunningDaemon {
  * one port would expose the admin surface wherever webhooks are reachable.
  */
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
+  // Validated before ANY resource exists. Throwing later — as the missing-secret check
+  // first did — leaves the worker pool, the timers and the admin server running with no
+  // handle to stop them, because the caller never received one. Every startup failure
+  // had that shape; this one just made it visible.
+  //
+  // The listener binds 0.0.0.0 by necessity, since GitHub has to reach it. Without a
+  // secret it accepted every delivery from anyone, each of which starts a review that
+  // spawns containers, and a log warning was the only mitigation — which is warning
+  // about something and then doing it anyway. There is no legitimate secretless
+  // deployment: a GitHub App always has one.
+  if (opts.webhookPort !== undefined && !opts.webhookSecret) {
+    throw new Error(
+      "refusing to start the webhook listener without a secret: it binds 0.0.0.0 and would " +
+        "accept unverified deliveries from anyone, each of which starts a review. Pass " +
+        "--webhook-secret or set GITHUB_WEBHOOK_SECRET (any random string, matching the one " +
+        "configured in the GitHub App). Use --poll instead if you do not want a listener.",
+    );
+  }
+
   const { db } = opts;
   const queue = new JobQueue(db, `daemon_${process.pid}`);
   const reviews = new ReviewStore(db);
@@ -185,20 +204,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         return;
       }
       let raw = "";
+      let tooLarge = false;
       req.on("data", (c) => {
+        if (tooLarge) return;
         raw += c;
-        // Refuse to buffer an unbounded body from an unauthenticated caller.
-        if (raw.length > 8 * 1024 * 1024) req.destroy();
+        // Refuse to buffer an unbounded body from an unverified caller. Answer before
+        // destroying: dropping the connection silently looks like a network fault to
+        // whoever is debugging their delivery.
+        if (raw.length > 8 * 1024 * 1024) {
+          tooLarge = true;
+          raw = "";
+          res.writeHead(413).end("payload too large");
+          req.destroy();
+        }
       });
       req.on("end", async () => {
+        if (tooLarge) return;
+        // Unconditional: the listener cannot start without a secret, so there is no
+        // branch here in which verification is skipped.
         const signature = req.headers["x-hub-signature-256"] as string | undefined;
-        if (opts.webhookSecret) {
-          const ok = await verifySignature(opts.webhookSecret, raw, signature);
-          if (!ok) {
-            logger.warn({ ip: req.socket.remoteAddress }, "rejected webhook: bad signature");
-            res.writeHead(401).end("invalid signature");
-            return;
-          }
+        const ok = await verifySignature(opts.webhookSecret ?? "", raw, signature);
+        if (!ok) {
+          logger.warn({ ip: req.socket.remoteAddress }, "rejected webhook: bad signature");
+          res.writeHead(401).end("invalid signature");
+          return;
         }
         try {
           const event = (req.headers["x-github-event"] as string) ?? "";
@@ -212,9 +241,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
     await new Promise<void>((r) => webhookServer?.listen(opts.webhookPort, "0.0.0.0", r));
     webhookPort = (webhookServer.address() as AddressInfo).port;
-    if (!opts.webhookSecret) {
-      logger.warn("webhook listener has NO secret configured; every delivery will be accepted");
-    }
   }
 
   // ── poller ──────────────────────────────────────────────────────────────
