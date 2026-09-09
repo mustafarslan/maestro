@@ -476,7 +476,13 @@ export class DockerSandboxDriver implements SandboxDriver {
       // `olderThanMs` was accepted and ignored, so the daemon's periodic sweep — which
       // passes a two-hour age — deleted containers of every age, including the ones its
       // own reviews were using at that moment.
-      if (cutoff !== undefined && createdAt !== undefined && createdAt > cutoff) {
+      //
+      // Fails CLOSED on an unknown age. The first version skipped the check when the
+      // created label was missing or unparseable, which force-removed exactly those
+      // containers at any age — reaching the failure this guard exists to prevent
+      // through the unlabelled path. A container you cannot date is not provably
+      // garbage. An unscoped `maestro reap`, which passes no age, still collects them.
+      if (cutoff !== undefined && (createdAt === undefined || createdAt > cutoff)) {
         skipped++;
         continue;
       }

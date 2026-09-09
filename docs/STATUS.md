@@ -582,6 +582,23 @@ These are recorded because each was invisible to the test suite that existed at 
     schema comment documents the states the code writes — including `leaked`, which recovery
     writes and nobody would know to look for.
 
+75. **The age cutoff failed open on a container it could not date.** The check was
+    `createdAt !== undefined && createdAt > cutoff`, so a managed container with a missing or
+    unparseable `maestro.created` label skipped the age test entirely and was force-removed at
+    any age — reaching the exact failure the guard was written to prevent, through the
+    unlabelled path. It fails closed now: a container you cannot date is not provably garbage,
+    and an unscoped `maestro reap`, which passes no age, still collects it.
+76. **The severity-copies guard could not detect what it claimed to.** It asserted
+    `toContain(SEVERITIES.join(...))`, a whole-file substring search that cannot see the order as
+    written, and it `continue`d past any file not mentioning "critical" rather than failing. A
+    guard that passes vacuously is worse than no guard, and I wrote this one an hour after
+    criticising exactly that pattern twice. It now extracts the literals in source order and
+    fails when a file stops stating the list at all; both failure modes were reintroduced to
+    confirm it catches them.
+
+Findings 75 and 76 were reported by **Maestro reviewing the six commits that introduced them**,
+which is the first time in this session it has reviewed work from the same day.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

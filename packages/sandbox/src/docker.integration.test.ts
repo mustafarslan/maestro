@@ -90,6 +90,45 @@ describe("prepare phase", () => {
 
 describe("analyze phase security posture", () => {
   itDocker(
+    "leaves a container it cannot date alone when an age cutoff is given",
+    async () => {
+      // The first version of the age check skipped it entirely when the created label was
+      // missing or unparseable, so exactly those containers were force-removed at any
+      // age — reaching the failure the guard exists to prevent through the unlabelled
+      // path. A container you cannot date is not provably garbage. Maestro reported this
+      // on the commit that introduced it.
+      const orphan = `maestro-undated-${Date.now()}`;
+      execFileSync("docker", [
+        "run",
+        "-d",
+        "--name",
+        orphan,
+        "--label",
+        "maestro.managed=true",
+        "alpine",
+        "sleep",
+        "120",
+      ]);
+
+      try {
+        await driver.reap({ olderThanMs: 60 * 60_000 });
+        const still = execFileSync("docker", ["ps", "-aq", "--filter", `name=${orphan}`], {
+          encoding: "utf8",
+        }).trim();
+        expect(still, "an undated container was swept by an age-bounded reap").not.toBe("");
+
+        // Deliberately NOT asserting that an unscoped sweep collects it here: an
+        // unscoped reap removes every managed container, including the sandbox the other
+        // tests in this file share. A test that damages its neighbours is a worse
+        // problem than the one it checks.
+      } finally {
+        execFileSync("docker", ["rm", "-f", orphan], { stdio: "ignore" });
+      }
+    },
+    180_000,
+  );
+
+  itDocker(
     "leaves a container younger than the age cutoff alone",
     async () => {
       // `olderThanMs` was accepted and ignored. The daemon's periodic sweep passes a
