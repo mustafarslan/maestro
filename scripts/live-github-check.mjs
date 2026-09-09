@@ -134,8 +134,10 @@ if (process.argv.includes("--write")) {
         `${MARKER}\nMaestro live check — this comment deletes itself.`,
       );
       commentId = posted.id;
-      // No inline anchors passed, so this must take the issue-comment path rather than
-      // the review path: a review with no comments would still show as a review.
+      // `postReview` posts an issue comment and nothing else now: the summary must stay
+      // updatable in place, and `updateComment` is the issues API. Anchored comments go
+      // through `postInlineComments` separately, which this check does not exercise —
+      // it would leave review threads that cannot be deleted the way a comment can.
       if (posted.mode !== "comment")
         throw new Error(`expected an issue comment, got ${posted.mode}`);
       return `id ${posted.id} as a ${posted.mode}`;

@@ -4,6 +4,7 @@ import { logger } from "@maestro/core";
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 import { storedGitHubApp } from "./github-app.js";
+import { commentableAnchors } from "./patch.js";
 
 const exec = promisify(execFile);
 
@@ -36,6 +37,13 @@ export interface PullRequestContext extends PullRequestRef {
   draft: boolean;
   changedFiles: string[];
   changedLines: number;
+  /**
+   * Which lines of which files can carry an inline comment, from the diff GitHub already
+   * sent with the file list. Built here because `listFiles` is the only place the patch
+   * is available and it was being thrown away; asking for it again at post time would
+   * double the request for data already in hand.
+   */
+  commentable: Map<string, Set<number>>;
   cloneUrl: string;
   htmlUrl: string;
 }
@@ -167,6 +175,7 @@ export class GitHubClient {
       draft: pr.draft ?? false,
       changedFiles: files.map((f) => f.filename),
       changedLines: files.reduce((n, f) => n + (f.additions ?? 0) + (f.deletions ?? 0), 0),
+      commentable: commentableAnchors(files),
       cloneUrl: pr.base.repo.clone_url,
       htmlUrl: pr.html_url,
     };
@@ -289,40 +298,20 @@ export class GitHubClient {
   }
 
   /**
-   * Posts one consolidated review. Inline comments are attempted first; if GitHub
-   * rejects an anchor (the line is not in the diff), the whole thing degrades to a
-   * single issue comment rather than losing the review.
+   * Posts the consolidated summary as an issue comment.
+   *
+   * An issue comment on purpose, and not a pull request review carrying the summary in
+   * its body. `findPreviousComment` searches issue comments, and `updateComment` is the
+   * issues API — so a summary posted as a review would be invisible to the next round's
+   * lookup and un-updatable by its id, and every push would add another full comment.
+   * One comment per pull request, edited in place, is the whole anti-noise design.
+   *
+   * Anchored comments go through `postInlineComments`, separately, for that reason.
    */
   async postReview(
     pr: PullRequestContext,
     body: string,
-    inline: InlineComment[] = [],
   ): Promise<{ id: number; mode: "review" | "comment" }> {
-    if (inline.length) {
-      try {
-        const { data } = await this.octokit.rest.pulls.createReview({
-          owner: pr.owner,
-          repo: pr.repo,
-          pull_number: pr.number,
-          commit_id: pr.headSha,
-          event: "COMMENT",
-          body,
-          comments: inline.map((c) => ({
-            path: c.path,
-            line: c.line,
-            body: c.body,
-            side: "RIGHT",
-          })),
-        });
-        return { id: data.id, mode: "review" };
-      } catch (err) {
-        logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          "inline review rejected; falling back to a single comment",
-        );
-      }
-    }
-
     const { data } = await this.octokit.rest.issues.createComment({
       owner: pr.owner,
       repo: pr.repo,
@@ -330,6 +319,47 @@ export class GitHubClient {
       body,
     });
     return { id: data.id, mode: "comment" };
+  }
+
+  /**
+   * Leaves anchored comments on the diff, as one review.
+   *
+   * Returns how many landed. A rejection is logged and dropped rather than retried or
+   * degraded into another issue comment: the summary has already been posted and carries
+   * every finding, so the cost of failing here is placement, not content. Falling back to
+   * a second comment would double the thing the design exists to avoid.
+   *
+   * Callers filter anchors against the diff first — `createReview` rejects the whole
+   * review over one bad line, so one unanchorable finding would otherwise cost all of
+   * them.
+   */
+  async postInlineComments(pr: PullRequestContext, inline: InlineComment[]): Promise<number> {
+    if (!inline.length) return 0;
+    try {
+      await this.octokit.rest.pulls.createReview({
+        owner: pr.owner,
+        repo: pr.repo,
+        pull_number: pr.number,
+        commit_id: pr.headSha,
+        event: "COMMENT",
+        // A review needs a body; this one deliberately says nothing a reader has to
+        // read twice — the summary comment is the review.
+        body: "Details and the metrics block are in the review comment on this pull request.",
+        comments: inline.map((c) => ({
+          path: c.path,
+          line: c.line,
+          body: c.body,
+          side: "RIGHT",
+        })),
+      });
+      return inline.length;
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), anchors: inline.length },
+        "inline review rejected; the summary comment already carries every finding",
+      );
+      return 0;
+    }
   }
 
   /**

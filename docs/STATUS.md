@@ -14,7 +14,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run, and the store driver's contract is now checked on **both** runtimes rather than only the one vitest happens to use (128) |
 | 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | Ollama Cloud live, through both the `openai-compatible` and `openai` adapters; `anthropic` and `google` fixtures only |
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
-| 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
+| 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes — including **anchored inline comments** (170), which the row claimed and nothing built | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
@@ -35,6 +35,11 @@ What that leaves, in order of how much it would tell us:
    repository and a push to it.
 2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local stand-in.
 3. **Forty real containers.** The load scenario is real concurrency over a simulated sandbox.
+4. **One inline review on a real pull request** (170). The anchor parser and the filter are
+   tested and mutation-checked, and the API shape is checked by Octokit's types, but
+   `postInlineComments` has not been sent. Unlike the comment the live check posts and then
+   deletes, review threads cannot be removed the same way — so this one leaves a mark, and
+   it should be done deliberately on a repository where that is fine.
 
 None is a missing implementation; each is a claim only the real thing can settle.
 
@@ -2076,6 +2081,51 @@ the server never sends fails it, and removing `live` from the server's response 
     The check now covers the surfaces that print commands to a user. Two guards had the same
     shape and only one had a scope wide enough to matter, which is worth remembering the next
     time a check is written against documents rather than against surfaces.
+
+170. **The inline comments were plumbing with nothing in it.** Phase 3 asks for "summary
+    comment + inline comments where line anchors are valid". `postReview` took an
+    `InlineComment[]`, had a documented fallback for a rejected anchor, and every caller in
+    the repository passed `[]`. The status table said the phase was built.
+
+    Three things had to exist before the feature could:
+
+    *Anchors.* GitHub accepts a comment only on a line inside a diff hunk. The patch was
+    already being fetched — `listFiles` returns it beside the filename — and discarded.
+    `commentableLines` walks the hunks; the right-side counter advances on additions and
+    context and not on deletions, and the `+` start of a hunk header is not its `-` start,
+    which is the mistake that puts every comment in the second hunk one line off and is
+    invisible whenever both lines happen to be in the diff.
+
+    *Filtering before posting, not after.* `pulls.createReview` rejects the **whole review**
+    over a single bad anchor. The existing fallback caught that and degraded to one issue
+    comment — so one finding pointing at an unchanged line would silently have cost every
+    other comment. Filtering first makes a rejection the exception rather than the design.
+
+    *Not turning the summary into a review.* `postReview`'s inline branch posted the summary
+    as a pull request review. `findPreviousComment` searches issue comments and
+    `updateComment` is the issues API, so that summary would have been invisible to the next
+    round and un-updatable by its id — a fresh full comment on every push, which is the noise
+    the whole design exists to avoid. The summary stays an issue comment; anchored comments
+    are a separate call whose failure is logged and dropped, because the summary already
+    carries every finding and the cost of failing there is placement, not content.
+
+    Carried findings are skipped by anchor, or a finding that is still true would post the
+    same comment at the same place on every push.
+
+    Verified by mutation at both layers: removing the diff check fails the unit tests and the
+    wiring test. Not verified against GitHub — a review with inline threads is an outward
+    action on somebody's pull request, and the threads it leaves cannot be removed the way
+    the live check removes its comment. It joins the list below.
+
+171. **Cross-package tests run against `dist`, so a mutation in `src` can look survivable.**
+    Found while mutation-checking the above: the mutation failed the engine's own tests and
+    passed the integration package's, because `@maestro/playbook` and `@maestro/engine`
+    resolve to their built output. The integration test was reading the previous build.
+
+    The gate is safe by accident — `typecheck` runs `tsc -b`, which emits, before `test` — but
+    "safe by accident" is the description of a thing that stops being safe. Recorded here
+    because it changes how a mutation result must be read: for anything crossing a package
+    boundary, rebuild between applying the mutation and believing the outcome.
 
 ### Found by mechanical sweep, still open
 

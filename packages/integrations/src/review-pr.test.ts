@@ -4,7 +4,12 @@ import { openStore } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { describe, expect, it } from "vitest";
 import type { GitHubClient } from "./github.js";
-import { narrowEnvSpec, resolveEnvSpec, reviewPullRequest } from "./review-pr.js";
+import {
+  narrowEnvSpec,
+  postAnchoredComments,
+  resolveEnvSpec,
+  reviewPullRequest,
+} from "./review-pr.js";
 
 /**
  * Enough of a client to reach the point where the review row exists. Checkout fails
@@ -220,5 +225,89 @@ describe("fork pull requests are downgraded before anything runs", () => {
     const spec = resolveEnvSpec(base, pr(true));
     expect(spec).toMatchObject({ cpus: 2, memoryMb: 4096, pids: 512, image: "auto" });
     expect(spec.timeouts).toEqual(base.timeouts);
+  });
+});
+
+describe("anchored comments on the diff", () => {
+  /**
+   * Phase 3 asks for "inline comments where line anchors are valid". `postReview` took a
+   * list of them and every caller passed `[]`, so the feature was plumbing with nothing
+   * in it — and the status table said it was built.
+   */
+  const finding = (over: Record<string, unknown>) =>
+    ({
+      category: "bug",
+      severity: "high",
+      confidence: 0.9,
+      title: "t",
+      body: "b",
+      agentIds: ["security"],
+      agreementCount: 1,
+      dedupeGroup: "g",
+      ...over,
+    }) as never;
+
+  const run = async (
+    posted: unknown[],
+    commentable: Map<string, Set<number>>,
+    carried: { file?: string; lineStart?: number }[] = [],
+  ) => {
+    let seen: { path: string; line: number; body: string }[] | null = null;
+    const n = await postAnchoredComments(
+      {
+        postInlineComments: async (
+          _pr: unknown,
+          comments: { path: string; line: number; body: string }[],
+        ) => {
+          seen = comments;
+          return comments.length;
+        },
+      } as never,
+      { owner: "o", repo: "r", number: 7, commentable } as never,
+      { triage: { posted, suppressed: [], summary: "" } } as never,
+      defaultPlaybook(),
+      carried as never,
+    );
+    return { n, seen };
+  };
+
+  const diff = new Map([["src/index.ts", new Set([4, 5])]]);
+
+  it("anchors a finding in the diff and drops one outside it", async () => {
+    // One bad anchor makes GitHub reject the whole review, so the filter is what keeps
+    // the good comment rather than what tidies the bad one.
+    const { seen } = await run(
+      [
+        finding({ file: "src/index.ts", lineStart: 4, title: "in the diff" }),
+        finding({ file: "src/index.ts", lineStart: 900, title: "not in the diff" }),
+      ],
+      diff,
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen?.[0]).toMatchObject({ path: "src/index.ts", line: 4 });
+  });
+
+  it("posts nothing when no finding can be anchored", async () => {
+    // A whole-PR point has nowhere to go, and the summary comment already carries it.
+    const { n, seen } = await run([finding({ title: "whole-PR point" })], diff);
+    expect(n).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it("does not repeat an anchor an earlier round already left", async () => {
+    const { seen } = await run([finding({ file: "src/index.ts", lineStart: 4 })], diff, [
+      { file: "src/index.ts", lineStart: 4 },
+    ]);
+    expect(seen).toEqual([]);
+  });
+
+  it("respects the playbook's comment cap", async () => {
+    const doc = defaultPlaybook();
+    expect(doc.triage.maxInlineComments).toBeGreaterThan(0);
+    const many = [4, 5].map((n) => finding({ file: "src/index.ts", lineStart: n }));
+    // Two anchorable findings, and the shipped cap is well above two: the cap is not
+    // what limits this case, which is what makes the previous assertions meaningful.
+    const { seen } = await run(many, diff);
+    expect(seen).toHaveLength(2);
   });
 });

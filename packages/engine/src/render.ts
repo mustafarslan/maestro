@@ -267,3 +267,34 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
 
   return lines.join("\n");
 }
+
+/**
+ * One anchored comment's body.
+ *
+ * Deliberately short. The summary comment carries the full explanation, the evidence and
+ * the metrics; an inline comment sits in the reader's way while they read the diff, and
+ * repeating everything there is how a reviewer learns to collapse them. Title, one line
+ * of attribution, the body.
+ *
+ * Built here rather than by whoever posts it, because the escaping in this file is the
+ * whole reason the posted comment renders as text — assembling an inline body by
+ * concatenation somewhere else would reopen exactly that.
+ */
+export function renderInlineBody(f: {
+  title: string;
+  body: string;
+  severity: string;
+  category: string;
+  confidence: number;
+  agentIds: string[];
+  agreementCount: number;
+}): string {
+  return [
+    `**${SEVERITY_ICON[f.severity] ?? ""} ${prose(oneLine(f.title))}**`,
+    `${f.severity} · ${code(f.category)} · confidence ${(f.confidence * 100).toFixed(0)}%` +
+      (f.agreementCount > 1 ? ` · **${f.agreementCount} agents agree**` : "") +
+      ` · _${f.agentIds.join(", ")}_`,
+    "",
+    prose(f.body),
+  ].join("\n");
+}

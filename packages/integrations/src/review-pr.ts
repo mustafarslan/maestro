@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type CarriedFinding,
   logger,
   planIncremental,
   ReviewStore,
@@ -9,7 +10,9 @@ import {
   type SqlDatabase,
 } from "@maestro/core";
 import {
+  anchorKey,
   type EngineDeps,
+  inlineComments,
   type ReviewOutcome,
   ReviewRecorder,
   renderReview,
@@ -229,8 +232,10 @@ export async function reviewPullRequest(
       await client.updateComment(pr, previous, markdown);
       posted = { id: previous, mode: "updated" };
     } else {
-      posted = await client.postReview(pr, markdown, []);
+      posted = await client.postReview(pr, markdown);
     }
+
+    const inlinePosted = await postAnchoredComments(client, pr, outcome, playbook, plan.carried);
 
     // Without the comment id, a later reaction cannot be matched back to the findings
     // it was reacting to, and the whole precision signal is lost.
@@ -242,7 +247,7 @@ export async function reviewPullRequest(
       error: outcome.error,
       costCents: outcome.costCents,
     });
-    log.info({ reviewId, posted }, "review posted");
+    log.info({ reviewId, posted, inlinePosted }, "review posted");
     return { reviewId, state: outcome.state, outcome, markdown, posted };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -349,4 +354,36 @@ export function narrowEnvSpec(
 
   log.info({ from: ".maestro.yaml" }, "applied repository config, narrowing only");
   return narrowed;
+}
+
+/**
+ * Leaves anchored comments on the lines the findings point at.
+ *
+ * Phase 3 asks for "inline comments where line anchors are valid" and nothing built it:
+ * `postReview` accepted a list and every caller passed `[]`, so the feature was plumbing
+ * with nothing in it.
+ *
+ * Separate from `reviewPullRequest` so the three decisions here can be tested without an
+ * engine, a container or a clone — which is the only reason they were testable at all.
+ */
+export async function postAnchoredComments(
+  client: Pick<GitHubClient, "postInlineComments">,
+  pr: PullRequestContext,
+  outcome: ReviewOutcome,
+  playbook: PlaybookDocument,
+  carried: CarriedFinding[],
+): Promise<number> {
+  // Anchors an earlier round already left. Without this a carried-forward finding posts
+  // the same comment again at the same place on every push.
+  const already = new Set(carried.map((c) => anchorKey(c.file ?? "", c.lineStart ?? undefined)));
+
+  // Filtered against the diff BEFORE posting: `createReview` rejects the entire review
+  // over one anchor outside it, so a single finding pointing at an unchanged line would
+  // otherwise cost every other comment.
+  const anchors = inlineComments(outcome.triage?.posted ?? [], pr.commentable ?? new Map(), {
+    cap: playbook.triage.maxInlineComments,
+    already,
+  });
+
+  return client.postInlineComments(pr, anchors);
 }
