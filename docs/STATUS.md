@@ -16,7 +16,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
 | 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
-| 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, and now against the **compiled binary**: `scripts/mcp-protocol-check.mjs` speaks JSON-RPC to it as a client would and runs in the gate |
+| 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment | publish/rollback/pin verified; test connection verified against Ollama |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
@@ -1778,6 +1778,25 @@ to answer.
 
     Third vocabulary in three findings — review states, finding statuses, now lifecycles — and
     the same shape each time: a set of strings that several files agree on by coincidence.
+
+154. **The MCP check proved tools were advertised, not that they worked.** It called
+    `initialize` and `tools/list` and stopped there, which establishes that thirteen names come
+    back — and nothing about whether any of them does anything through the protocol. Phase 4's
+    stated exit is "trigger a review, read findings and change an agent's model from a Claude
+    Code session", and the part of that a script can perform was being taken on trust.
+
+    It now reads the playbook over JSON-RPC, rebinds `security` to a different provider and
+    model, and reads it back: `claude-opus-5` → `glm-5.3:cloud`, against the compiled binary.
+    Load-bearing, verified by making `set_agent_model` publish nothing — the check then reports
+    the agent still bound to `claude-opus-5` and fails.
+
+    Getting there took three wrong turns, all mine and all the same shape. A patch script raised
+    on its second assertion, so neither of its edits was written, and the assertions I had added
+    were checking calls the script never sent. I read the response shape from a guess rather than
+    from the response, and reported a failure that was my accessor. And the first mutation
+    anchor did not match, so the run "passed" and proved nothing — the third time in this session
+    that a mutation which failed to apply looked exactly like a guard that holds, and the second
+    time I caught it only because the result was too convenient.
 
 ### Found by mechanical sweep, still open
 
