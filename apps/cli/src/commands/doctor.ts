@@ -131,6 +131,26 @@ export async function doctor(): Promise<number> {
         },
   );
 
+  // Disk is where a leaking reaper actually hurts: snapshot image layers fill a disk
+  // long before stray containers become visible in `docker ps`.
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    const { stdout } = await run("docker", [
+      "system",
+      "df",
+      "--format",
+      "{{.Type}} {{.Size}} {{.Reclaimable}}",
+    ]);
+    const images = stdout.split("\n").find((l) => l.startsWith("Images"));
+    if (images) {
+      checks.push({ status: "info", label: "docker disk", detail: images.trim() });
+    }
+  } catch {
+    // Docker already has its own check above; a failure here is not worth a second line.
+  }
+
   console.log(color.bold("\nmaestro doctor\n"));
   for (const c of checks) console.log(checkLine(c.status, c.label, c.detail));
 
