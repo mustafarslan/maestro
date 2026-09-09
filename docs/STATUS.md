@@ -19,7 +19,7 @@ the README so the claims in that file stay short and true.
 | MCP server | Real MCP client handshake: 10 tools, resources, and `set_agent_model` publishing a new playbook version |
 | Admin API | Token required; no token, a wrong token and a token that is a prefix of the real one are all rejected |
 | Server-side validation | A cyclic playbook POSTed to the API is rejected with both the cycle and the port-type violation |
-| Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
+| Prompt injection defenses (revised) | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
 | **The documented install path** | `install.sh` run in clean Linux containers against a real GitHub release (`v0.1.0`): correct platform and arch detection, download, `chmod`, install to `~/.maestro/bin`, the binary-runs verification step, and then `maestro --version` and `maestro init` working from the installed binary. The private-release and empty-download paths were tested too |
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
 | Webhook authentication is mandatory | The daemon refuses to start a listener without a secret, asserted in tests, rather than warning and starting anyway |
@@ -435,6 +435,23 @@ These are recorded because each was invisible to the test suite that existed at 
 61. **`serve` printed an admin URL of 127.0.0.1 regardless of where it bound**, so a deployment
     using `--admin-host 0.0.0.0` was handed a URL that works from the host and not from where the
     operator needed it. Seen in this project's own Compose logs and read past.
+
+62. **The untrusted-content fence could be closed by the text inside it.** `wrapUntrusted` ended
+    the block with the literal string `</untrusted-content>`, which the author of a pull request
+    can simply type in the title or body. Their text then terminated the fence and everything
+    after it sat at the same level as the trusted prompt — the exact bypass the fence exists to
+    prevent, against the threat this design calls dominant.
+
+    The payload that demonstrates it was **already in the injection suite**. The assertion was
+    `expect(wrapped).toContain(payload)`, which is equally true of a successful escape, so nine
+    injection tests passed while the primary defence was bypassable. A test that cannot fail is
+    worse than no test, because it converts an unknown into confidence.
+
+    The fence now carries a random per-call id in both tags, so the closer cannot be written by
+    someone who has not seen it and nothing can be prepared from a previous transcript, and any
+    literal occurrence of the tag name in the content is defanged as well. The tests assert
+    containment — one boundary, injected text before it — rather than presence, and all three
+    fail against the old implementation.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
