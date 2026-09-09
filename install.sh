@@ -100,6 +100,22 @@ if [ ! -s "$TMP" ]; then
   exit 1
 fi
 
+# And a download that produced the WRONG thing. A mirror, proxy or private bucket that
+# answers with an HTML error page and status 200 sails past `curl -f`, and the only later
+# symptom was the binary failing to execute — which this script then diagnosed as a musl
+# libc problem, sending somebody to debug their platform when their URL was at fault.
+# Checked by magic number rather than by `file`, which is not everywhere.
+MAGIC="$(od -An -tx1 -N4 "$TMP" 2>/dev/null | tr -d ' \n')"
+case "$MAGIC" in
+  cffaedfe|cefaedfe|feedfacf|feedface|cafebabe|7f454c46) ;;   # Mach-O (both ends), fat, ELF
+  *)
+    red "What was downloaded is not an executable: ${URL}"
+    red "First bytes were '${MAGIC}'. That usually means the URL served an error page or an"
+    red "HTML redirect rather than the release asset - check MAESTRO_BASE_URL or the version."
+    exit 1
+    ;;
+esac
+
 chmod +x "$TMP"
 mv "$TMP" "$INSTALL_DIR/maestro"
 trap - EXIT
@@ -120,7 +136,12 @@ echo
 # Under `set -e` an `&&` chain that fails would abort the script here with no message,
 # leaving a new user with a broken binary and a silent exit.
 if ! "$INSTALL_DIR/maestro" --version >/dev/null 2>&1; then
-  red "The downloaded binary does not run on this platform."
+  # Remove it. Leaving a binary that does not run at the install path puts a broken
+  # `maestro` on somebody's PATH: every later invocation fails in a way that has nothing
+  # to do with the real problem, and nothing ever cleans it up.
+  rm -f "$INSTALL_DIR/maestro"
+  red "The downloaded binary does not run on this platform, and has been removed."
+  red "It is a real executable, so this is a platform mismatch rather than a bad download:"
   red "Maestro ships glibc binaries; musl hosts (Alpine) are not supported yet."
   exit 1
 fi

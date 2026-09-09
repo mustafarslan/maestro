@@ -22,7 +22,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
-| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer and Compose run locally; **no multi-platform release has been downloaded and run** |
+| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact, happy path and failure paths, which found 130; Compose runs locally; **no multi-platform release has been downloaded and run** |
 
 What that leaves, in order of how much it would tell us:
 
@@ -1260,6 +1260,30 @@ before a release, and either would catch the other side changing under us.
     headers, and `doctor` does not either. The shipped artifact's HTTP surface had never been
     exercised at all — which is the same lesson as 128, one layer up: the tests run against the
     pieces, and the product is the binary.
+
+130. **The installer blamed the wrong thing and left the wreckage on your PATH.** A mirror,
+    proxy or private bucket that answers with an HTML error page and status 200 sails past
+    `curl -f`. The only later symptom was the binary failing to execute, which this script
+    diagnosed as *"Maestro ships glibc binaries; musl hosts (Alpine) are not supported yet"* —
+    sending somebody to debug a libc problem they do not have, when their URL was at fault. And
+    it had already `mv`'d the file into place, so a 76-byte HTML document was left executable at
+    `~/.maestro/bin/maestro`: a broken `maestro` on the PATH, failing ever after in a way
+    unrelated to the real problem, with nothing to clean it up.
+
+    The download is now checked by magic number — Mach-O both byte orders, fat binaries, ELF —
+    before it is installed, with a message that says what actually happened. The platform
+    message survives for the case it was written for, and now says so explicitly ("It is a real
+    executable, so this is a platform mismatch rather than a bad download"), and removes the
+    file either way.
+
+    Found by serving a release over a local HTTP server and running `install.sh` against it,
+    happy path and failure paths. It is the first thing a user runs and it had never been
+    executed against an actual served artifact — the same shape as the previous three findings,
+    now applied to the install step rather than the binary.
+
+    One thing checked and found already correct: the exit code. An early reading suggested it
+    exited 0 on failure; that was my own measurement error — `sh install.sh | tail` reports
+    `tail`'s status, the identical trap that had just been fixed in the gate script.
 
 ### Found by mechanical sweep, still open
 
