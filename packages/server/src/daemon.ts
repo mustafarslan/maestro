@@ -31,7 +31,7 @@ import {
 } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
-import { DockerSandboxDriver } from "@maestro/sandbox";
+import { DockerSandboxDriver, type SandboxDriver } from "@maestro/sandbox";
 import { type RunningAdmin, startAdminServer } from "./admin.js";
 import { collectBody } from "./api.js";
 import { listen } from "./listen.js";
@@ -61,6 +61,11 @@ export interface DaemonOptions {
    * Exposed so the pause can be exercised without filling a disk.
    */
   minFreeBytes?: number;
+  /**
+   * Sandbox driver. Defaults to Docker; exposed so the reaper's startup sweep can be
+   * observed without real containers, the way `EngineDeps` already takes one.
+   */
+  driver?: SandboxDriver;
 }
 
 export interface RunningDaemon {
@@ -135,7 +140,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const playbooks = new PlaybookStore(db);
   const providers = new ProviderConfigStore(db);
   providers.ensureDefaults();
-  const driver = new DockerSandboxDriver();
+  const driver = opts.driver ?? new DockerSandboxDriver();
   const scheduler = new Scheduler(opts.limits ?? DEFAULT_LIMITS);
   const adminToken = opts.adminToken ?? randomBytes(24).toString("hex");
 
@@ -584,11 +589,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // ── environment reaper ──────────────────────────────────────────────────
   // Containers and snapshot images outlive a crashed process; sweeping on an interval is
   // what stops a long-running daemon from filling the disk.
-  const reaperTimer = setInterval(() => {
+  const sweep = (olderThanMs: number) => {
     // Two guards, because either alone has failed here. The age filter was passed and
     // ignored by the driver, so this swept containers of every age; and the sweep never
     // named the reviews it must not touch, so it was destroying the containers its own
     // in-flight reviews were using, every ten minutes.
+    //
+    // `protectReviewIds` reads the shared store, so it also covers a second daemon's
+    // in-flight reviews — which is what makes the startup sweep below safe.
     const active = db
       .prepare(
         `SELECT id FROM reviews WHERE state IN (${IN_FLIGHT_STATES.map(() => "?").join(",")})`,
@@ -597,9 +605,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       .map((r) => r.id);
 
     void driver
-      .reap({ olderThanMs: 2 * 60 * 60_000, protectReviewIds: active })
+      .reap({ olderThanMs, protectReviewIds: active })
       .catch((err) => logger.warn({ err }, "reap failed"));
-  }, 10 * 60_000);
+  };
+
+  // On startup, which the plan asks for and only the interval delivered.
+  //
+  // Startup is the moment strays are likeliest — a killed daemon leaves its containers
+  // running — and it was the moment nothing looked. The first sweep was ten minutes
+  // away, and it would not have touched them anyway: containers minutes old are far
+  // inside the two-hour age filter, so a crashed daemon's containers held their memory
+  // and their snapshot layers for at least two hours. The poller beside this one already
+  // ticks once before setting its interval; the reaper did not.
+  //
+  // A shorter age here, because at startup the reviews to protect are named explicitly
+  // and read from the shared store. Not zero: a container a racing process created
+  // seconds ago has no review row yet.
+  sweep(5 * 60_000);
+  const reaperTimer = setInterval(() => sweep(2 * 60 * 60_000), 10 * 60_000);
 
   return {
     webhookPort,

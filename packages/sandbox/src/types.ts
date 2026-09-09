@@ -61,5 +61,16 @@ export interface SandboxDriver {
   reap(opts?: {
     reviewId?: string;
     olderThanMs?: number;
+    /**
+     * Reviews whose containers must be left alone.
+     *
+     * Part of the contract, not of one driver: an unscoped sweep matches every managed
+     * container including the ones a running daemon is using, and `maestro reap` during a
+     * review destroyed it. The Docker driver has honoured this since that was found; the
+     * interface did not declare it, so the daemon only typechecked because it happened to
+     * hold the concrete class. A second driver written faithfully against this interface
+     * would have reintroduced the bug, and the conformance suite could not have known.
+     */
+    protectReviewIds?: string[];
   }): Promise<{ containers: number; images: number }>;
 }

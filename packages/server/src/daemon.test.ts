@@ -522,3 +522,72 @@ describe("a daemon that cannot bind its webhook port", () => {
     await new Promise((r) => probe.close(r));
   }, 15_000);
 });
+
+describe("the reaper sweeps on startup", () => {
+  /**
+   * The plan says the reaper "sweeps on startup and on an interval". Only the interval
+   * existed, so the first sweep was ten minutes away — and it would not have touched a
+   * crashed daemon's containers anyway, because they are minutes old and the periodic
+   * sweep's age filter is two hours. Containers held their memory and their snapshot
+   * layers for at least that long, at exactly the moment strays are likeliest.
+   */
+  let db: SqlDatabase;
+  let version: string;
+  let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    version = new PlaybookStore(db).publish(defaultPlaybook(), { activate: true }).id;
+  });
+  afterEach(async () => {
+    await running?.stop();
+    running = undefined;
+  });
+
+  const spyDriver = () => {
+    const calls: { olderThanMs?: number; protectReviewIds?: string[] }[] = [];
+    const driver = {
+      available: async () => true,
+      reap: async (opts?: { olderThanMs?: number; protectReviewIds?: string[] }) => {
+        calls.push(opts ?? {});
+        return { containers: 0, images: 0 };
+      },
+    } as never;
+    return { driver, calls };
+  };
+
+  it("reaps once before the interval, not only after it", async () => {
+    const { driver, calls } = spyDriver();
+    running = await startDaemon({ db, driver, concurrentReviews: 0 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls.length).toBe(1);
+  }, 15_000);
+
+  it("uses an age short enough to catch what a crash just left behind", async () => {
+    // Minutes, not hours. A container from a killed daemon is seconds old.
+    const { driver, calls } = spyDriver();
+    running = await startDaemon({ db, driver, concurrentReviews: 0 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls[0]?.olderThanMs).toBeLessThanOrEqual(10 * 60_000);
+    expect(calls[0]?.olderThanMs).toBeGreaterThan(0);
+  }, 15_000);
+
+  it("still names the reviews it must not touch", async () => {
+    // The startup sweep is only safe because of this: a second daemon's in-flight
+    // reviews are in the same store, so its containers are protected too.
+    const reviews = new ReviewStore(db);
+    const reviewId = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 1,
+      headSha: "a".repeat(40),
+      playbookVersionId: version,
+    }).id;
+    reviews.setState(reviewId, "analyzing");
+
+    const { driver, calls } = spyDriver();
+    running = await startDaemon({ db, driver, concurrentReviews: 0 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls[0]?.protectReviewIds).toContain(reviewId);
+  }, 15_000);
+});

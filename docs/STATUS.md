@@ -2348,6 +2348,41 @@ the server never sends fails it, and removing `live` from the server's response 
     (As with 169, this entry cannot write the rejected spelling out, because the check
     covers this file. That is the check being right.)
 
+185. **The reaper never swept on startup, which is the moment it is for.** The plan says
+    the reaper "sweeps on startup and on an interval". Only the interval existed —
+    `setInterval(fn, 10 * 60_000)` with nothing before it — so the first sweep was ten
+    minutes away.
+
+    And it would not have touched anything even then. The periodic sweep's age filter is
+    two hours, and a killed daemon's containers are seconds old, so they held their
+    memory and their snapshot layers for at least two hours after a crash. The chain is
+    worse than either number suggests: an interrupted review stays in an in-flight state
+    for thirty minutes, during which `protectReviewIds` deliberately protects those very
+    containers.
+
+    The poller ten lines away already ticks once before setting its interval. The reaper
+    did not, and container leaks are in the plan's own risk list.
+
+    It sweeps at startup now, with a five-minute age rather than two hours — safe because
+    the reviews to protect are named explicitly and read from the shared store, so a
+    second daemon's live containers are covered too. Not zero, because a container a
+    racing process created seconds ago has no review row yet.
+
+186. **`protectReviewIds` was not in the driver contract.** The `SandboxDriver` interface
+    declared `reap({reviewId, olderThanMs})`. The daemon has passed `protectReviewIds`
+    since the day an unscoped sweep was found destroying the containers of its own running
+    reviews — and it typechecked only because the daemon happened to hold the concrete
+    `DockerSandboxDriver` rather than the interface.
+
+    So the parameter that stops a sweep destroying live containers was absent from the
+    contract every driver is written against, and from the conformance suite the plan says
+    every driver must pass. A second driver implemented faithfully would have reintroduced
+    the bug, correctly.
+
+    Found by making the driver injectable so the startup sweep above could be tested
+    without real containers: the moment the daemon held the interface instead of the
+    class, the compiler said so.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
