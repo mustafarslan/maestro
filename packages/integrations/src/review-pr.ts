@@ -192,6 +192,17 @@ export async function reviewPullRequest(
     // Re-read before posting: a push during the run may have superseded this result,
     // and publishing a review for a SHA nobody is looking at any more is worse than
     // publishing nothing.
+    // An aborted review must not post either. Cancellation existed to stop a review
+    // "finishing a comment nobody will read" — but the engine treats an abort as every
+    // agent being skipped and still returns a completed review, so the empty comment was
+    // posted to the closed pull request anyway. Guarding only on `superseded` covered the
+    // push case and not the close case.
+    if (opts.signal?.aborted) {
+      reviews.setState(reviewId, "cancelled");
+      log.info({ reviewId }, "not posting: review was cancelled");
+      return { reviewId, state: "cancelled", outcome, skipped: "cancelled before posting" };
+    }
+
     const current = reviews.get(reviewId);
     if (current?.state === "superseded") {
       log.info({ reviewId }, "not posting: superseded by a newer push");

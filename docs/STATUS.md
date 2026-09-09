@@ -633,7 +633,16 @@ These are recorded because each was invisible to the test suite that existed at 
     into "this file did not change", which is the same shape as the defect the method was added
     to fix. A partial "no" is still a verdict; it returns unknown now.
 
-Findings 75-81 were reported by **Maestro reviewing this session's own commits** — the first two
+82. **A cancelled review still posted its comment, and the `cancelled` state was never written.**
+    Cancellation existed to stop a review "finishing a comment nobody will read" — but the engine
+    treats an abort as every agent being skipped and still returns a completed review, and the
+    posting guard covered only `superseded`. So closing a pull request mid-review posted an empty
+    comment to the closed pull request: the exact outcome the feature was added to prevent.
+    `cancelled` was meanwhile declared in `REVIEW_STATES`, treated as terminal and as
+    re-reviewable, and written by nothing — the ninth built-but-unwired capability found in this
+    session, and the state the feature is named after.
+
+Findings 75-82 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.

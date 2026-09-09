@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { openStore } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { describe, expect, it } from "vitest";
@@ -115,5 +117,48 @@ describe("a repository's own .maestro.yaml", () => {
 
   it("leaves the spec untouched when there is no file", () => {
     expect(narrowEnvSpec(base, undefined, quiet)).toEqual(base);
+  });
+});
+
+describe("a cancelled review", () => {
+  it("does not post a comment to the pull request it was cancelled for", async () => {
+    // Cancellation existed to stop a review "finishing a comment nobody will read", but
+    // the engine treats an abort as every agent being skipped and still returns a
+    // completed review — so the empty comment was posted to the closed pull request
+    // anyway. The posting guard covered `superseded` and not this.
+    const db = await openStore({ path: ":memory:" });
+    const playbook = defaultPlaybook();
+    const version = new PlaybookStore(db).publish(playbook);
+
+    const controller = new AbortController();
+    controller.abort();
+
+    let posted = false;
+    const client = {
+      ...fakeClient(),
+      postReview: async () => {
+        posted = true;
+        return { id: 1, mode: "comment" };
+      },
+    } as unknown as ReturnType<typeof fakeClient>;
+
+    await reviewPullRequest({
+      client,
+      db,
+      deps: { driver: {} as never, registry: {} as never },
+      playbook,
+      playbookVersionId: version.id,
+      pr: { owner: "o", repo: "r", number: 7 },
+      signal: controller.signal,
+    }).catch(() => undefined);
+
+    expect(posted, "a cancelled review posted a comment").toBe(false);
+  });
+
+  it("records the state the feature is named after", async () => {
+    // `cancelled` was declared in REVIEW_STATES, treated as terminal and as
+    // re-reviewable, and nothing anywhere ever wrote it.
+    const source = readFileSync(join(import.meta.dirname, "review-pr.ts"), "utf8");
+    expect(source).toContain('setState(reviewId, "cancelled")');
   });
 });
