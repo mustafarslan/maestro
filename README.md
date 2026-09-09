@@ -81,6 +81,13 @@ it is safe to feed attacker-controlled PR text to a model at all — see
 + the editable persona + a fixed output contract. The wrapper lives in code so no persona edit —
 including one made in the Studio — can remove the injection defenses.
 
+**Agents are scheduled across reviews, not within one.** A worker pool admits agent tasks under
+global, per-agent, per-repo and per-provider limits, rotating across reviews rather than FIFO. So
+while the product agent is saturated on PR #1, the security and architecture agents flow to PR #2
+instead of queueing behind it, and a 40-file pull request cannot starve a 2-file one that arrived
+later. A slot is taken *before* the container is created — admitting first would hold a container's
+memory and disk for the whole wait.
+
 **Teardown is not a graph node.** It is a finalizer that runs on every terminal state, so no
 drawable graph can leak containers.
 
@@ -124,6 +131,16 @@ pnpm typecheck
 pnpm test              # includes real-Docker integration tests
 pnpm run build:binary  # -> dist/maestro
 ```
+
+## Deploying
+
+`maestro serve` on a host is the supported deployment: it is one binary, and the installer above is
+the whole setup.
+
+`docker-compose.yml` is included but **experimental and unrun**. Maestro is a container there while
+its sandboxes are siblings on the host daemon, so the egress proxy has to bind a port that is both
+fixed and published for them to reach it (`MAESTRO_PROXY_PORT_RANGE`, published on the bridge
+gateway). That is wired and unit-tested; it has never been run on a real Linux host.
 
 ## Status
 

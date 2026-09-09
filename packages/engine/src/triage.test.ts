@@ -30,6 +30,59 @@ describe("triage", () => {
     expect(result.posted[0]?.agreementCount).toBe(2);
   });
 
+  it("merges one defect that two agents gave different category slugs", () => {
+    // Verbatim from a real Maestro self-review: the same dead ternary was posted twice,
+    // as `dead-conditional` and `no-op-ternary`, because the dedupe key included the
+    // category and agents invent their own slugs. Two comments for one defect is the
+    // failure mode that makes people stop reading an automated reviewer.
+    const result = triage(doc, [
+      {
+        agentId: "architecture",
+        findings: [
+          f({
+            file: "apps/cli/src/commands/reap.ts",
+            lineStart: 42,
+            category: "dead-conditional",
+            title: "Ternary returns the same value on both branches",
+            body: "Both branches evaluate to 'ok'.",
+          }),
+        ],
+      },
+      {
+        agentId: "security",
+        findings: [
+          f({
+            file: "apps/cli/src/commands/reap.ts",
+            lineStart: 42,
+            category: "no-op-ternary",
+            title: "No-op ternary",
+            body: "The condition has no effect on the result, so the status is always 'ok' — the failure case is unreachable.",
+          }),
+        ],
+      },
+    ]);
+
+    expect(result.posted).toHaveLength(1);
+    expect(result.posted[0]?.agreementCount).toBe(2);
+    // The fuller explanation survives, with the category that came with it.
+    expect(result.posted[0]?.category).toBe("no-op-ternary");
+  });
+
+  it("keeps genuinely different defects in the same file apart", () => {
+    // Dropping category from the key must not collapse unrelated findings; distance in
+    // the file is what separates them.
+    const result = triage(doc, [
+      {
+        agentId: "security",
+        findings: [
+          f({ lineStart: 10, category: "sql-injection" }),
+          f({ lineStart: 200, category: "missing-auth", title: "No auth check" }),
+        ],
+      },
+    ]);
+    expect(result.posted.length + result.suppressed.length).toBe(2);
+  });
+
   it("raises confidence when agents agree, because agreement is evidence", () => {
     const alone = triage(doc, [{ agentId: "security", findings: [f({ confidence: 0.7 })] }]);
     const agreed = triage(doc, [
@@ -39,7 +92,7 @@ describe("triage", () => {
     expect(agreed.posted[0]!.confidence).toBeGreaterThan(alone.posted[0]!.confidence);
   });
 
-  it("treats nearby lines in the same file and category as one defect", () => {
+  it("treats nearby lines in the same file as one defect", () => {
     // Agents rarely anchor to the identical line.
     const result = triage(doc, [
       { agentId: "security", findings: [f({ lineStart: 10 })] },
@@ -48,10 +101,40 @@ describe("triage", () => {
     expect(result.posted).toHaveLength(1);
   });
 
-  it("keeps different categories in the same file separate", () => {
+  it("keeps a second defect at the same location visible instead of discarding it", () => {
+    // Grouping by location alone is what stops one defect being posted twice under two
+    // invented category slugs. The cost is that two real defects on one line land in the
+    // same group — so the merged-away description is carried, not dropped.
     const result = triage(doc, [
       { agentId: "security", findings: [f({ category: "sql-injection" })] },
-      { agentId: "architecture", findings: [f({ category: "null-deref" })] },
+      {
+        agentId: "architecture",
+        findings: [
+          f({
+            category: "null-deref",
+            title: "Result may be null",
+            body: "The query can return no rows and the caller dereferences the result unconditionally.",
+          }),
+        ],
+      },
+    ]);
+
+    expect(result.posted).toHaveLength(1);
+    expect(result.posted[0]?.alsoReported).toHaveLength(1);
+    const bodies = [result.posted[0]?.body, result.posted[0]?.alsoReported?.[0]?.body].join(" ");
+    expect(bodies).toContain("User input reaches the query.");
+    expect(bodies).toContain("dereferences the result");
+  });
+
+  it("keeps far-apart findings in one file separate", () => {
+    const result = triage(doc, [
+      {
+        agentId: "security",
+        findings: [
+          f({ lineStart: 10 }),
+          f({ lineStart: 400, title: "Unbounded loop", body: "No exit condition." }),
+        ],
+      },
     ]);
     expect(result.posted).toHaveLength(2);
   });
@@ -78,10 +161,11 @@ describe("triage", () => {
       {
         agentId: "security",
         findings: [
-          f({ category: "a", severity: "low", confidence: 0.99 }),
-          f({ category: "b", severity: "critical", confidence: 0.7 }),
-          f({ category: "c", severity: "high", confidence: 0.95 }),
-          f({ category: "d", severity: "high", confidence: 0.75 }),
+          // Distinct locations: findings in the same place are one group by design.
+          f({ category: "a", lineStart: 10, severity: "low", confidence: 0.99 }),
+          f({ category: "b", lineStart: 100, severity: "critical", confidence: 0.7 }),
+          f({ category: "c", lineStart: 200, severity: "high", confidence: 0.95 }),
+          f({ category: "d", lineStart: 300, severity: "high", confidence: 0.75 }),
         ],
       },
     ]);

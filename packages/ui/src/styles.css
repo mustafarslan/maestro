@@ -168,10 +168,12 @@ td {
 tr.clickable {
   cursor: pointer;
 }
-tr.clickable:hover td {
+/* Selection is stated before hover so the hover rule does not silently lose to it, and
+   both resolve to the same colour regardless of which applies. */
+tr.selected td {
   background: var(--panel-2);
 }
-tr.selected td {
+tr.clickable:hover td {
   background: var(--panel-2);
 }
 
@@ -285,7 +287,7 @@ tr.selected td {
 .field {
   margin-bottom: 12px;
 }
-.field label {
+.field-label {
   display: block;
   font-size: 12px;
   color: var(--muted);

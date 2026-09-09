@@ -2,6 +2,12 @@
 #
 # Maestro is a single executable; Compose only supplies a place to run it, a volume for
 # its SQLite database and workspaces, and the Docker socket it needs to create sandboxes.
+#
+# EXPERIMENTAL. This file has not been run end to end — it needs a Linux host with the
+# Docker socket mounted, and the maintainer's testing was on macOS. The sandbox-to-proxy
+# path below is the part most likely to need adjusting for your daemon's bridge; if
+# dependency installs fail, that is where to look. `maestro serve` on the host is the
+# supported deployment.
 services:
   maestro:
     build: .
@@ -20,12 +26,18 @@ services:
       MAESTRO_ADMIN_TOKEN: ${MAESTRO_ADMIN_TOKEN:?set an admin token}
       MAESTRO_HOME: /data
       # Sandboxes are siblings on the HOST daemon, so they cannot reach this
-      # container's loopback. The egress proxy therefore binds all interfaces inside
-      # this container, and sandboxes must be told an address that resolves to it.
-      # 172.17.0.1 is the default bridge gateway, which is what a sibling container
-      # reaches when it dials host-gateway; change it if your daemon uses a different
-      # bridge. Getting this wrong makes every dependency install fail.
+      # container's loopback. Two things have to line up, and both are here:
+      #
+      #   1. the proxy binds a port that is PUBLISHED below — an ephemeral port cannot
+      #      be, so a range is pinned. It is a range, not one port, because concurrent
+      #      reviews each run their own proxy; the range width caps how many prepare
+      #      phases can run at once.
+      #   2. sandboxes are told an address that reaches this container. 172.17.0.1 is
+      #      the default bridge gateway; change it if your daemon uses a different one.
+      #
+      # Getting either wrong makes every dependency install fail.
       MAESTRO_PROXY_HOST: ${MAESTRO_PROXY_HOST:-172.17.0.1}
+      MAESTRO_PROXY_PORT_RANGE: ${MAESTRO_PROXY_PORT_RANGE:-7790-7799}
     volumes:
       - maestro-data:/data
       # Sandboxes are sibling containers on the host daemon. This grants Maestro
@@ -38,6 +50,9 @@ services:
       # Admin UI: bound to loopback on the host, because it is not authenticated by
       # anything other than the token and has no business on a public interface.
       - "127.0.0.1:7777:7777"
+      # Egress proxy, reachable by sibling sandbox containers over the bridge gateway
+      # only — never on the LAN. Must match MAESTRO_PROXY_PORT_RANGE above.
+      - "172.17.0.1:7790-7799:7790-7799"
     command:
       - serve
       - --webhook-port=8080

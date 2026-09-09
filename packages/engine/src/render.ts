@@ -43,6 +43,15 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
           ` · _${f.agentIds.join(", ")}_`,
       );
       lines.push("", f.body);
+      // A second agent that described this location differently, kept rather than
+      // dropped — one comment per location, but nothing an agent said is lost.
+      for (const also of f.alsoReported ?? []) {
+        lines.push(
+          "",
+          `> **Also reported here** (${also.agentId}) — ${also.title}`,
+          `> ${also.body}`,
+        );
+      }
       if (f.evidence) lines.push("", "```", f.evidence.slice(0, 1500), "```");
       lines.push("");
     }

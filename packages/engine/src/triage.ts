@@ -11,6 +11,15 @@ export interface TriagedFinding extends Finding {
   agentIds: string[];
   /** How many independent agents raised the same defect. Agreement is evidence. */
   agreementCount: number;
+  /**
+   * Descriptions merged into this one that told a different story.
+   *
+   * Grouping by location alone means two genuinely different defects on the same line
+   * can land in one group. Discarding the shorter body would lose the second defect, so
+   * it is carried here and rendered under the main one: one comment per location, and
+   * nothing an agent said is thrown away.
+   */
+  alsoReported?: { agentId: string; title: string; body: string }[];
   suppressedReason?: string;
 }
 
@@ -65,9 +74,23 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
       if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[existing.severity]) {
         existing.severity = finding.severity;
       }
-      if (finding.body.length > existing.body.length) {
+
+      // Whichever explanation is fuller leads; the other is kept alongside it when it
+      // is telling a different story rather than restating the same one.
+      const incomingLeads = finding.body.length > existing.body.length;
+      const other = incomingLeads
+        ? { agentId: existing.agentIds[0] ?? "unknown", ...existing }
+        : { agentId, ...finding };
+
+      if (incomingLeads) {
         existing.title = finding.title;
         existing.body = finding.body;
+        existing.category = finding.category;
+      }
+      if (other.category !== existing.category) {
+        const also = existing.alsoReported ?? [];
+        also.push({ agentId: other.agentId, title: other.title, body: other.body });
+        existing.alsoReported = also;
       }
       if (!existing.evidence && finding.evidence) existing.evidence = finding.evidence;
     }
@@ -106,12 +129,17 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
 }
 
 /**
- * Findings within a few lines of each other, in the same file and category, are treated
- * as the same defect — agents rarely anchor to the identical line.
+ * Findings in the same place are treated as the same defect.
+ *
+ * Category is deliberately NOT part of the key. Agents invent their own slugs, so one
+ * defect arrives as `dead-conditional` from one agent and `no-op-ternary` from another,
+ * and keying on category shipped both — the duplication that makes people stop reading
+ * an automated reviewer. Same file, same ten-line window, same defect; triage keeps the
+ * fuller explanation and records the agreement.
  */
 function dedupeKey(f: Finding): string {
   const bucket = f.lineStart ? Math.floor(f.lineStart / 10) : "none";
-  return `${f.file ?? "repo"}:${f.category.toLowerCase()}:${bucket}`;
+  return `${f.file ?? "repo"}:${bucket}`;
 }
 
 function buildSummary(

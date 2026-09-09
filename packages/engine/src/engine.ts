@@ -1,6 +1,6 @@
 import { type Finding, runReviewAgent } from "@maestro/agents";
 import { logger, type SpanRecorder, type SqlDatabase } from "@maestro/core";
-import type { ProviderRegistry } from "@maestro/llm";
+import type { Provider, ProviderRegistry } from "@maestro/llm";
 import type { EnvSpec, GraphNode, PlaybookDocument, PromptContext } from "@maestro/playbook";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
 import { type RouteDecision, route } from "./router.js";
@@ -12,10 +12,28 @@ export interface EngineDeps {
   spans?: SpanRecorder;
   /** When present, per-step model calls are persisted as they happen. */
   db?: SqlDatabase;
+  /**
+   * Admission control for agent tasks, supplied by the daemon.
+   *
+   * The engine deliberately does not own this: a single `maestro review` has nothing to
+   * schedule against, while the daemon must hold limits across every concurrent review.
+   * Without it every agent of every review starts at once — which is how the product
+   * agent saturating PR #1 stops the other agents flowing to PR #2.
+   *
+   * Resolves with a release function once a slot is free.
+   */
+  acquireSlot?: (req: {
+    reviewId: string;
+    agentId: string;
+    repoId: string;
+    providerId: string;
+  }) => Promise<() => void>;
 }
 
 export interface ReviewRequest {
   reviewId: string;
+  /** Used for the scheduler's per-repo limit; defaults to the review's own id. */
+  repoId?: string;
   playbook: PlaybookDocument;
   sourcePath: string;
   baseRef: string;
@@ -24,6 +42,15 @@ export interface ReviewRequest {
   context: PromptContext;
   envSpec?: EnvSpec;
   signal?: AbortSignal;
+}
+
+/**
+ * Roughly three characters per token, against the model's own context window, leaving
+ * headroom for the reply. Unknown models keep the conservative default in the loop.
+ */
+function promptCharBudget(provider: Provider, model: string): number | undefined {
+  const window = provider.capabilities(model).contextWindow;
+  return window ? Math.floor(window * 3 * 0.8) : undefined;
 }
 
 export interface NodeOutcome {
@@ -166,10 +193,21 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       agentNodes.map(async (node) => {
         const agent = req.playbook.agents.find((a) => a.id === node.agentId);
         if (!agent) return null;
+        const binding = deps.registry.resolve(agent.model);
+
+        // Wait for a slot BEFORE creating the container: admitting first and queueing
+        // second would hold a container, its memory and its disk for the whole wait.
+        const release = await deps.acquireSlot?.({
+          reviewId: req.reviewId,
+          agentId: agent.id,
+          repoId: req.repoId ?? req.reviewId,
+          providerId: binding.provider.id,
+        });
+        // The clock starts after admission, so queueing time is not reported as the
+        // agent being slow.
         const started = Date.now();
 
         try {
-          const binding = deps.registry.resolve(agent.model);
           // Each agent gets its OWN container off the shared snapshot: concurrent agents
           // running builds would otherwise clobber one another's working directory.
           const sandbox = await deps.driver.analyze(readyEnv, { agentId: agent.id, spec });
@@ -191,6 +229,10 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
               maxSteps: agent.model.maxSteps,
               costCapCents: Math.min(agent.model.costCapCents, decision.costCapCents),
               deadlineMs: spec.timeouts.analyzeSec * 1000,
+              // Sized from the bound model's real window rather than one constant: a
+              // 200k-token model was being trimmed at half its capacity for no reason,
+              // while a smaller one was rejected by the API before the guard engaged.
+              maxPromptChars: promptCharBudget(binding.provider, binding.model),
             },
             signal: req.signal,
           });
@@ -204,7 +246,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
               nodeId: node.id,
               kind: node.kind,
               agentId: agent.id,
-              state: "done",
+              state: result.loop.stopKind === "context-limit" ? "failed" : "done",
               durationMs: Date.now() - started,
               costCents: result.loop.costCents,
               findings: result.findings.length,
@@ -224,7 +266,9 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             nodeId: node.id,
             kind: node.kind,
             agentId: agent.id,
-            state: "done",
+            // A run the context window cut short produced partial work at best;
+            // recording it as "done" hides that from whoever reads the metrics block.
+            state: result.loop.stopKind === "context-limit" ? "failed" : "done",
             durationMs: Date.now() - started,
             costCents: result.loop.costCents,
             findings: result.findings.length,
@@ -253,6 +297,10 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           });
           if (fatal) throw err;
           return null;
+        } finally {
+          // Must run on every path including a fatal throw, or one failing agent leaks a
+          // slot and the pool drains until the daemon stalls.
+          release?.();
         }
       }),
     );

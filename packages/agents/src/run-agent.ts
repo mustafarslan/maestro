@@ -21,7 +21,7 @@ export interface ReviewAgentRequest {
   /** Dependency install did not complete; command output is unreliable evidence. */
   setupFailed?: boolean;
   context: PromptContext;
-  budget: { maxSteps: number; costCapCents: number; deadlineMs?: number };
+  budget: { maxSteps: number; costCapCents: number; deadlineMs?: number; maxPromptChars?: number };
   signal?: AbortSignal;
   onStep?: (step: { index: number; costCents: number }) => void;
 }

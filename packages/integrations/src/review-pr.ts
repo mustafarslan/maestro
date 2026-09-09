@@ -126,6 +126,9 @@ export async function reviewPullRequest(
       { ...opts.deps, db },
       {
         reviewId,
+        // Real repo identity, so the scheduler's per-repo limit stops one busy repo
+        // from starving the others rather than being a per-review no-op.
+        repoId,
         playbook,
         sourcePath: workdir,
         baseRef: plan.baseRef,

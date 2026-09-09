@@ -282,7 +282,7 @@ const DEFAULT_MAX_PROMPT_CHARS = 400_000;
  * The task and the most recent exchanges are what the model actually needs; a file it
  * read fifteen steps ago is the cheapest thing to lose. Returns how many were dropped.
  */
-function trimHistory(messages: Message[], maxChars: number): number {
+export function trimHistory(messages: Message[], maxChars: number): number {
   const size = () => messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
   if (size() <= maxChars) return 0;
 
@@ -293,7 +293,9 @@ function trimHistory(messages: Message[], maxChars: number): number {
   // this trimming exists to rescue.
   //
   // Index 0 (the task) and the last four messages (the live exchange) are never touched.
-  for (let i = 1; i < messages.length - 4 && size() > maxChars; ) {
+  // The bound is -5, not -4: splice(i, 2) at i = length-5 would remove length-4, which
+  // is inside the live exchange this loop promises never to touch.
+  for (let i = 1; i < messages.length - 5 && size() > maxChars; ) {
     const current = messages[i];
     const next = messages[i + 1];
     if (current?.role === "assistant" && current.toolCalls?.length && next?.role === "tool") {

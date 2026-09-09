@@ -3,6 +3,14 @@ import type { Sandbox } from "@maestro/sandbox";
 import { SUBMIT_FINDINGS_JSON_SCHEMA } from "./finding.js";
 
 /**
+ * Caps on a single read. An unbounded read of a lockfile or a generated file is what
+ * exceeded a model's context window in practice — three of them cost more tokens than
+ * the whole diff. The loop's history trimming is the safety net; this is the fix.
+ */
+const MAX_READ_LINES = 300;
+const MAX_READ_CHARS = 32_000;
+
+/**
  * The agent tool surface.
  *
  * Every one of these executes INSIDE the analyze container. Implementing them host-side
@@ -16,8 +24,7 @@ import { SUBMIT_FINDINGS_JSON_SCHEMA } from "./finding.js";
 export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = {
   read_file: {
     name: "read_file",
-    description:
-      "Read a file from the checkout. Returns numbered lines so you can cite exact locations.",
+    description: `Read a file from the checkout. Returns numbered lines so you can cite exact locations. At most ${MAX_READ_LINES} lines per call — request a specific range for anything larger.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -147,14 +154,23 @@ export function buildDispatch(ctx: ToolContext) {
         const path = safePath(input.path);
         if (typeof path !== "string") return { output: path.error, isError: true };
         const start = Number(input.startLine ?? 1);
-        const end = Number(input.endLine ?? start + 400);
+        const end = Math.min(
+          Number(input.endLine ?? start + MAX_READ_LINES),
+          start + MAX_READ_LINES,
+        );
         // Numbered lines, so a finding can cite a location the reviewer can click.
         const res = await ctx.sandbox.exec(
           `sed -n ${shellQuote(`${start},${end}p`)} ${shellQuote(path)} | cat -n | sed ${shellQuote(`s/^/${start === 1 ? "" : ""}/`)}`,
         );
         if (res.exitCode !== 0)
           return { output: res.stderr.trim() || `cannot read ${path}`, isError: true };
-        return { output: renumber(res.stdout, start) || `(${path} is empty in that range)` };
+        const text = renumber(res.stdout, start);
+        if (text.length > MAX_READ_CHARS) {
+          return {
+            output: `${text.slice(0, MAX_READ_CHARS)}\n… [truncated at ${MAX_READ_CHARS} characters — read a narrower line range]`,
+          };
+        }
+        return { output: text || `(${path} is empty in that range)` };
       }
 
       case "list_dir": {

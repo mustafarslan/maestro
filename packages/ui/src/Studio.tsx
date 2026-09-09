@@ -219,8 +219,11 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
           <div className="spacer" />
           {saved ? <span className="muted">{saved}</span> : null}
           {dirty ? <span className="badge running">unsaved</span> : null}
-          <button onClick={addAgent}>Add agent</button>
+          <button type="button" onClick={addAgent}>
+            Add agent
+          </button>
           <button
+            type="button"
             className="primary"
             onClick={save}
             disabled={!dirty || saving || issues.length > 0}
@@ -296,15 +299,20 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
               <div className="panel-head">
                 {agent.name}
                 <div className="spacer" />
-                <button onClick={() => updateAgent(agent.id, { enabled: !agent.enabled })}>
+                <button
+                  type="button"
+                  onClick={() => updateAgent(agent.id, { enabled: !agent.enabled })}
+                >
                   {agent.enabled ? "Disable" : "Enable"}
                 </button>
-                <button onClick={() => removeAgent(agent.id)}>Remove</button>
+                <button type="button" onClick={() => removeAgent(agent.id)}>
+                  Remove
+                </button>
               </div>
               <div className="panel-body">
                 <div className="grid3">
-                  <div className="field">
-                    <label>Provider</label>
+                  <label className="field">
+                    <span className="field-label">Provider</span>
                     <select
                       value={agent.model.providerId}
                       onChange={(e) => updateModel(agent.id, { providerId: e.target.value })}
@@ -315,11 +323,17 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                         </option>
                       ))}
                     </select>
-                  </div>
+                  </label>
+                  {/* The control is chosen at render time — a live catalogue gives a
+                      dropdown, an unqueried provider a free-text box — so this label is
+                      associated by id rather than by wrapping. */}
                   <div className="field">
-                    <label>Model</label>
+                    <label className="field-label" htmlFor={`model-${agent.id}`}>
+                      Model
+                    </label>
                     {modelsFor(agent.model.providerId).length ? (
                       <select
+                        id={`model-${agent.id}`}
                         value={agent.model.model}
                         onChange={(e) => updateModel(agent.id, { model: e.target.value })}
                       >
@@ -334,25 +348,26 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                       </select>
                     ) : (
                       <input
+                        id={`model-${agent.id}`}
                         value={agent.model.model}
                         onChange={(e) => updateModel(agent.id, { model: e.target.value })}
                         placeholder="run 'maestro llm models' to populate"
                       />
                     )}
                   </div>
-                  <div className="field">
-                    <label>Max steps</label>
+                  <label className="field">
+                    <span className="field-label">Max steps</span>
                     <input
                       type="number"
                       value={agent.model.maxSteps}
                       onChange={(e) => updateModel(agent.id, { maxSteps: Number(e.target.value) })}
                     />
-                  </div>
+                  </label>
                 </div>
 
                 <div className="grid2">
-                  <div className="field">
-                    <label>Cost cap (cents)</label>
+                  <label className="field">
+                    <span className="field-label">Cost cap (cents)</span>
                     <input
                       type="number"
                       value={agent.model.costCapCents}
@@ -360,9 +375,9 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                         updateModel(agent.id, { costCapCents: Number(e.target.value) })
                       }
                     />
-                  </div>
-                  <div className="field">
-                    <label>Temperature</label>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Temperature</span>
                     <input
                       type="number"
                       step="0.1"
@@ -374,19 +389,19 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                         })
                       }
                     />
-                  </div>
+                  </label>
                 </div>
 
-                <div className="field">
-                  <label>
+                <label className="field">
+                  <span className="field-label">
                     Persona — Maestro always wraps this in a fixed preamble and output contract,
                     which cannot be edited
-                  </label>
+                  </span>
                   <textarea
                     value={agent.persona}
                     onChange={(e) => updateAgent(agent.id, { persona: e.target.value })}
                   />
-                </div>
+                </label>
               </div>
             </>
           )}
@@ -397,17 +412,17 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
         <div className="panel-head">Environment</div>
         <div className="panel-body">
           <div className="grid3">
-            <div className="field">
-              <label>Image</label>
+            <label className="field">
+              <span className="field-label">Image</span>
               <input
                 value={doc.envSpec.image}
                 onChange={(e) =>
                   setDoc({ ...doc, envSpec: { ...doc.envSpec, image: e.target.value } })
                 }
               />
-            </div>
-            <div className="field">
-              <label>CPUs</label>
+            </label>
+            <label className="field">
+              <span className="field-label">CPUs</span>
               <input
                 type="number"
                 value={doc.envSpec.cpus}
@@ -415,20 +430,20 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   setDoc({ ...doc, envSpec: { ...doc.envSpec, cpus: Number(e.target.value) } })
                 }
               />
-            </div>
-            <div className="field">
-              <label>Memory</label>
+            </label>
+            <label className="field">
+              <span className="field-label">Memory</span>
               <input
                 value={doc.envSpec.memory}
                 onChange={(e) =>
                   setDoc({ ...doc, envSpec: { ...doc.envSpec, memory: e.target.value } })
                 }
               />
-            </div>
+            </label>
           </div>
           <div className="grid3">
-            <div className="field">
-              <label>Analyze timeout (s)</label>
+            <label className="field">
+              <span className="field-label">Analyze timeout (s)</span>
               <input
                 type="number"
                 value={doc.envSpec.timeouts.analyzeSec}
@@ -442,9 +457,9 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   })
                 }
               />
-            </div>
-            <div className="field">
-              <label>Egress allowlist (prepare only)</label>
+            </label>
+            <label className="field">
+              <span className="field-label">Egress allowlist (prepare only)</span>
               <input
                 value={doc.envSpec.egressAllowlist.join(", ")}
                 onChange={(e) =>
@@ -460,9 +475,9 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   })
                 }
               />
-            </div>
-            <div className="field">
-              <label>Min confidence to post</label>
+            </label>
+            <label className="field">
+              <span className="field-label">Min confidence to post</span>
               <input
                 type="number"
                 step="0.05"
@@ -474,7 +489,7 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   })
                 }
               />
-            </div>
+            </label>
           </div>
         </div>
       </div>
@@ -493,7 +508,9 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   {v.id === data.active?.id ? (
                     <span className="badge done">active</span>
                   ) : (
-                    <button onClick={() => api.activate(v.id).then(load)}>Roll back</button>
+                    <button type="button" onClick={() => api.activate(v.id).then(load)}>
+                      Roll back
+                    </button>
                   )}
                 </td>
               </tr>

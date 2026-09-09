@@ -69,8 +69,17 @@ export class Scheduler {
   /** Resolves with a release function once a slot is free. */
   acquire(req: SlotRequest): Promise<() => void> {
     return new Promise((resolve) => {
+      const before = this.running.size;
       this.waiters.push({ req, resolve, seq: this.seq++ });
       this.pump();
+      // Queueing is the interesting event: it is the difference between "the review is
+      // slow" and "the review is waiting", and only the scheduler can tell them apart.
+      if (this.waiters.some((w) => w.req === req)) {
+        logger.debug(
+          { ...req, running: before, waiting: this.waiters.length },
+          "agent task queued for a scheduler slot",
+        );
+      }
     });
   }
 

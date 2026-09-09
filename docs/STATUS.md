@@ -42,19 +42,23 @@ insecure neighbour, so it was not pattern-matching on "API route".
   the conformance suite against recorded fixtures only. All live testing used Ollama
   (`glm-5.3:cloud`). The shipped default playbook binds every agent to Anthropic, so a fresh
   install needs an `ANTHROPIC_API_KEY` before it will run.
-- **Only two of the four agents have run against a model.** `product` and `ui-ux` have tuned
-  personas but no live execution behind them.
+- **`ui-ux` has never run against a model.** `product`, `security` and `architecture` have all
+  executed live; the router correctly skips `ui-ux` on backend-only diffs, and no test review has
+  yet touched a file its path rules match.
 - **Nothing has ever been posted to a real pull request.** Every GitHub run was `--dry-run`. The
   posting path, comment updating, and reaction ingestion are unit-tested but not exercised against
   live GitHub.
 - **The webhook path has not received a real delivery.** Signature verification and event
   interpretation are unit-tested; no GitHub App has been created.
-- **The Compose deployment is unverified.** The proxy-host fix is reasoned and documented but has
-  not been run: it needs a Linux host with the socket mounted.
+- **The Compose deployment is unverified and labelled experimental in the file itself.** Sandboxes
+  are siblings on the host daemon, so they reach the egress proxy only if its port is both fixed
+  and published; that is now wired (`MAESTRO_PROXY_PORT_RANGE`, published on the bridge gateway) and
+  unit-tested, but running it needs a Linux host with the socket mounted and that has not happened.
 - **Release CI has not run.** `.github/workflows/release.yml` cross-compiles four targets; only the
   host target has actually been built.
-- **Load behaviour is untested at scale.** The scheduler's fairness and limits are unit-tested, but
-  the plan's "10 simultaneous PRs across 3 repos" scenario has not been run.
+- **Load behaviour is untested at scale.** The scheduler is now actually wired into the daemon and
+  its admission is asserted by engine tests, but the plan's "10 simultaneous PRs across 3 repos"
+  scenario has not been run against real Docker.
 
 ## Known limitations
 
@@ -113,7 +117,54 @@ These are recorded because each was invisible to the test suite that existed at 
     drops assistant/tool messages as a *pair* — removing a tool result alone orphans the call it
     answered and providers reject the request, which would have broken the very runs it rescues.
 
-Findings 11-16 were reported by **Maestro reviewing its own commits**. It also produced one
+17. **Triage posted one defect twice whenever two agents named it differently.** The dedupe key
+    included the finding's category, and agents invent their own slugs — the same dead ternary
+    shipped as `dead-conditional` and `no-op-ternary`, and the same CLI bug as
+    `cli-arg-validation` and `cli-argument-validation`. Comment duplication is the specific failure
+    this whole design exists to prevent, and it was in the shipped output. Grouping is now by
+    location alone; a merged-away description that told a different story is carried as
+    "also reported here" rather than discarded, so the fix cannot lose a second real defect.
+18. **`read_file` had no output cap**, inheriting a 512KB default from the container exec layer.
+    A few reads of a lockfile cost more tokens than the entire diff — this was the actual cause of
+    the context-window overflow, of which the trimming in 16 was only the safety net. Reads are now
+    capped at 300 lines and 32KB.
+19. **The context-window budget was unreachable from every production caller.** `maxPromptChars`
+    existed in the loop but `ReviewAgentRequest` could not structurally carry it, so every real run
+    used one hardcoded constant regardless of the model bound: half the window wasted on a large
+    model, and no protection at all on a small one. It is now sized from the model's own
+    `contextWindow`.
+20. **The trimmer spliced into the window it promised to protect.** The bound `length - 4` let a
+    two-message splice at `length - 5` reach into the live exchange.
+21. **The scheduler was constructed and never used.** `new Scheduler(...)` sat in the daemon with
+    no caller, so the per-agent, per-repo, per-provider and global limits were decoration and every
+    agent of every concurrent review started at once — the user-facing requirement that agents flow
+    to another PR while one is saturated was not actually implemented. The engine now takes an
+    admission hook, the daemon supplies the scheduler, and the slot is released in a `finally` so a
+    failing agent cannot drain the pool.
+22. **Lint had 21 pre-existing errors**, which CI runs as a required step — the release workflow
+    would have failed on its first run. Fixed rather than silenced: form labels are now associated
+    with their controls, buttons carry an explicit type, and a CSS rule that lost to a
+    higher-specificity hover was reordered.
+
+Findings 11-18 and 20 were reported by **Maestro reviewing its own commits**. It also produced one
 false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
 could not run Bun to check — both spellings are in fact valid), which is roughly the calibration
-you want.
+you want. Findings 19 and 20 are the sharpest evidence so far: it read a fix that had just been
+committed, traced the new config field through three packages, and found that nothing could set it.
+
+## Model choice per agent
+
+Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion
+stated twice, so triage's cross-agent agreement boost only means something when the agents differ.
+Current bindings, from live runs against Ollama Cloud:
+
+| Agent | Model | Observed |
+| --- | --- | --- |
+| security | `glm-5.3:cloud` | 18 tool calls, found the IDOR in `notabase` |
+| architecture | `glm-5.3:cloud` | 18 tool calls, found 19 and 20 above |
+| product | `gpt-oss:120b-cloud` | 4 tool calls, 0 findings — noticeably less thorough on the same diff |
+| ui-ux | `gpt-oss:20b-cloud` | never routed to yet |
+
+The `product` row is the honest one: the smaller model stops early and submits an empty list rather
+than digging. That is a model-quality difference, not a bug, and it is the kind of thing the eval
+harness exists to measure per playbook version.

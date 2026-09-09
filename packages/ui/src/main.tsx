@@ -73,6 +73,7 @@ function App() {
         <div className="tabs">
           {(["reviews", "studio", "providers"] as Tab[]).map((t) => (
             <button
+              type="button"
               key={t}
               className={`tab ${tab === t ? "active" : ""}`}
               onClick={() => setTab(t)}

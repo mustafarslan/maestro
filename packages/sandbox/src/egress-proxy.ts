@@ -139,8 +139,7 @@ export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy
   });
 
   const host = bindAddress();
-  await new Promise<void>((resolve) => server.listen(0, host, resolve));
-  const port = (server.address() as AddressInfo).port;
+  const port = await listenOnAvailablePort(server, host);
   logger.debug({ host, port, allowlist }, "egress proxy listening");
 
   return {
@@ -153,4 +152,55 @@ export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * Binds the proxy, honouring a fixed port range when one is configured.
+ *
+ * An ephemeral port is right for a local install, and wrong inside Compose: a port that
+ * is chosen at review time cannot have been published in the compose file, so sibling
+ * sandboxes dial the bridge gateway and find nothing listening. A RANGE rather than a
+ * single port because concurrent reviews each run their own proxy — one fixed port
+ * would serialise the thing the scheduler exists to parallelise.
+ */
+async function listenOnAvailablePort(server: Server, host: string): Promise<number> {
+  const candidates = portCandidates();
+  if (candidates.length === 0) {
+    await new Promise<void>((resolve) => server.listen(0, host, resolve));
+    return (server.address() as AddressInfo).port;
+  }
+
+  for (const candidate of candidates) {
+    const bound = await new Promise<boolean>((resolve) => {
+      const onError = () => resolve(false);
+      server.once("error", onError);
+      server.listen(candidate, host, () => {
+        server.removeListener("error", onError);
+        resolve(true);
+      });
+    });
+    if (bound) return candidate;
+  }
+
+  throw new Error(
+    `No free port in MAESTRO_PROXY_PORT_RANGE (${candidates[0]}-${candidates[candidates.length - 1]}). ` +
+      "Every port in the range is in use, which caps concurrent prepare phases — widen the range " +
+      "and publish the same range in docker-compose.yml.",
+  );
+}
+
+/** Parses MAESTRO_PROXY_PORT_RANGE ("7790-7799" or a single "7790"); empty means ephemeral. */
+function portCandidates(): number[] {
+  const raw = process.env.MAESTRO_PROXY_PORT_RANGE?.trim();
+  if (!raw) return [];
+  const match = /^(\d+)(?:-(\d+))?$/.exec(raw);
+  if (!match) {
+    throw new Error(`MAESTRO_PROXY_PORT_RANGE must be "PORT" or "START-END", got "${raw}"`);
+  }
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : start;
+  if (end < start || start < 1 || end > 65535) {
+    throw new Error(`MAESTRO_PROXY_PORT_RANGE "${raw}" is not a valid port range`);
+  }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
 }

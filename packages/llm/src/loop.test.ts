@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { ECHO_TOOL, SUBMIT_TOOL } from "./conformance.js";
-import { runAgent } from "./loop.js";
+import { runAgent, trimHistory } from "./loop.js";
 import { Provider } from "./provider.js";
 import { anthropicTransport, failingTransport, fakeConfig, flakyTransport } from "./testing.js";
-import { ProviderError } from "./types.js";
+import { type Message, ProviderError } from "./types.js";
 
 const base = {
   model: "claude-opus-5",
@@ -371,5 +371,54 @@ describe("context window guard", () => {
 
     // The original task must survive: without it the model loses what it was asked.
     expect(result.messages[0]).toMatchObject({ role: "user", content: "go" });
+  });
+});
+
+describe("trimHistory", () => {
+  const pair = (i: number, size: number): Message[] => [
+    { role: "assistant", content: "", toolCalls: [{ id: `${i}`, name: "read", input: {} }] },
+    { role: "tool", results: [{ callId: `${i}`, name: "read", output: "z".repeat(size) }] },
+  ];
+
+  const conversation = (pairs: number, size = 20_000): Message[] => [
+    { role: "user", content: "review this" },
+    ...Array.from({ length: pairs }, (_, i) => pair(i, size)).flat(),
+  ];
+
+  it("never splices into the last four messages it promises to protect", () => {
+    // The bound was `length - 4`, and splice(i, 2) at i = length-5 reached one message
+    // into the live exchange. The protected window silently became three, in exactly
+    // the long runs this code exists to rescue.
+    const messages = conversation(4);
+    const tail = messages.slice(-4);
+
+    trimHistory(messages, 1_000);
+
+    // Identity, not bytes: an over-long conversation also has its remaining tool output
+    // truncated, which legitimately rewrites these messages. What must not happen is
+    // one of them being removed.
+    expect(messages.slice(-4)).toEqual(tail);
+  });
+
+  it("keeps the task and drops whole assistant/tool pairs", () => {
+    // Dropping a tool result without its call orphans the call: providers reject the
+    // whole request with "tool result is missing".
+    const messages = conversation(6);
+    const dropped = trimHistory(messages, 50_000);
+
+    expect(dropped).toBeGreaterThan(0);
+    expect(dropped % 2).toBe(0);
+    expect(messages[0]).toMatchObject({ role: "user", content: "review this" });
+    for (const [i, m] of messages.entries()) {
+      if (m.role !== "tool") continue;
+      expect(messages[i - 1]).toMatchObject({ role: "assistant" });
+    }
+  });
+
+  it("leaves a conversation that already fits completely alone", () => {
+    const messages = conversation(3, 10);
+    const before = JSON.stringify(messages);
+    expect(trimHistory(messages, 1_000_000)).toBe(0);
+    expect(JSON.stringify(messages)).toBe(before);
   });
 });

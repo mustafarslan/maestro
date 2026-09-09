@@ -194,10 +194,15 @@ export function Reviews({ reviews }: { reviews: ReviewRow[] }) {
               {detail.review.title ?? detail.review.id}
               <span className={`badge ${detail.review.state}`}>{detail.review.state}</span>
               <div className="spacer" />
-              <button className={tab === "trace" ? "primary" : ""} onClick={() => setTab("trace")}>
+              <button
+                type="button"
+                className={tab === "trace" ? "primary" : ""}
+                onClick={() => setTab("trace")}
+              >
                 Trace
               </button>
               <button
+                type="button"
                 className={tab === "findings" ? "primary" : ""}
                 onClick={() => setTab("findings")}
               >

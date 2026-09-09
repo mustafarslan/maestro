@@ -121,7 +121,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const result = await reviewPullRequest({
         client,
         db,
-        deps: { driver, registry: await providers.buildRegistry(), spans: new SpanRecorder(db) },
+        deps: {
+          driver,
+          registry: await providers.buildRegistry(),
+          spans: new SpanRecorder(db),
+          // Admission control across every concurrent review. Without this the daemon
+          // starts every agent of every review at once and the per-agent, per-repo and
+          // per-provider limits are decoration.
+          acquireSlot: (slot) => scheduler.acquire(slot),
+        },
         playbook: record.doc,
         playbookVersionId: record.id,
         pr,
