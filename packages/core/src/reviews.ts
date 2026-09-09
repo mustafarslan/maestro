@@ -118,6 +118,25 @@ export class ReviewStore {
   }
 }
 
+/**
+ * Every state a review can be in.
+ *
+ * Exported so nothing has to restate it. The UI missed two of these — `triaging` and
+ * `cancelled` rendered with no colour at all, so a cancelled review looked like neither
+ * finished nor failed, which is the state it most needs to be distinguishable in.
+ */
+export const REVIEW_STATES = [
+  "queued",
+  "preparing",
+  "analyzing",
+  "triaging",
+  "posting",
+  "done",
+  "failed",
+  "cancelled",
+  "superseded",
+] as const;
+
 /** States in which a review is being worked on by somebody. */
 export const IN_FLIGHT_STATES = [
   "queued",

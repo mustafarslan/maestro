@@ -204,6 +204,7 @@ tr.clickable:hover td {
 .badge.running,
 .badge.analyzing,
 .badge.preparing,
+.badge.triaging,
 .badge.posting,
 .badge.medium {
   color: var(--warn);
@@ -212,6 +213,7 @@ tr.clickable:hover td {
 .badge.queued,
 .badge.skipped,
 .badge.superseded,
+.badge.cancelled,
 .badge.low,
 .badge.info {
   color: var(--muted);

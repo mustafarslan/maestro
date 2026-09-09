@@ -553,6 +553,13 @@ These are recorded because each was invisible to the test suite that existed at 
     read "running" — the same "fixed the level I was looking at" mistake this session has made
     three times.
 
+72. **Two review states had no colour in the admin UI.** The schema allows nine; the stylesheet
+    coloured seven. `triaging` and `cancelled` fell through to the bare `.badge` rule, so a
+    cancelled review looked like neither finished nor failed — the state it most needs to be
+    distinguishable in, and one the daemon now produces more of since it cancels reviews on a
+    closed pull request. The states are a single exported list now, and a test asserts every one
+    has a rule and that a cancelled review is not coloured like a running one.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
