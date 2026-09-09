@@ -199,7 +199,19 @@ export class GitHubClient {
       });
       if (!("content" in data)) return null;
       return Buffer.from(data.content, "base64").toString("utf8");
-    } catch {
+    } catch (err) {
+      // 404 is the normal case — most repositories have no `.maestro.yaml`, and that is
+      // not worth a log line. Anything else is a call that failed, and returning null for
+      // it makes a broken request indistinguishable from an absent file: the repository's
+      // own configuration silently stops applying and nothing says so. Found by calling
+      // this with the wrong arguments during a live check and watching it report
+      // "absent" for a request to `/repos///contents/maestro`.
+      if ((err as { status?: number }).status !== 404) {
+        logger.warn(
+          { owner: pr.owner, repo: pr.repo, ref: pr.baseRef, path, err },
+          "could not read the base branch config; continuing without it",
+        );
+      }
       return null;
     }
   }
@@ -238,9 +250,12 @@ export class GitHubClient {
         return null;
       }
       return files.map((f) => f.filename);
-    } catch {
+    } catch (err) {
       // Unknown rather than empty: an empty list would read as "nothing was addressed"
       // and silently settle nothing, which is the safer failure but a different claim.
+      // Logged, because unlike a missing config file there is no ordinary reason for a
+      // compare between two commits of the same repository to fail.
+      logger.warn({ pr: pr.number, base, head, err }, "could not compare commits");
       return null;
     }
   }
