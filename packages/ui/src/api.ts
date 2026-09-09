@@ -38,6 +38,7 @@ export const api = {
   providers: () => request<ProvidersResponse>("/api/providers"),
   stats: () => request<StatsResponse>("/api/stats"),
   feedback: () => request<FeedbackResponse>("/api/findings/feedback"),
+  environments: () => request<{ environments: EnvironmentRow[] }>("/api/environments"),
 };
 
 export interface Issue {
@@ -218,4 +219,22 @@ export interface FeedbackResponse {
     open: number;
     acceptanceRate?: number;
   }[];
+}
+
+/** One container a review started. Kept after teardown, so a leak has a history. */
+export interface EnvironmentRow {
+  id: string;
+  review_id: string;
+  kind: string;
+  agent_id: string | null;
+  container_id: string | null;
+  image_id: string | null;
+  state: string;
+  lease_until: string | null;
+  ttl_at: string;
+  created_at: string;
+  destroyed_at: string | null;
+  repo: string;
+  pr_number: number;
+  review_state: string;
 }

@@ -266,3 +266,51 @@ describe("request body limits", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("the environments endpoint the operator view reads", () => {
+  const seedEnv = (id: string, state: string, over: Record<string, unknown> = {}) => {
+    const reviewId = db.prepare("SELECT id FROM reviews LIMIT 1").get<{ id: string }>()?.id;
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO environments (id, review_id, kind, agent_id, container_id, workdir, state,
+                                 spec_json, lease_until, ttl_at, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      id,
+      reviewId,
+      (over.kind as string) ?? "analyze",
+      (over.agent_id as string) ?? "security",
+      `container-${id}`,
+      "/w",
+      state,
+      "{}",
+      now,
+      now,
+      now,
+    );
+  };
+
+  it("joins each environment to the pull request it belongs to", async () => {
+    // A stray container is a number until you know whose it is. `maestro doctor` counts
+    // them; this is what makes one actionable.
+    seedEnv("e1", "running");
+    const res = await fetch(`${base}/api/environments`, { headers: auth });
+    const body = (await res.json()) as { environments: { repo: string; pr_number: number }[] };
+    expect(body.environments[0]).toMatchObject({ repo: "acme/web", pr_number: 7 });
+  });
+
+  it("puts leaked and running environments above finished ones", async () => {
+    // Anybody opening this page is looking for what is still holding disk.
+    seedEnv("e-done", "destroyed");
+    seedEnv("e-live", "running");
+    seedEnv("e-leak", "leaked");
+    const res = await fetch(`${base}/api/environments`, { headers: auth });
+    const body = (await res.json()) as { environments: { id: string }[] };
+    expect(body.environments.map((e) => e.id)).toEqual(["e-leak", "e-live", "e-done"]);
+  });
+
+  it("needs the token like everything else", async () => {
+    const res = await fetch(`${base}/api/environments`);
+    expect(res.status).toBe(401);
+  });
+});

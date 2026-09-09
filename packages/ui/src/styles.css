@@ -416,3 +416,17 @@ button:disabled {
 .node-box.disabled {
   opacity: 0.45;
 }
+
+/* A warning that belongs to a panel rather than to a row: leaked environments, and
+   anything else where the table is still worth reading but needs a sentence first. */
+.notice {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+}
+.notice code {
+  font-family: ui-monospace, monospace;
+}

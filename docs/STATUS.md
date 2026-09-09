@@ -852,6 +852,18 @@ These are recorded because each was invisible to the test suite that existed at 
     which was declared for this and never set by anything, is gone: the refusal happens in the
     tool, before the sandbox is reached, so the flag belonged on the log entry.
 
+### Phase 8: the environments view
+
+The observability phase names an environments page — running containers, TTLs, what the reaper
+left behind — and it was the one page that did not exist. `maestro doctor` counts strays, which
+tells an operator that something leaked but not what. `/api/environments` joins each row to its
+pull request and puts leaked and running ones first, and the UI shows the lease with an explicit
+"expired 4m ago" on anything still marked live — which is exactly what the reaper looks for. Rows
+are kept after teardown, so a leak has a history rather than only a present.
+
+Container and image leaks are a named risk of this design: every review starts several containers
+and commits a snapshot image, and a crash between prepare and teardown leaves them behind.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

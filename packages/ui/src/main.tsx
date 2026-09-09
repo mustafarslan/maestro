@@ -1,13 +1,14 @@
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, type ProvidersResponse, type ReviewRow, type StatsResponse, TOKEN } from "./api";
+import { Environments } from "./Environments";
 import { Providers } from "./Providers";
 import { Quality } from "./Quality";
 import { Reviews } from "./Reviews";
 import { Studio } from "./Studio";
 import "./styles.css";
 
-type Tab = "reviews" | "studio" | "providers" | "quality";
+type Tab = "reviews" | "studio" | "providers" | "environments" | "quality";
 
 function App() {
   const [tab, setTab] = useState<Tab>("reviews");
@@ -72,7 +73,7 @@ function App() {
       <div className="topbar">
         <div className="brand">Maestro</div>
         <div className="tabs">
-          {(["reviews", "studio", "providers", "quality"] as Tab[]).map((t) => (
+          {(["reviews", "studio", "providers", "environments", "quality"] as Tab[]).map((t) => (
             <button
               type="button"
               key={t}
@@ -94,6 +95,7 @@ function App() {
         {tab === "reviews" ? <Reviews reviews={reviews} /> : null}
         {tab === "studio" ? <Studio providers={providers} /> : null}
         {tab === "providers" ? <Providers providers={providers} stats={stats} /> : null}
+        {tab === "environments" ? <Environments /> : null}
         {tab === "quality" ? <Quality /> : null}
       </div>
     </div>

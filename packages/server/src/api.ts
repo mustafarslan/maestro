@@ -136,6 +136,31 @@ const routes: Route[] = [
     }),
   },
   {
+    // The environments view the plan's observability phase names: what is running now,
+    // when its lease expires, and what the reaper has left behind. Container leaks are a
+    // listed risk and `maestro doctor` only counts strays — this says which review each
+    // one belongs to, which is what makes a leak actionable rather than a number.
+    method: "GET",
+    pattern: /^\/api\/environments$/,
+    handler: async (ctx) => ({
+      environments: ctx.db
+        .prepare(
+          `SELECT e.id, e.review_id, e.kind, e.agent_id, e.container_id, e.image_id, e.workdir,
+                  e.state, e.lease_until, e.ttl_at, e.created_at, e.destroyed_at,
+                  repos.owner || '/' || repos.name AS repo, r.pr_number, r.state AS review_state
+             FROM environments e
+             JOIN reviews r ON r.id = e.review_id
+             JOIN repos ON repos.id = r.repo_id
+            ORDER BY
+              -- Live and leaked first: those are the rows anybody opens this page for.
+              CASE e.state WHEN 'leaked' THEN 0 WHEN 'running' THEN 1 ELSE 2 END,
+              e.created_at DESC
+            LIMIT 200`,
+        )
+        .all(),
+    }),
+  },
+  {
     method: "GET",
     pattern: /^\/api\/stats$/,
     handler: async (ctx) => {
