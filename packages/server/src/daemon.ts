@@ -31,7 +31,14 @@ import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { type RunningAdmin, startAdminServer } from "./admin.js";
+import { collectBody } from "./api.js";
 import { DEFAULT_LIMITS, Scheduler, type SchedulerLimits } from "./scheduler.js";
+
+/**
+ * The receiver's own ceiling on what it will buffer from a caller whose signature has not
+ * been checked yet. GitHub caps a delivery payload at 25MB.
+ */
+const WEBHOOK_MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 export interface DaemonOptions {
   db: SqlDatabase;
@@ -419,46 +426,46 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let webhookServer: Server | undefined;
   let webhookPort: number | undefined;
   if (opts.webhookPort !== undefined) {
-    webhookServer = createServer((req, res) => {
+    webhookServer = createServer(async (req, res) => {
       if (req.method !== "POST") {
         res.writeHead(405).end();
         return;
       }
-      let raw = "";
-      let tooLarge = false;
-      req.on("data", (c) => {
-        if (tooLarge) return;
-        raw += c;
-        // Refuse to buffer an unbounded body from an unverified caller. Answer before
-        // destroying: dropping the connection silently looks like a network fault to
-        // whoever is debugging their delivery.
-        if (raw.length > 8 * 1024 * 1024) {
-          tooLarge = true;
-          raw = "";
-          res.writeHead(413).end("payload too large");
-          req.destroy();
-        }
-      });
-      req.on("end", async () => {
-        if (tooLarge) return;
-        // Unconditional: the listener cannot start without a secret, so there is no
-        // branch here in which verification is skipped.
-        const signature = req.headers["x-hub-signature-256"] as string | undefined;
-        const ok = await verifySignature(opts.webhookSecret ?? "", raw, signature);
-        if (!ok) {
-          logger.warn({ ip: req.socket.remoteAddress }, "rejected webhook: bad signature");
-          res.writeHead(401).end("invalid signature");
-          return;
-        }
-        try {
-          const event = (req.headers["x-github-event"] as string) ?? "";
-          enqueueTrigger(interpretEvent(event, JSON.parse(raw)));
-          res.writeHead(202).end("accepted");
-        } catch (err) {
-          logger.error({ err }, "webhook handling failed");
-          res.writeHead(400).end("bad payload");
-        }
-      });
+      // Bytes, decoded once. Appending each chunk to a string decodes it on its own, so
+      // a character whose UTF-8 bytes straddle a chunk boundary became two replacement
+      // characters — and the reconstructed body then no longer matched what GitHub
+      // signed. A real delivery about a pull request whose title contains an emoji was
+      // rejected as forged, intermittently, depending on where TCP split it.
+      //
+      // Refuse to buffer an unbounded body from an unverified caller. Answer before
+      // destroying: dropping the connection silently looks like a network fault to
+      // whoever is debugging their delivery.
+      let raw: string;
+      try {
+        raw = await collectBody(req, WEBHOOK_MAX_BODY_BYTES, () =>
+          res.writeHead(413).end("payload too large"),
+        );
+      } catch {
+        return;
+      }
+
+      // Unconditional: the listener cannot start without a secret, so there is no
+      // branch here in which verification is skipped.
+      const signature = req.headers["x-hub-signature-256"] as string | undefined;
+      const ok = await verifySignature(opts.webhookSecret ?? "", raw, signature);
+      if (!ok) {
+        logger.warn({ ip: req.socket.remoteAddress }, "rejected webhook: bad signature");
+        res.writeHead(401).end("invalid signature");
+        return;
+      }
+      try {
+        const event = (req.headers["x-github-event"] as string) ?? "";
+        enqueueTrigger(interpretEvent(event, JSON.parse(raw)));
+        res.writeHead(202).end("accepted");
+      } catch (err) {
+        logger.error({ err }, "webhook handling failed");
+        res.writeHead(400).end("bad payload");
+      }
     });
     await new Promise<void>((r) => webhookServer?.listen(opts.webhookPort, "0.0.0.0", r));
     webhookPort = (webhookServer.address() as AddressInfo).port;

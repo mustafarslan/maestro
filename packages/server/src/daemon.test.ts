@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
@@ -344,4 +345,78 @@ describe("the poller survives what it cannot control", () => {
     expect(source).not.toMatch(/setInterval\(\(\) => void tick\(\)/);
     expect(source).toMatch(/tick\(\)\.catch\(/);
   });
+});
+
+describe("a delivery whose body arrives in pieces", () => {
+  let db: SqlDatabase;
+  let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  const secret = "s3cret";
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    new PlaybookStore(db).publish(defaultPlaybook(), { activate: true });
+    running = await startDaemon({
+      db,
+      webhookPort: 0,
+      webhookSecret: secret,
+      concurrentReviews: 0,
+    });
+  });
+  afterEach(async () => {
+    await running?.stop();
+    running = undefined;
+  });
+
+  /**
+   * Writes the request in two pieces, splitting the body inside a character.
+   *
+   * `fetch` will not do this, and it is the only shape that shows the defect: the
+   * receiver appended each chunk to a string, which decodes each chunk on its own, so a
+   * character whose UTF-8 bytes straddle the boundary became two replacement characters.
+   * The reconstructed body then no longer matched what GitHub signed, and a genuine
+   * delivery was rejected as forged — intermittently, depending on where TCP split it.
+   */
+  const deliverSplit = (port: number, body: string, splitAtByte: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const buf = Buffer.from(body, "utf8");
+      const signature = createHmac("sha256", secret).update(buf).digest("hex");
+      const socket = connect(port, "127.0.0.1", () => {
+        socket.write(
+          [
+            "POST / HTTP/1.1",
+            "Host: 127.0.0.1",
+            "content-type: application/json",
+            "x-github-event: pull_request",
+            `x-hub-signature-256: sha256=${signature}`,
+            `content-length: ${buf.length}`,
+            "connection: close",
+            "",
+            "",
+          ].join("\r\n"),
+        );
+        socket.write(buf.subarray(0, splitAtByte));
+        // A second event-loop turn, so the receiver sees two 'data' events.
+        setTimeout(() => socket.write(buf.subarray(splitAtByte)), 10);
+      });
+      let response = "";
+      socket.on("data", (d) => {
+        response += d.toString("latin1");
+      });
+      socket.on("error", reject);
+      socket.on("close", () => resolve(Number(response.split(" ")[1] ?? 0)));
+    });
+
+  it("accepts a signature over a body split inside a multi-byte character", async () => {
+    const body = JSON.stringify({
+      action: "opened",
+      repository: { name: "maestro", owner: { login: "acme" } },
+      // The rocket is four bytes, and a pull request title with an emoji is ordinary.
+      pull_request: { number: 7, title: "fix 🚀 the thing", head: { sha: "abc123" } },
+    });
+    const buf = Buffer.from(body, "utf8");
+    const split = buf.indexOf(Buffer.from("🚀", "utf8")) + 2;
+    expect(split).toBeGreaterThan(2);
+
+    expect(await deliverSplit(running?.webhookPort as number, body, split)).toBe(202);
+  }, 15_000);
 });

@@ -331,7 +331,7 @@ export async function handleApi(
     if (req.method === "POST") {
       let raw: string;
       try {
-        raw = await readBody(req);
+        raw = await collectBody(req, MAX_BODY_BYTES);
       } catch (err) {
         // An oversized body is the client's error, not ours; answering 500 sends someone
         // looking for a server fault that is not there.
@@ -375,28 +375,52 @@ export class BodyTooLargeError extends Error {
   }
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+/**
+ * Reads a request body without corrupting it.
+ *
+ * The chunks are kept as bytes and decoded once at the end. Appending each chunk to a
+ * string decodes it on its own, and a character whose UTF-8 bytes straddle a chunk
+ * boundary is decoded as two replacement characters — so an emoji in a persona, or an
+ * accent in a repository name, arrived mangled and was stored that way. On the webhook
+ * listener the same line was worse: the reconstructed body no longer matched what GitHub
+ * signed, so a real delivery was rejected as forged, intermittently, depending on where
+ * TCP happened to split it.
+ *
+ * `.length` on a string is UTF-16 code units, which is also not the byte cap it was
+ * written to be. Both problems have the same cause and the same fix.
+ *
+ * `onTooLarge` runs before the socket is destroyed, so a caller that wants to answer the
+ * client can — writing after `destroy()` goes nowhere.
+ */
+export function collectBody(
+  req: IncomingMessage,
+  maxBytes: number,
+  onTooLarge?: () => void,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    let raw = "";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
     let settled = false;
-    req.on("data", (c) => {
+    req.on("data", (c: Buffer) => {
       if (settled) return;
-      raw += c;
-      if (raw.length > MAX_BODY_BYTES) {
+      bytes += c.length;
+      if (bytes > maxBytes) {
         settled = true;
         // Rejecting alone does not stop the stream: the data listener keeps firing and
-        // the string keeps growing for as long as the client keeps sending, so the limit
-        // bounds nothing. Destroying the request is what actually stops it — the webhook
-        // receiver already did this; the admin API had the same code without the destroy.
-        raw = "";
+        // the buffer keeps growing for as long as the client keeps sending, so the limit
+        // bounds nothing. Destroying the request is what actually stops it.
+        chunks.length = 0;
+        onTooLarge?.();
         req.destroy();
         reject(new BodyTooLargeError());
+        return;
       }
+      chunks.push(c);
     });
     req.on("end", () => {
       if (!settled) {
         settled = true;
-        resolve(raw);
+        resolve(Buffer.concat(chunks).toString("utf8"));
       }
     });
     req.on("error", (err) => {

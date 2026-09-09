@@ -2153,6 +2153,28 @@ the server never sends fails it, and removing `live` from the server's response 
     repository, runs the real checkout, and asserts on the diff an agent would actually
     read. Mutation-checked by removing the deepening.
 
+173. **A pull request with an emoji in its title could be rejected as forged.** Both HTTP
+    body readers did `raw += chunk`. A Buffer appended to a string is decoded on its own,
+    so a character whose UTF-8 bytes straddle a chunk boundary becomes two replacement
+    characters. Proved in isolation first: splitting `fix 🚀 the thing` two bytes into the
+    rocket produced `fix ��� the thing`, and the HMACs of the two strings differ.
+
+    On the webhook listener that means the reconstructed body no longer matches what
+    GitHub signed, so a genuine delivery is answered `401 invalid signature` — the review
+    never happens, and the only trace is a log line saying somebody sent a bad signature.
+    Intermittent, because it depends on where TCP split the payload, which is the worst
+    way for this to fail: it looks like a misconfigured secret.
+
+    On the admin API the same line silently mangled what a person typed — an emoji in a
+    persona, an accent in a name — and stored it that way.
+
+    Both now keep bytes and decode once. `raw.length` was also counting UTF-16 code units
+    against a byte cap; same cause, same fix.
+
+    The test writes the request over a raw socket in two pieces, splitting inside the
+    character, because `fetch` will not produce that shape and it is the only shape that
+    shows it. Mutation-checked by restoring the per-chunk decode.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
