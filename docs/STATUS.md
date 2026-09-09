@@ -453,6 +453,15 @@ These are recorded because each was invisible to the test suite that existed at 
     containment — one boundary, injected text before it — rather than presence, and all three
     fail against the old implementation.
 
+63. **A review outliving its lease was re-claimed while still running.** The daemon claims a job
+    for fifteen minutes, and `JobQueue.heartbeat` exists to extend that — nothing ever called it.
+    Reviews routinely approach the lease; a single agent was observed running 900 seconds in this
+    project's own logs. Past the deadline a second worker claims the same job, which increments
+    `attempts` each time, so a long review that is succeeding is eventually marked failed after
+    five re-claims. The idempotency key on `(repo, pr, head_sha)` bounded the damage — the second
+    review skips rather than posting twice — but the job accounting was still wrong. The worker
+    now renews at a third of the lease and clears the timer in a `finally`.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

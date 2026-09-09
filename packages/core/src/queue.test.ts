@@ -102,3 +102,44 @@ describe("JobQueue", () => {
     expect(q.claim()).toBeNull();
   });
 });
+
+describe("leases on work that outlives them", () => {
+  it("lets another worker claim a job whose lease expired", async () => {
+    // This is the crash-recovery behaviour and it must keep working: a worker that dies
+    // holds its job only until the lease runs out.
+    const a = new JobQueue(db, "worker-a");
+    const b = new JobQueue(db, "worker-b");
+    a.enqueue({ kind: "review-pr", payload: { n: 1 } });
+
+    const first = a.claim(-1); // already expired
+    expect(first).toBeTruthy();
+    expect(b.claim(60_000)).toBeTruthy();
+  });
+
+  it("keeps a job claimed while its holder renews", async () => {
+    // Reviews routinely approach the lease. Without renewal a long one is re-claimed,
+    // burns an attempt each time, and is eventually marked failed while still
+    // succeeding. `heartbeat` existed for this and the daemon never called it.
+    const a = new JobQueue(db, "worker-a");
+    const b = new JobQueue(db, "worker-b");
+    a.enqueue({ kind: "review-pr", payload: { n: 1 } });
+
+    const job = a.claim(-1);
+    expect(job).toBeTruthy();
+    a.heartbeat(job!.id, 60_000);
+
+    expect(b.claim(60_000), "a renewed job was stolen").toBeNull();
+  });
+
+  it("refuses to renew a job held by someone else", async () => {
+    // Otherwise a worker could hold open a job it does not own, defeating recovery.
+    const a = new JobQueue(db, "worker-a");
+    const b = new JobQueue(db, "worker-b");
+    a.enqueue({ kind: "review-pr", payload: { n: 1 } });
+
+    const job = a.claim(-1);
+    b.heartbeat(job!.id, 60_000);
+    // Still claimable, because b's renewal did not apply to a's job.
+    expect(b.claim(60_000)).toBeTruthy();
+  });
+});

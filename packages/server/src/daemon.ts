@@ -50,6 +50,9 @@ export interface RunningDaemon {
  * nothing else; the admin API and UI bind to loopback behind a token. Serving both from
  * one port would expose the admin surface wherever webhooks are reachable.
  */
+/** How long a claimed job stays claimed without renewal. Renewed at a third of this. */
+const LEASE_MS = 15 * 60_000;
+
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Validated before ANY resource exists. Throwing later — as the missing-secret check
   // first did — leaves the worker pool, the timers and the admin server running with no
@@ -175,11 +178,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     workers.push(
       (async () => {
         while (!stopping) {
-          const job = queue.claim(15 * 60_000, ["review-pr"]);
+          const job = queue.claim(LEASE_MS, ["review-pr"]);
           if (!job) {
             await sleep(1000);
             continue;
           }
+          // The lease is a deadline, not a reservation: once it passes another worker may
+          // claim the same job even though this one is still working. Reviews routinely
+          // approach the lease — a single agent has been observed running 900 seconds —
+          // so without renewal a long review is re-claimed, burns an attempt each time,
+          // and is eventually marked failed while it is still succeeding. `heartbeat`
+          // existed for this and nothing called it.
+          const renew = setInterval(() => {
+            try {
+              queue.heartbeat(job.id, LEASE_MS);
+            } catch (err) {
+              // A failed renewal is not worth killing the review over; the worst case is
+              // the re-claim this exists to avoid, and the idempotency key still holds.
+              logger.warn({ jobId: job.id, err }, "lease renewal failed");
+            }
+          }, LEASE_MS / 3);
+
           try {
             notify("review", { started: job.id });
             await runOne(job.payload as PullRequestRef);
@@ -188,6 +207,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             const message = err instanceof Error ? err.message : String(err);
             logger.error({ jobId: job.id, err: message }, "review job failed");
             queue.fail(job.id, message);
+          } finally {
+            clearInterval(renew);
           }
         }
       })(),
