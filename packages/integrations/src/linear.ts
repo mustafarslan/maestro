@@ -121,6 +121,22 @@ export function extractAcceptanceCriteria(description?: string): string | undefi
   return section || undefined;
 }
 
+/**
+ * The one query Maestro sends Linear.
+ *
+ * Exported so `scripts/live-linear-check.mjs` can post it to the real endpoint and check
+ * it still validates. Linear runs schema validation *before* authentication — a bogus
+ * field comes back `GRAPHQL_VALIDATION_FAILED` while a well-formed query comes back
+ * "Authentication required" — so the shape can be verified with no API key at all. That
+ * turns "unverified against the real endpoint" into something CI could run.
+ *
+ * `issue(id:)` takes the human-readable identifier (`ENG-123`) as well as a UUID, which is
+ * why no separate lookup is needed.
+ */
+export const ISSUE_QUERY = `query Issue($id: String!) {
+  issue(id: $id) { identifier title description url state { name } }
+}`;
+
 export class LinearClient {
   constructor(
     private readonly apiKey: string,
@@ -136,9 +152,7 @@ export class LinearClient {
   }
 
   async getIssue(identifier: string): Promise<LinearIssue | undefined> {
-    const query = `query Issue($id: String!) {
-      issue(id: $id) { identifier title description url state { name } }
-    }`;
+    const query = ISSUE_QUERY;
 
     const res = await this.fetchImpl(this.endpoint, {
       method: "POST",

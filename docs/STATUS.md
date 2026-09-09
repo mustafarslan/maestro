@@ -87,9 +87,16 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## Not yet verified
 
-- **Linear has never been called against a real workspace.** Key extraction, criteria parsing
-  and every degradation path are unit-tested against a fake transport, but no live API key has
-  been used, so the GraphQL query shape is unverified against the real endpoint.
+- **Linear has never been called against a real workspace**, but the query shape is no longer
+  unverified. Linear runs GraphQL schema validation *before* authentication — a bogus field comes
+  back `GRAPHQL_VALIDATION_FAILED` while a well-formed query gets as far as "Authentication
+  required" — so `scripts/live-linear-check.mjs` validates Maestro's one query against the live
+  schema with no API key, and runs a control first so that "no validation error" cannot be
+  confused with "validation never ran". Every field it selects exists on `Issue`, and
+  `issue(id:)` accepts the human-readable `ENG-123` form, which is why no separate lookup is
+  needed. What remains unverified is what only a real workspace can answer: whether key
+  extraction picks the right issue out of real branch names, and whether real descriptions parse
+  into acceptance criteria.
 - **The Anthropic and Google adapters have never made a live call.** They speak their own
   protocols and have no local stand-in, so this needs a key for one of those services. The
   `openai` adapter is no longer in that set: it passes the conformance suite against Ollama's
@@ -1098,6 +1105,20 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     `comment.body`, `comment.author_association` (`"OWNER"`, confirming the exact casing of the
     trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
     matched. `issue.pull_request` was the one that did not.
+
+### Two external contracts, verified without credentials
+
+The last few findings all came from the same move: comparing an assumption against the thing it
+is an assumption about, rather than reading the code again. Both of these were on the "needs a
+live run" list, and neither needed one.
+
+- **GitHub's webhook payloads.** Every field the parser reads, checked against real API objects.
+  Found 123 — and, before it, that GitHub delivers no `reaction` event at all (122).
+- **Linear's GraphQL schema.** Linear validates before it authenticates, so the query shape is
+  checkable with no key. `scripts/live-linear-check.mjs` does it, control first.
+
+Both are scripts rather than tests, because both reach the network; both are cheap enough to run
+before a release, and either would catch the other side changing under us.
 
 ### Found by mechanical sweep, still open
 
