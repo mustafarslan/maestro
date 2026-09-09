@@ -116,6 +116,10 @@ describe("trigger_review", () => {
 
     const row = db.prepare("SELECT kind, state FROM jobs WHERE id=?").get(res.jobId);
     expect(row).toMatchObject({ kind: "review-pr", state: "queued" });
+
+    // No daemon in this test, so nothing holds a lease. A COUNT(*) based check would
+    // have reported a live worker regardless, which is a fabricated signal.
+    expect(res.workersActive).toBe(false);
   });
 
   it("collapses a second trigger for the same PR instead of racing the webhook", async () => {

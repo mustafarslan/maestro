@@ -333,12 +333,12 @@ export function buildServer(deps: McpDeps): McpServer {
         dedupeKey: `${pr.owner}/${pr.repo}#${pr.number}@latest`,
       });
 
-      const daemonRunning =
-        (
-          db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE state='running'").get() as
-            | { n: number }
-            | undefined
-        )?.n !== undefined;
+      // A lease in the future means a worker is alive and claiming work. The COUNT(*)
+      // form this replaces always returns a row, so the boolean was always true — a
+      // fabricated signal, the same defect as printing 0.00 cost for an unpriced provider.
+      const leased = db
+        .prepare("SELECT COUNT(*) AS n FROM jobs WHERE locked_until > ?")
+        .get(new Date().toISOString()) as { n: number } | undefined;
 
       return text({
         ok: true,
@@ -348,7 +348,8 @@ export function buildServer(deps: McpDeps): McpServer {
         note: jobId
           ? "queued; `maestro serve` must be running to pick it up"
           : "already queued for this pull request",
-        daemonRunning,
+        // Evidence of a live worker, not proof of one: an idle daemon holds no lease.
+        workersActive: (leased?.n ?? 0) > 0,
       });
     },
   );
