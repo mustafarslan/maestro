@@ -303,3 +303,27 @@ describe("the plan's load scenario: 10 pull requests across 3 repos", () => {
     expect(admissionOrder.indexOf("rv-9")).toBeLessThan(30);
   });
 });
+
+describe("bookkeeping", () => {
+  it("forgets a review once it has no running or waiting work", async () => {
+    // One entry per review, kept forever, is a slow leak in a daemon meant to run for
+    // months. Fairness only needs reviews that are still competing for slots.
+    const scheduler = new Scheduler({ global: 2, perAgent: 2, perRepo: 2, perProvider: 2 });
+    const releases = await Promise.all(
+      ["a", "b"].map((id) =>
+        scheduler.acquire({
+          reviewId: `rv-${id}`,
+          agentId: "security",
+          repoId: "r",
+          providerId: "p",
+        }),
+      ),
+    );
+    for (const release of releases) release();
+
+    expect(scheduler.stats()).toMatchObject({ running: 0, waiting: 0 });
+    // Fairness must still work afterwards: a fresh review is not disadvantaged by a
+    // tally left over from a finished one.
+    expect(scheduler.trackedReviews()).toBe(0);
+  });
+});

@@ -55,6 +55,11 @@ export class Scheduler {
 
   constructor(private readonly limits: SchedulerLimits = DEFAULT_LIMITS) {}
 
+  /** Reviews still holding a fairness tally. Exposed so a leak is testable. */
+  trackedReviews(): number {
+    return this.admissions.size;
+  }
+
   stats(): { running: number; waiting: number; byAgent: Record<string, number> } {
     const byAgent: Record<string, number> = {};
     for (const r of this.running.values()) byAgent[r.agentId] = (byAgent[r.agentId] ?? 0) + 1;
@@ -146,6 +151,15 @@ export class Scheduler {
         if (released) return;
         released = true;
         this.running.delete(key);
+        // A review with nothing running and nothing waiting is finished, so its tally is
+        // dead weight. Without this the map grows by one entry per review for the life of
+        // the daemon, which for a long-running install is a slow leak of exactly the kind
+        // this codebase keeps finding.
+        const id = chosen.req.reviewId;
+        const stillBusy =
+          this.waiters.some((w) => w.req.reviewId === id) ||
+          [...this.running.values()].some((r) => r.reviewId === id);
+        if (!stillBusy) this.admissions.delete(id);
         this.pump();
       });
       progressed = true;

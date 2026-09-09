@@ -22,7 +22,7 @@ the README so the claims in that file stay short and true.
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
 | **Live posting to a real PR** | Reviewed `mustafarslan/maestro#1` for real and posted comment `5598039765`, fetched back from the API to confirm content. Three agent containers observed running with `net=none`; zero strays after teardown |
 | **Live review quality** | That review found two genuine defects in the PR's own diff — a missing subprocess timeout that would hang `doctor` on a wedged daemon, and a disk check scoped daemon-wide when it was added to expose Maestro's own leaked layers. Both fixed in the PR |
-| Scheduler fairness under load | The plan's 10-PRs-across-3-repos scenario, 40 agent tasks: no limit exceeded, no starvation, one saturated repo does not block the others |
+| Scheduler fairness under load | The plan's 10-PRs-across-3-repos scenario, simulated: 40 agent tasks through the real scheduler, no containers. No limit exceeded, no starvation, one saturated repo does not block the others |
 
 ### The review that proves the point
 
@@ -206,8 +206,31 @@ These are recorded because each was invisible to the test suite that existed at 
     `run_eval`. Invisible because the other ten work and nothing compared the surface to the plan.
     A test now asserts the full list.
 
-Findings 11-20, 23-25 and 29 were reported by, or found by running, **Maestro against real code —
-its own commits and its own pull request**. It also produced one
+32. **`doctor` could never report more than one leak.** `probe()` returns the first line of
+    stdout, and the stray-container count was built on it — so a host with forty leaked containers
+    reported "1 leaked container(s)". Magnitude is the entire point of a leak check: the number
+    never grows, the operator concludes there is nothing to clean, and the disk fills anyway. This
+    is the leak detection the rest of this document cites as the protection against container
+    leaks, and it had never worked. Found by Maestro reviewing the fix it had itself asked for on
+    the previous round, and verified fixed against a real daemon: 3 leaked containers now reported
+    as 3.
+33. **`trigger_review` reported a fabricated worker signal.** `daemonRunning` came from a
+    `COUNT(*)`, which always returns a row, so the boolean was always true — the same defect as
+    printing a cost of 0.00 for an unpriced provider, in output someone acts on.
+
+Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
+code — its own commits and its own pull request**.
+
+### The self-review loop, observed
+
+Round 1 on the live pull request found a missing subprocess timeout and a disk check scoped to the
+whole daemon. Both were real; both were fixed. Round 2 then reviewed that fix and found that
+routing the command through `probe()` — which is what fixing the timeout required — had introduced
+first-line truncation, and that the same flaw had been sitting in the pre-existing stray-container
+count all along. It also correctly noted that this was *not* a repeat of round 1's findings.
+
+That is the loop working as designed, and it is also the honest counter-argument to any claim that
+the bug count is now zero: each round of fixes is itself new code. It also produced one
 false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
 could not run Bun to check — both spellings are in fact valid), which is roughly the calibration
 you want. Findings 19 and 20 are the sharpest evidence so far: it read a fix that had just been
