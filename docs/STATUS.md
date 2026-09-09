@@ -18,7 +18,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
-| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, and **version diff** (160) | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
+| 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160) and **gate nodes with per-node failure policy** (162) | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
@@ -1948,6 +1948,28 @@ the server never sends fails it, and removing `live` from the server's response 
     `ship.sh` piped it to `tail` and reported exit 0, which was `tail`'s. The pipeline-exit-code
     mistake, three times in one session, in three different disguises. It is not a knowledge
     problem, which is why the answer is a script rather than a note.
+
+162. **The Studio could not add a gate, and could not set a failure policy.** Phase 6 specifies
+    a flow editor that adds, removes and rewires "`agent` and `gate` nodes" with a "per-node
+    failure policy". The string `gate` appeared nowhere in `Studio.tsx`, and `failurePolicy`
+    appeared once — in the object it writes when adding an agent, never in a control.
+
+    Both are the shape this session keeps finding. The engine has run gates since it was
+    written: `applyGate` drops findings below a severity floor or a confidence floor, or in an
+    excluded category, and the node registry lists `gate` as something the canvas may draw. The
+    engine also honours `failurePolicy` on every node — that is mutation-tested. Neither could
+    be reached from the product surface, so the only way to get a gate was to hand-edit exported
+    YAML.
+
+    The Studio adds one now, wired between the agents and triage, which is the only position its
+    ports allow. Removing it reconnects its inputs to triage, because the alternative is a graph
+    where every agent is orphaned — asserted in the validator's tests, along with the shape the
+    Studio produces being one the engine can run. The gate's thresholds and the node's failure
+    policy are editable.
+
+    Still not done from that line of the plan: rewiring edges on the canvas. The graph is
+    validated at save, so arbitrary rewiring needs the editor to reject an invalid connection as
+    it is drawn rather than after — real work, and recorded rather than half-built.
 
 ### Found by mechanical sweep, still open
 

@@ -156,6 +156,75 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
     });
   };
 
+  /**
+   * A gate node: filter findings before triage.
+   *
+   * The engine has run gates since it was written — `applyGate` drops findings below a
+   * severity or confidence floor, or in an excluded category — and the node registry lists
+   * `gate` as something the canvas may draw. The Studio could not add one, so the only way
+   * to get a gate was to hand-edit exported YAML. Same shape as `automaticTriggers` and
+   * `thinkingBudget`: the engine honours it and nothing could set it.
+   *
+   * Inserted between the agents and triage, which is the only position its ports allow:
+   * it takes Finding[] and returns Finding[].
+   */
+  const addGate = () => {
+    setDoc((prev) => {
+      if (!prev) return prev;
+      const next = structuredClone(prev);
+      let n = 1;
+      while (next.graph.nodes.some((x) => x.id === `gate-${n}`)) n++;
+      const nodeId = `gate-${n}`;
+      const triage = next.graph.nodes.find((x) => x.kind === "triage");
+
+      next.graph.nodes.push({
+        id: nodeId,
+        kind: "gate",
+        // A gate that filters nothing is the honest default: it is added empty and the
+        // thresholds are set below, rather than guessing a floor on the user's behalf.
+        failurePolicy: "skip-with-note",
+        config: { excludeCategories: [] },
+        position: { x: 700, y: 20 },
+      });
+
+      // Every agent now feeds the gate, and the gate feeds triage. Rewiring by hand is not
+      // yet possible on the canvas, so adding a gate has to leave a valid graph.
+      if (triage) {
+        for (const edge of next.graph.edges) {
+          if (edge.to === triage.id && edge.from !== nodeId) edge.to = nodeId;
+        }
+        next.graph.edges.push({ from: nodeId, to: triage.id });
+      }
+      return next;
+    });
+  };
+
+  const removeGate = (nodeId: string) => {
+    setDoc((prev) => {
+      if (!prev) return prev;
+      const next = structuredClone(prev);
+      const triage = next.graph.nodes.find((x) => x.kind === "triage");
+      // Reconnect whatever fed the gate straight to triage, or removing it would leave
+      // every agent orphaned and the graph invalid.
+      for (const edge of next.graph.edges) {
+        if (edge.to === nodeId && triage) edge.to = triage.id;
+      }
+      next.graph.edges = next.graph.edges.filter((e) => e.from !== nodeId);
+      next.graph.nodes = next.graph.nodes.filter((x) => x.id !== nodeId);
+      return next;
+    });
+  };
+
+  const updateNode = (nodeId: string, patch: Record<string, unknown>) => {
+    setDoc((prev) => {
+      if (!prev) return prev;
+      const next = structuredClone(prev);
+      const node = next.graph.nodes.find((x) => x.id === nodeId);
+      if (node) Object.assign(node, patch);
+      return next;
+    });
+  };
+
   const addAgent = () => {
     setDoc((prev) => {
       if (!prev) return prev;
@@ -250,6 +319,13 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
           {dirty ? <span className="badge running">unsaved</span> : null}
           <button type="button" onClick={addAgent}>
             Add agent
+          </button>
+          <button
+            type="button"
+            onClick={addGate}
+            disabled={doc.graph.nodes.some((n) => n.kind === "gate")}
+          >
+            Add gate
           </button>
           <button
             type="button"
@@ -568,6 +644,96 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
           </div>
         </div>
       </div>
+
+      {doc.graph.nodes
+        .filter((n) => n.kind === "gate")
+        .map((gate) => (
+          <div className="panel" key={gate.id}>
+            <div className="panel-head">
+              Gate — drops findings before triage
+              <div className="spacer" />
+              <button type="button" onClick={() => removeGate(gate.id)}>
+                Remove
+              </button>
+            </div>
+            <div className="panel-body">
+              <div className="grid2">
+                <label className="field">
+                  <span className="field-label">Minimum severity to keep</span>
+                  <select
+                    value={(gate.config as { minSeverity?: string }).minSeverity ?? ""}
+                    onChange={(e) =>
+                      updateNode(gate.id, {
+                        config: {
+                          ...gate.config,
+                          minSeverity: e.target.value || undefined,
+                        },
+                      })
+                    }
+                  >
+                    <option value="">any</option>
+                    {["critical", "high", "medium", "low", "info"].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Minimum confidence to keep</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    placeholder="any"
+                    value={(gate.config as { minConfidence?: number }).minConfidence ?? ""}
+                    onChange={(e) =>
+                      updateNode(gate.id, {
+                        config: {
+                          ...gate.config,
+                          minConfidence: e.target.value === "" ? undefined : Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">Categories to drop outright</span>
+                  <input
+                    placeholder="style, nitpick"
+                    value={(
+                      (gate.config as { excludeCategories?: string[] }).excludeCategories ?? []
+                    ).join(", ")}
+                    onChange={(e) =>
+                      updateNode(gate.id, {
+                        config: {
+                          ...gate.config,
+                          excludeCategories: e.target.value
+                            .split(",")
+                            .map((c) => c.trim())
+                            .filter(Boolean),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">
+                    If this node fails — the plan calls for this per node, and nothing could set it
+                  </span>
+                  <select
+                    value={gate.failurePolicy}
+                    onChange={(e) => updateNode(gate.id, { failurePolicy: e.target.value })}
+                  >
+                    <option value="skip-with-note">Skip it and note it in the comment</option>
+                    <option value="fail-review">Fail the whole review</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+        ))}
 
       <VersionDiff />
 

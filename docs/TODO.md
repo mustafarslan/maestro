@@ -95,6 +95,21 @@ proxy: either the published Maestro image, or a small purpose-built one.
 Everything else is mechanical: create the network beside the environment, start the proxy, point
 `HTTP_PROXY` at it by container name, and tear both down in the finalizer that already exists.
 
+## Rewiring the graph on the canvas
+
+Phase 6 asks for a flow editor that adds, removes **and rewires** agent and gate nodes. Adding
+and removing both work, including gates as of finding 162. Rewiring does not: there is no
+`onConnect` or `onEdgesChange`, so edges are drawn and not edited.
+
+It is not a small addition, which is why it is here rather than half-built. The node registry has
+typed ports — `Checkout`, `RouteDecision`, `Finding[]`, `Review` — and the graph is validated on
+save, so an editor that lets any node be joined to any other would let somebody draw an invalid
+graph and only learn at publish. Doing it properly means rejecting a connection as it is drawn,
+which means the port rules have to be available to the canvas rather than only to the validator.
+
+The cheap version — allow any edge, let save-time validation catch it — would technically satisfy
+the line in the plan and would be worse than not having it.
+
 ## Other
 
 - **A live hosted-provider call has never been made.** Every model call in this project used

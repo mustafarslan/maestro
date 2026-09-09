@@ -214,3 +214,47 @@ describe("settings that are not implemented", () => {
     expect(validateGraph(defaultPlaybook())).toEqual([]);
   });
 });
+
+describe("a gate the Studio can add", () => {
+  // The engine has run gates since it was written and the node registry lists `gate` as
+  // something the canvas may draw, but the Studio could not add one — the only way to get a
+  // gate was to hand-edit exported YAML. These pin the shape the Studio produces, so a
+  // graph it builds is one the validator accepts and the engine can run.
+  const withGate = (): PlaybookDocument => {
+    const doc = clone();
+    const triage = doc.graph.nodes.find((n) => n.kind === "triage");
+    doc.graph.nodes.push({
+      id: "gate-1",
+      kind: "gate",
+      failurePolicy: "skip-with-note",
+      config: { excludeCategories: [] },
+      position: { x: 700, y: 20 },
+    });
+    for (const e of doc.graph.edges) {
+      if (e.to === triage?.id) e.to = "gate-1";
+    }
+    doc.graph.edges.push({ from: "gate-1", to: triage?.id as string });
+    return doc;
+  };
+
+  it("validates as a graph the engine can run", () => {
+    expect(validateGraph(withGate())).toEqual([]);
+  });
+
+  it("still validates with thresholds set", () => {
+    const doc = withGate();
+    const gate = doc.graph.nodes.find((n) => n.id === "gate-1");
+    if (gate)
+      gate.config = { minSeverity: "medium", minConfidence: 0.7, excludeCategories: ["style"] };
+    expect(validateGraph(doc)).toEqual([]);
+  });
+
+  it("rejects a gate left dangling, which is what removing it carelessly would do", () => {
+    // The Studio reconnects the gate's inputs to triage when removing it, precisely so this
+    // cannot happen. If it ever stops doing that, the graph is invalid rather than silently
+    // dropping every finding.
+    const doc = withGate();
+    doc.graph.edges = doc.graph.edges.filter((e) => e.from !== "gate-1");
+    expect(validateGraph(doc).length).toBeGreaterThan(0);
+  });
+});
