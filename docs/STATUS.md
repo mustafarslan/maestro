@@ -546,6 +546,13 @@ These are recorded because each was invisible to the test suite that existed at 
     written out twice, and a test asserts recovery covers every state the reaper protects —
     a state in one list and not the other is exactly this leak again.
 
+    Recovery also closes what the review left open: its unfinished tasks are failed, and its
+    environment rows are marked `leaked` rather than `destroyed`, since whether the container
+    actually went away is unknown and claiming it was cleaned up is the assertion that hides a
+    disk filling. Fixing only the review row would have left a failed review whose tasks still
+    read "running" — the same "fixed the level I was looking at" mistake this session has made
+    three times.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

@@ -142,16 +142,38 @@ export const IN_FLIGHT_STATES = [
 export function recoverStaleReviews(db: SqlDatabase, olderThanMs: number): number {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   const placeholders = IN_FLIGHT_STATES.map(() => "?").join(",");
-  const res = db
-    .prepare(
-      `UPDATE reviews SET state='failed', error=?, finished_at=?
-       WHERE state IN (${placeholders}) AND COALESCE(started_at, created_at) < ?`,
-    )
-    .run(
-      "interrupted: no worker was holding this review when the daemon started",
-      new Date().toISOString(),
-      ...IN_FLIGHT_STATES,
-      cutoff,
-    );
-  return res.changes ?? 0;
+  const now = new Date().toISOString();
+
+  return db.transaction(() => {
+    const stale = db
+      .prepare(
+        `SELECT id FROM reviews
+         WHERE state IN (${placeholders}) AND COALESCE(started_at, created_at) < ?`,
+      )
+      .all<{ id: string }>(...IN_FLIGHT_STATES, cutoff)
+      .map((r) => r.id);
+    if (!stale.length) return 0;
+
+    const list = stale.map(() => "?").join(",");
+    db.prepare(
+      `UPDATE reviews SET state='failed', error=?, finished_at=? WHERE id IN (${list})`,
+    ).run("interrupted: no worker was holding this review when the daemon started", now, ...stale);
+
+    // The children have to move too. A failed review whose tasks still say "running"
+    // is a contradiction on the board, and an environment row left `running` is a
+    // sandbox the UI shows as live for ever and nothing ever reconciles.
+    db.prepare(
+      `UPDATE tasks SET state='failed', error=?, finished_at=?
+       WHERE review_id IN (${list}) AND state IN ('pending','ready','running')`,
+    ).run("interrupted with its review", now, ...stale);
+
+    // 'leaked', not 'destroyed': whether the container actually went away is unknown,
+    // and claiming it was cleaned up is the assertion that hides a disk filling.
+    db.prepare(
+      `UPDATE environments SET state='leaked', destroyed_at=?
+       WHERE review_id IN (${list}) AND state NOT IN ('destroyed','leaked')`,
+    ).run(now, ...stale);
+
+    return stale.length;
+  });
 }

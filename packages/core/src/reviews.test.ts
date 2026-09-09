@@ -74,3 +74,62 @@ describe("recovering reviews a crashed process left behind", () => {
     expect(recoverStaleReviews(db, 30 * 60_000)).toBe(IN_FLIGHT_STATES.length);
   });
 });
+
+describe("recovery closes what the review left open", () => {
+  it("fails the review's unfinished tasks", () => {
+    // A failed review whose tasks still say "running" is a contradiction on the board,
+    // and it was the state every crashed review left behind.
+    const id = makeReview(10, "analyzing", 60 * 60_000);
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO tasks (id, review_id, node_id, kind, state, created_at)
+       VALUES ('t1', ?, 'agent:security', 'agent', 'running', ?)`,
+    ).run(id, now);
+    db.prepare(
+      `INSERT INTO tasks (id, review_id, node_id, kind, state, created_at)
+       VALUES ('t2', ?, 'agent:product', 'agent', 'done', ?)`,
+    ).run(id, now);
+
+    recoverStaleReviews(db, 30 * 60_000);
+
+    const states = db
+      .prepare("SELECT id, state FROM tasks WHERE review_id=? ORDER BY id")
+      .all<{ id: string; state: string }>(id);
+    expect(states).toEqual([
+      { id: "t1", state: "failed" },
+      // A task that genuinely finished keeps its result.
+      { id: "t2", state: "done" },
+    ]);
+  });
+
+  it("marks the review's environments leaked, not destroyed", () => {
+    // Whether the container actually went away is unknown. Claiming it was cleaned up is
+    // the assertion that hides a disk filling; "leaked" is what the reaper reconciles.
+    const id = makeReview(11, "analyzing", 60 * 60_000);
+    db.prepare(
+      `INSERT INTO environments (id, review_id, kind, state, spec_json, ttl_at, created_at)
+       VALUES ('e1', ?, 'analyze', 'running', '{}', datetime('now'), datetime('now'))`,
+    ).run(id);
+
+    recoverStaleReviews(db, 30 * 60_000);
+
+    const row = db
+      .prepare("SELECT state, destroyed_at FROM environments WHERE id='e1'")
+      .get<{ state: string; destroyed_at: string | null }>();
+    expect(row?.state).toBe("leaked");
+    expect(row?.destroyed_at).toBeTruthy();
+  });
+
+  it("leaves a live review's children untouched", () => {
+    const id = makeReview(12, "analyzing", 60_000);
+    db.prepare(
+      `INSERT INTO tasks (id, review_id, node_id, kind, state, created_at)
+       VALUES ('t3', ?, 'agent:security', 'agent', 'running', datetime('now'))`,
+    ).run(id);
+
+    recoverStaleReviews(db, 30 * 60_000);
+
+    const row = db.prepare("SELECT state FROM tasks WHERE id='t3'").get<{ state: string }>();
+    expect(row?.state).toBe("running");
+  });
+});
