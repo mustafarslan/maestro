@@ -1,4 +1,4 @@
-import { openStore } from "@maestro/core";
+import { IN_FLIGHT_STATES, openStore } from "@maestro/core";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { arg, has } from "../args.js";
 import { checkLine, color } from "../ui.js";
@@ -52,9 +52,9 @@ reviews that are still running are left alone unless --force is given.
     ? []
     : db
         .prepare(
-          `SELECT id FROM reviews WHERE state IN ('queued','preparing','analyzing','triaging','posting')`,
+          `SELECT id FROM reviews WHERE state IN (${IN_FLIGHT_STATES.map(() => "?").join(",")})`,
         )
-        .all<{ id: string }>()
+        .all<{ id: string }>(...IN_FLIGHT_STATES)
         .map((r) => r.id);
 
   const swept = await driver.reap({

@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { JobQueue, logger, ReviewStore, SpanRecorder, type SqlDatabase } from "@maestro/core";
+import {
+  IN_FLIGHT_STATES,
+  JobQueue,
+  logger,
+  ReviewStore,
+  recoverStaleReviews,
+  SpanRecorder,
+  type SqlDatabase,
+} from "@maestro/core";
 import {
   diffPoll,
   GitHubClient,
@@ -83,6 +91,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const driver = new DockerSandboxDriver();
   const scheduler = new Scheduler(opts.limits ?? DEFAULT_LIMITS);
   const adminToken = opts.adminToken ?? randomBytes(24).toString("hex");
+
+  // A crash leaves reviews mid-flight for ever, and the reaper now skips containers
+  // belonging to in-flight reviews — so without this an orphan is protected permanently
+  // and its containers can never be collected, by the very sweep that exists for crashes.
+  // The cutoff exceeds the job lease so a review a live worker still holds is never
+  // mistaken for an orphan.
+  const recovered = recoverStaleReviews(db, LEASE_MS * 2);
+  if (recovered) logger.warn({ recovered }, "failed reviews left behind by a previous process");
 
   const inFlight = new Map<string, AbortController>();
   let stopping = false;
@@ -358,9 +374,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // in-flight reviews were using, every ten minutes.
     const active = db
       .prepare(
-        `SELECT id FROM reviews WHERE state IN ('queued','preparing','analyzing','triaging','posting')`,
+        `SELECT id FROM reviews WHERE state IN (${IN_FLIGHT_STATES.map(() => "?").join(",")})`,
       )
-      .all<{ id: string }>()
+      .all<{ id: string }>(...IN_FLIGHT_STATES)
       .map((r) => r.id);
 
     void driver

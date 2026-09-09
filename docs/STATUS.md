@@ -532,6 +532,20 @@ These are recorded because each was invisible to the test suite that existed at 
     the test fail *and* takes down the sandbox the following tests depend on, which is precisely
     the failure it describes.
 
+71. **A crash left reviews in flight for ever, and my own fix turned that into a permanent
+    leak.** Nothing ever reset review state, so an interrupted review stayed in `analyzing`
+    indefinitely. On its own that was untidy. It became a leak earlier the same day when the
+    reaper learned to skip containers belonging to in-flight reviews (finding 58): the orphaned
+    review was protected permanently, so its containers — precisely the ones the reaper exists
+    to collect after a crash — could never be swept. The sweep was blocked from the case it was
+    written for, by a fix intended to make it safer.
+
+    The daemon now fails reviews left behind by a previous process on start, with a cutoff
+    exceeding the job lease so a review a live worker still holds is never mistaken for an
+    orphan. The in-flight state list is shared between recovery and the reaper rather than
+    written out twice, and a test asserts recovery covers every state the reaper protects —
+    a state in one list and not the other is exactly this leak again.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

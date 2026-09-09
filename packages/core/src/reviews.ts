@@ -117,3 +117,41 @@ export class ReviewStore {
     return this.db.prepare("SELECT * FROM reviews WHERE id=?").get<ReviewRow>(id);
   }
 }
+
+/** States in which a review is being worked on by somebody. */
+export const IN_FLIGHT_STATES = [
+  "queued",
+  "preparing",
+  "analyzing",
+  "triaging",
+  "posting",
+] as const;
+
+/**
+ * Fails reviews left mid-flight by a process that is no longer running.
+ *
+ * Nothing reset review state on a crash, so an interrupted review sat in `analyzing`
+ * for ever. That was untidy on its own and became a leak once the reaper learned to skip
+ * containers belonging to in-flight reviews: the orphan was protected permanently, and
+ * its containers — the ones the reaper exists to collect after exactly this kind of
+ * crash — could never be swept.
+ *
+ * `olderThanMs` must exceed the job lease, so a review a live worker is still holding is
+ * never mistaken for an orphan.
+ */
+export function recoverStaleReviews(db: SqlDatabase, olderThanMs: number): number {
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  const placeholders = IN_FLIGHT_STATES.map(() => "?").join(",");
+  const res = db
+    .prepare(
+      `UPDATE reviews SET state='failed', error=?, finished_at=?
+       WHERE state IN (${placeholders}) AND COALESCE(started_at, created_at) < ?`,
+    )
+    .run(
+      "interrupted: no worker was holding this review when the daemon started",
+      new Date().toISOString(),
+      ...IN_FLIGHT_STATES,
+      cutoff,
+    );
+  return res.changes ?? 0;
+}
