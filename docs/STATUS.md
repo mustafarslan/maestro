@@ -15,7 +15,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | Ollama Cloud live, through both the `openai-compatible` and `openai` adapters; `anthropic` and `google` fixtures only |
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
 | 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
-| 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest, exchange, storage and the `doctor` states are tested; **the GitHub round trip is not** |
+| 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment | publish/rollback/pin verified; test connection verified against Ollama |
@@ -143,7 +143,7 @@ insecure neighbour, so it was not pattern-matching on "API route".
 
 ## The one recurring bug class, and what now stops it
 
-Seventeen separate defects in this project shared a single shape: configuration declared at one end
+Nineteen separate defects in this project shared a single shape: configuration declared at one end
 and read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
 loop and no caller could reach it. Linear context was rendered into the prompt and never populated.
 `thinkingBudget` was dead — then still dead after the fix that was supposed to revive it, because
@@ -158,7 +158,8 @@ compiles perfectly. Every one of them was caught by a person noticing, which is 
 
 A mechanical sweep for it — exported symbols with no callers, schema columns with no writer,
 class methods nobody calls — found eleven more in two passes after twenty-odd rounds of reading
-had not (findings 96-106 and the open list below). Reading finds bugs in code you are looking at;
+had not (findings 96-106 and the open list below), and the phase audit found four more
+(109-113) by asking of each plan item not "is it there" but "can anything reach it". Reading finds bugs in code you are looking at;
 this class is invisible precisely because both halves look right on their own.
 
 `packages/playbook/src/wiring.test.ts` now asserts the property directly: every tunable in the
@@ -966,6 +967,22 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     Studio's model picker never offered it, so the only way to set it was hand-editing YAML.
     The UI's `ModelBinding` interface is a hand-maintained copy of the zod schema and had
     drifted; that is the same two-sources-of-truth shape, now one field closer to matching.
+
+114. **The manifest flow stored a webhook secret `serve` would not use.** GitHub's conversion
+    response carries a `webhook_secret`; it was written to `github-app.json`, `github-app show`
+    reported it as stored, and `serve` read only `--webhook-secret` and `GITHUB_WEBHOOK_SECRET` —
+    so an operator who created an App with a webhook got one whose deliveries are signed with a
+    secret Maestro had on disk and refused to use, and was told to set a variable they had never
+    been shown. Found in the commit whose finding 109 justifies its own design by avoiding
+    exactly this. `resolveWebhookSecret` is exported so the precedence is asserted without
+    starting a daemon.
+
+115. **A comment claiming a property the code did not have.** The manifest callback compared the
+    `state` nonce with `===` under a comment saying it was compared in constant time. Loopback,
+    single-use, ten-minute window — the exposure is negligible and the false claim is not, since
+    the next person to read it has no reason to check. It uses `timingSafeEqual` now, after a
+    length check, because that throws on mismatched lengths. The manifest's HTML escaping also
+    covered `"` but not `&` or `<`, so an app name containing one would have broken the form.
 
 ### Found by mechanical sweep, still open
 

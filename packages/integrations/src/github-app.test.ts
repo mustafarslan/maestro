@@ -139,3 +139,66 @@ describe("stored credentials", () => {
     expect(GitHubClient.fromEnv()).toBeNull();
   });
 });
+
+describe("identifying an App credential", () => {
+  // Neither App branch of `identity()` runs anywhere else: one needs an installation and
+  // the other an app JWT, and no App exists to point them at. Mocking octokit's rest
+  // surface exercises the branching — which endpoint each state asks for — which is the
+  // part that was wrong before (`GET /user` for everything, refused to an installation
+  // token with a 403, reporting the *preferred* configuration as broken).
+  const withRest = (client: GitHubClient, rest: unknown): GitHubClient => {
+    (client as unknown as { octokit: { rest: unknown } }).octokit = { rest };
+    return client;
+  };
+
+  it("asks what an installation can reach, not who the user is", async () => {
+    saveGitHubApp({
+      appId: "42",
+      privateKey: "k",
+      installationId: 7,
+      createdAt: new Date().toISOString(),
+    });
+    const client = GitHubClient.fromEnv() as GitHubClient;
+    let asked = "";
+    withRest(client, {
+      users: {
+        getAuthenticated: async () => {
+          asked = "users";
+          return { data: { login: "nope" } };
+        },
+      },
+      apps: {
+        listReposAccessibleToInstallation: async () => {
+          asked = "installation";
+          return { data: { total_count: 3 } };
+        },
+      },
+    });
+
+    await expect(client.identity()).resolves.toBe("app installation 7, 3 repositories");
+    expect(asked).toBe("installation");
+  });
+
+  it("asks about the app itself when no installation is recorded", async () => {
+    saveGitHubApp({ appId: "42", privateKey: "k", createdAt: new Date().toISOString() });
+    const client = GitHubClient.fromEnv() as GitHubClient;
+    withRest(client, {
+      apps: { getAuthenticated: async () => ({ data: { slug: "maestro-x" } }) },
+    });
+    await expect(client.identity()).resolves.toMatch(/app maestro-x .*no installation id/);
+  });
+
+  it("says 'repository' rather than 'repositorys' for a single one", async () => {
+    saveGitHubApp({
+      appId: "42",
+      privateKey: "k",
+      installationId: 7,
+      createdAt: new Date().toISOString(),
+    });
+    const client = GitHubClient.fromEnv() as GitHubClient;
+    withRest(client, {
+      apps: { listReposAccessibleToInstallation: async () => ({ data: { total_count: 1 } }) },
+    });
+    await expect(client.identity()).resolves.toContain("1 repository");
+  });
+});

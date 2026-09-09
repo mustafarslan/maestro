@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -122,7 +122,13 @@ ${color.bold("maestro github-app")} <subcommand>
           `<body style="font:14px system-ui;padding:2rem">` +
           `<p>Sending the app manifest to GitHub…</p>` +
           `<form id="f" method="post" action="${action}">` +
-          `<input type="hidden" name="manifest" value="${JSON.stringify(manifest).replaceAll('"', "&quot;")}">` +
+          // `&` first, or the entities introduced below get double-escaped. `<` matters
+          // because an app name containing one would otherwise close the attribute's
+          // element early and break the form.
+          `<input type="hidden" name="manifest" value="${JSON.stringify(manifest)
+            .replaceAll("&", "&amp;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("<", "&lt;")}">` +
           `<noscript><button type="submit">Continue to GitHub</button></noscript>` +
           `</form><script>document.getElementById("f").submit()</script></body>`,
       );
@@ -131,8 +137,13 @@ ${color.bold("maestro github-app")} <subcommand>
     if (url.pathname === "/callback") {
       const code = url.searchParams.get("code") ?? undefined;
       // Compared before anything is exchanged: without it, any page the operator happens
-      // to have open could drive this callback.
-      const ok = url.searchParams.get("state") === state;
+      // to have open could drive this callback. Constant-time and length-checked first,
+      // because timingSafeEqual throws on a length mismatch — the comment here used to
+      // claim constant time over a plain `===`, which is the kind of false claim this
+      // project keeps finding in its own commits.
+      const given = url.searchParams.get("state") ?? "";
+      const ok =
+        given.length === state.length && timingSafeEqual(Buffer.from(given), Buffer.from(state));
       res.writeHead(ok && code ? 200 : 400, { "content-type": "text/html; charset=utf-8" });
       res.end(
         `<!doctype html><meta charset="utf-8"><body style="font:14px system-ui;padding:2rem">${

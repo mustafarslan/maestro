@@ -1,7 +1,27 @@
 import { openStore } from "@maestro/core";
+import { storedGitHubApp } from "@maestro/integrations";
 import { startDaemon } from "@maestro/server";
 import { arg, numberArg } from "../args.js";
 import { checkLine, color } from "../ui.js";
+
+/**
+ * Where the webhook secret comes from, in order.
+ *
+ * The manifest flow's App comes with a secret GitHub generated, stored beside the private
+ * key. Without the third source `serve` would refuse to start and tell the operator to set
+ * a variable they were never shown, about a secret Maestro already had on disk — the
+ * "stored and read by nothing" shape the flow itself exists to avoid. Flag and environment
+ * still win, so an override is always possible.
+ *
+ * Exported so the order can be asserted without starting a daemon.
+ */
+export function resolveWebhookSecret(argv: string[]): string | undefined {
+  return (
+    arg(argv, "--webhook-secret") ??
+    process.env.GITHUB_WEBHOOK_SECRET ??
+    storedGitHubApp()?.webhookSecret
+  );
+}
 
 export async function serve(argv: string[]): Promise<number> {
   if (argv.includes("--help")) {
@@ -43,7 +63,7 @@ ${color.bold("maestro serve")} [options]
   const daemon = await startDaemon({
     db,
     webhookPort,
-    webhookSecret: arg(argv, "--webhook-secret") ?? process.env.GITHUB_WEBHOOK_SECRET,
+    webhookSecret: resolveWebhookSecret(argv),
     adminPort,
     adminHost: arg(argv, "--admin-host"),
     adminToken: process.env.MAESTRO_ADMIN_TOKEN,
