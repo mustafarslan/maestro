@@ -596,8 +596,30 @@ These are recorded because each was invisible to the test suite that existed at 
     fails when a file stops stating the list at all; both failure modes were reintroduced to
     confirm it catches them.
 
-Findings 75 and 76 were reported by **Maestro reviewing the six commits that introduced them**,
-which is the first time in this session it has reviewed work from the same day.
+77. **The line-change signal would have driven every acceptance rate to ~100%.** It compared a
+    finding's file against the pull request's *cumulative* file list — and a finding points at a
+    file in that diff by construction, so on the first push after any review essentially every
+    finding was marked accepted. `recordFeedback` deduplicates, so the corruption would have been
+    permanent, and the Quality view wired up the same day would have shown every agent at perfect
+    precision for ever. It now compares the delta between the reviewed SHA and the new head. An
+    undeterminable delta settles nothing: unknown is not "nothing changed".
+78. **The reaper's image sweep ignored both guards the container sweep had just gained.** Snapshot
+    images carry the same labels and were listed with neither the in-flight protection nor the age
+    cutoff, so a review's snapshot could be deleted between agent starts — the engine creates one
+    container per agent as scheduler slots free up — and every later start against that image
+    fails. The container half was fixed and the image half was not, in the same function.
+79. **Cancellation matched pull requests by number alone, across repositories.** `inFlight` holds
+    reviews for every repo the daemon serves and PR numbers are small dense integers, so a
+    `closed` event for one repository aborted the review of any other with the same number.
+    Anyone able to open and close pull requests in one repository could sweep numbers and kill
+    reviews of private repositories they cannot read. Both the new cancel path and the
+    pre-existing supersede path had it; the new one copied the old rather than noticing. Both go
+    through one repository-scoped helper now.
+
+Findings 75-79 were reported by **Maestro reviewing this session's own commits** — the first two
+on the six commits that introduced them, the rest on the eight before those. Three of the five are
+cases of fixing one half of something and leaving the other, which is the failure mode this
+session has repeated most.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

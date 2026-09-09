@@ -162,6 +162,34 @@ export class GitHubClient {
     }
   }
 
+  /**
+   * Files changed between two commits.
+   *
+   * Distinct from a pull request's file list, which is cumulative against the base. The
+   * line-change quality signal needs the delta since the last review: a finding points at
+   * a file in the PR's diff by construction, so asking "is this file in the PR's diff"
+   * answers yes for every finding and marks them all accepted.
+   */
+  async filesChangedBetween(
+    pr: PullRequestRef,
+    base: string,
+    head: string,
+  ): Promise<string[] | null> {
+    try {
+      const { data } = await this.octokit.rest.repos.compareCommits({
+        owner: pr.owner,
+        repo: pr.repo,
+        base,
+        head,
+      });
+      return (data.files ?? []).map((f) => f.filename);
+    } catch {
+      // Unknown rather than empty: an empty list would read as "nothing was addressed"
+      // and silently settle nothing, which is the safer failure but a different claim.
+      return null;
+    }
+  }
+
   /** Short-lived token for cloning. Never enters a container. */
   async cloneToken(): Promise<string | undefined> {
     const auth = (await this.octokit.auth()) as { token?: string };

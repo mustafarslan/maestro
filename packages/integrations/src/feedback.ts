@@ -97,6 +97,17 @@ export async function ingestLineChanges(
   const current = await client.getPullRequest(pr).catch(() => null);
   if (!current || current.headSha === review.head_sha) return 0;
 
+  // The DELTA since the review, not the pull request's cumulative file list. A finding
+  // points at a file in the PR's diff by construction, so comparing against that list
+  // answered "yes" for essentially every finding on the first push after any review —
+  // marking them all accepted and driving every agent's acceptance rate to ~100%. The
+  // metric the Quality view exists to show would have been meaningless, permanently,
+  // because recordFeedback deduplicates.
+  const changedSince = await client
+    .filesChangedBetween(pr, review.head_sha, current.headSha)
+    .catch(() => null);
+  if (!changedSince) return 0;
+
   const findings = db
     .prepare(
       // 'posted' as well as 'open': posting stamps every reported finding 'posted',
@@ -108,8 +119,8 @@ export async function ingestLineChanges(
   let changed = 0;
   for (const finding of findings) {
     // File-level granularity: line-level would need the patch of every intermediate
-    // commit, and touching the file at all is already meaningful evidence.
-    if (current.changedFiles.includes(finding.file)) {
+    // commit, and touching the file at all since the review is meaningful evidence.
+    if (changedSince.includes(finding.file)) {
       recordFeedback(db, finding.id, "line_changed");
       settleStatus(db, finding.id);
       changed++;

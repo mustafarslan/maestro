@@ -140,6 +140,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }
   };
 
+  /**
+   * In-flight reviews of one pull request, matched on repository AND number.
+   *
+   * Matching on the number alone was a cross-repository abort: `inFlight` holds reviews
+   * for every repo this daemon serves, and PR numbers are small dense integers, so a
+   * `closed` event for one repo killed the review of any other repo with the same
+   * number. Anyone able to open and close pull requests in one repository could sweep
+   * numbers and abort reviews of private repositories they cannot read. Both the cancel
+   * and supersede paths had it — the newer one copied the older rather than noticing.
+   */
+  const inFlightFor = (pr: PullRequestRef): string[] => {
+    const repoId = reviews.ensureRepo(pr.owner, pr.repo);
+    return [...inFlight.keys()].filter((id) => {
+      const meta = reviews.get(id);
+      return meta?.repo_id === repoId && meta.pr_number === pr.number;
+    });
+  };
+
   /** Enqueue rather than review inline: the HTTP handler must return immediately. */
   const enqueueTrigger = (t: ReviewTrigger): void => {
     // Reactions are the feedback signal precision is measured from, not review triggers.
@@ -187,12 +205,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
 
     // A new head SHA makes any in-flight review of this PR unpostable; cancel it so it
     // stops holding a container and a scheduler slot.
-    for (const [reviewId, controller] of inFlight) {
-      const meta = reviews.get(reviewId);
-      if (meta && meta.pr_number === t.pr.number && meta.head_sha !== t.headSha) {
-        logger.info({ reviewId }, "cancelling superseded in-flight review");
-        controller.abort();
-      }
+    for (const reviewId of inFlightFor(t.pr)) {
+      if (reviews.get(reviewId)?.head_sha === t.headSha) continue;
+      logger.info({ reviewId }, "cancelling superseded in-flight review");
+      inFlight.get(reviewId)?.abort();
     }
   };
 

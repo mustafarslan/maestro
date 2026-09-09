@@ -1,6 +1,6 @@
 import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { beforeEach, describe, expect, it } from "vitest";
-import { agentQuality, ingestReaction, signalFromReaction } from "./feedback.js";
+import { agentQuality, ingestLineChanges, ingestReaction, signalFromReaction } from "./feedback.js";
 
 let db: SqlDatabase;
 let reviewId: string;
@@ -164,5 +164,79 @@ describe("dismissal is sticky", () => {
     expect(
       db.prepare("SELECT status FROM findings WHERE id=?").get<{ status: string }>(id)?.status,
     ).toBe("suppressed");
+  });
+});
+
+describe("the line-change signal compares the right two things", () => {
+  /** A finding pointing at a specific file, which is what this signal keys on. */
+  const findingOn = (file: string): string => {
+    const id = newId("fd");
+    db.prepare(
+      `INSERT INTO findings (id, review_id, agent_id, file, line_start, category, severity,
+                             confidence, title, body, status, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      id,
+      reviewId,
+      "security",
+      file,
+      1,
+      "idor",
+      "high",
+      0.9,
+      "t",
+      "b",
+      "posted",
+      new Date().toISOString(),
+    );
+    return id;
+  };
+
+  const statusOf = (id: string) =>
+    db.prepare("SELECT status FROM findings WHERE id=?").get<{ status: string }>(id)?.status;
+
+  const client = (since: string[] | null, prFiles: string[]) =>
+    ({
+      getPullRequest: async () => ({ headSha: "b".repeat(40), changedFiles: prFiles }),
+      filesChangedBetween: async () => since,
+    }) as unknown as Parameters<typeof ingestLineChanges>[1];
+
+  const pr = { owner: "acme", repo: "web", number: 1 };
+
+  it("does not settle a finding whose file has not changed since the review", async () => {
+    // The bug this replaces: comparing against the pull request's cumulative file list
+    // answered "yes" for essentially every finding, because a finding points at a file in
+    // that diff by construction. Every agent's acceptance rate went to ~100% and stayed
+    // there, because recordFeedback deduplicates.
+    const id = findingOn("src/untouched.ts");
+    const settled = await ingestLineChanges(
+      db,
+      client(["src/other.ts"], ["src/untouched.ts", "src/other.ts"]),
+      pr,
+      reviewId,
+    );
+    expect(settled).toBe(0);
+    expect(statusOf(id)).toBe("posted");
+  });
+
+  it("settles a finding whose file was edited after the review", async () => {
+    const id = findingOn("src/fixed.ts");
+    const settled = await ingestLineChanges(
+      db,
+      client(["src/fixed.ts"], ["src/fixed.ts"]),
+      pr,
+      reviewId,
+    );
+    expect(settled).toBe(1);
+    expect(statusOf(id)).toBe("accepted");
+  });
+
+  it("settles nothing when the delta cannot be determined", async () => {
+    // Unknown is not "nothing changed"; settling on a failed comparison would record a
+    // verdict nobody reached.
+    const id = findingOn("src/fixed.ts");
+    const settled = await ingestLineChanges(db, client(null, ["src/fixed.ts"]), pr, reviewId);
+    expect(settled).toBe(0);
+    expect(statusOf(id)).toBe("posted");
   });
 });

@@ -498,13 +498,45 @@ export class DockerSandboxDriver implements SandboxDriver {
     // the whole caching feature useless. Skip any image that is also a cache entry;
     // `reapDependencyCache()` is the deliberate way to remove those.
     const cacheIds = new Set(await listIds(["images", "-q", "maestro/deps"]));
-    const images = (await listIds(["images", "-q", ...filterArgs])).filter(
-      (id) => !cacheIds.has(id),
-    );
+    const images: string[] = [];
+    for (const id of await listIds(["images", "-q", ...filterArgs])) {
+      if (cacheIds.has(id)) continue;
+
+      // The same two guards as the containers above. Applying them to only half the
+      // sweep left a review's snapshot deletable while its agents were still starting
+      // from it: the engine creates one container per agent as scheduler slots free up,
+      // so there is a real window between prepare finishing and the last agent starting.
+      // Every later `docker run` against a deleted image fails.
+      const { reviewId, createdAt } = await imageLabels(id);
+      if (reviewId && protectedIds.has(reviewId)) {
+        skipped++;
+        continue;
+      }
+      if (cutoff !== undefined && (createdAt === undefined || createdAt > cutoff)) {
+        skipped++;
+        continue;
+      }
+      images.push(id);
+    }
     for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
 
     return { containers: containers.length, images: images.length, protected: skipped };
   }
+}
+
+/** The same labels, read from an image rather than a container. */
+async function imageLabels(imageId: string): Promise<{ reviewId?: string; createdAt?: number }> {
+  const res = await docker(
+    [
+      "image",
+      "inspect",
+      "--format",
+      `{{index .Config.Labels "${LABEL_REVIEW}"}}|{{index .Config.Labels "${LABEL_CREATED}"}}`,
+      imageId,
+    ],
+    { timeoutMs: 20_000 },
+  );
+  return parseLabelPair(res.stdout);
 }
 
 /** The review a container belongs to and when it was created, from its own labels. */
@@ -520,7 +552,12 @@ async function containerLabels(
     ],
     { timeoutMs: 20_000 },
   );
-  const [review, created] = res.stdout.trim().split("|");
+  return parseLabelPair(res.stdout);
+}
+
+/** Shared by the container and image readers, so the two cannot interpret labels differently. */
+function parseLabelPair(stdout: string): { reviewId?: string; createdAt?: number } {
+  const [review, created] = stdout.trim().split("|");
   const usable = (v?: string) => (v && v !== "<no value>" ? v : undefined);
   const createdAt = usable(created) ? Date.parse(usable(created) as string) : Number.NaN;
   return {
