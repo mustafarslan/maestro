@@ -1571,8 +1571,13 @@ before a release, and either would catch the other side changing under us.
   design work with its own leak surface, and shipping a half-verified change to the containment
   boundary would be worse than the gap it closes.
 
-  Left as it is, deliberately and with the evidence recorded, so whoever picks it up starts from
-  measurements rather than from the same three experiments.
+  Left as it is, deliberately — but not left vague. The full topology was then built and measured
+  with a stand-in proxy, and it works: from a container on a `--internal` network, direct sockets
+  and DNS are blocked while a dual-homed proxy container is reachable by name and enforces the
+  allowlist on what passes through it. The remaining decision is what runs that proxy, and it is
+  platform-specific: bind-mounting Maestro's own static binary fails on a macOS host with
+  `exec format error`, because the host binary is Mach-O and the container is Linux.
+  `docs/TODO.md` carries the design, the measurements and the three open choices.
 
 144. **The pull request comment implied the prepare phase was sealed.** The metrics block said
     "N egress attempt(s) blocked during dependency install", which is true and reads as complete.
