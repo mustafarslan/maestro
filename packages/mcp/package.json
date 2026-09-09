@@ -15,6 +15,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@maestro/agents": "workspace:*",
     "@maestro/core": "workspace:*",
     "@maestro/engine": "workspace:*",
     "@maestro/integrations": "workspace:*",

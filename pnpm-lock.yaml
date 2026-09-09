@@ -183,6 +183,9 @@ importers:
 
   packages/mcp:
     dependencies:
+      '@maestro/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@maestro/core':
         specifier: workspace:*
         version: link:../core

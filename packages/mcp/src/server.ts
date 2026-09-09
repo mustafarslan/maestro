@@ -1,3 +1,4 @@
+import { severityAtLeast } from "@maestro/agents";
 import { JobQueue, maestroHome, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { parsePullRequestRef } from "@maestro/integrations";
@@ -285,7 +286,6 @@ export function buildServer(deps: McpDeps): McpServer {
       },
     },
     async ({ reviewId, includeSuppressed, minSeverity }) => {
-      const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
       const rows = db
         .prepare(
           `SELECT id, agent_id, file, line_start, line_end, category, severity, confidence,
@@ -297,7 +297,7 @@ export function buildServer(deps: McpDeps): McpServer {
 
       const filtered = rows.filter((r) => {
         if (!includeSuppressed && r.status === "suppressed") return false;
-        if (minSeverity && (rank[String(r.severity)] ?? 9) > (rank[minSeverity] ?? 9)) return false;
+        if (minSeverity && !severityAtLeast(String(r.severity), minSeverity)) return false;
         return true;
       });
       return text({ reviewId, count: filtered.length, findings: filtered });

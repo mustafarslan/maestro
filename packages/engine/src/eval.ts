@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Finding } from "@maestro/agents";
+import { type Finding, severityAtLeast } from "@maestro/agents";
 import type { ReviewOutcome } from "./engine.js";
 
 /**
@@ -35,8 +35,6 @@ export interface Fixture {
   /** Patterns that must NOT be reported: the false-positive half of the answer key. */
   forbidden?: string[];
 }
-
-const SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"];
 
 function matches(pattern: string, finding: Finding): boolean {
   const raw = `${finding.title}\n${finding.body}\n${finding.category}`;
@@ -148,9 +146,7 @@ export function scoreOutcome(
 
 function severityOk(expected: ExpectedFinding, finding: Finding): boolean {
   if (!expected.severityAtLeast) return true;
-  return (
-    SEVERITY_ORDER.indexOf(finding.severity) >= SEVERITY_ORDER.indexOf(expected.severityAtLeast)
-  );
+  return severityAtLeast(finding.severity, expected.severityAtLeast);
 }
 
 // ── fixture storage ───────────────────────────────────────────────────────────

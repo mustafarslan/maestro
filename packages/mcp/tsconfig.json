@@ -4,6 +4,7 @@
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
   "references": [
+    { "path": "../agents" },
     { "path": "../core" },
     { "path": "../engine" },
     { "path": "../integrations" },

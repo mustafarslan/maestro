@@ -560,6 +560,17 @@ These are recorded because each was invisible to the test suite that existed at 
     closed pull request. The states are a single exported list now, and a test asserts every one
     has a rule and that a cancelled review is not coloured like a running one.
 
+73. **Severity ordering was written out six times, and one copy was backwards.** Two zod enums,
+    three rank maps and one array; `eval.ts` ordered them ascending while every other file
+    ordered them descending. No copy was wrong on its own, which is what made it dangerous —
+    the same word meant opposite things in different files, and comparing with the wrong sense
+    is a silent inversion that accepts trivia and rejects real defects. Now one exported
+    ordering with `severityRank` and `severityAtLeast`, used by triage, the gate filter, the
+    eval matcher and the MCP finding filter. An unknown severity sorts last rather than first,
+    since treating an unrecognised value as critical would let a malformed finding jump the
+    queue and clear every floor. A guard asserts no rank map comes back and that the two enums
+    that cannot import it still spell the list identically.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

@@ -1,4 +1,4 @@
-import { type Finding, runReviewAgent } from "@maestro/agents";
+import { type Finding, runReviewAgent, severityAtLeast } from "@maestro/agents";
 import { logger, type SpanRecorder, type SqlDatabase } from "@maestro/core";
 import type { Provider, ProviderRegistry } from "@maestro/llm";
 import {
@@ -74,15 +74,14 @@ function applyGate(node: GraphNode, results: AgentFindings[]): AgentFindings[] {
     return results;
   }
   const gate = parsed.data;
-  const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  const floor = gate.minSeverity ? rank[gate.minSeverity] : undefined;
+  const floor = gate.minSeverity;
   const excluded = new Set(gate.excludeCategories.map((c) => c.toLowerCase()));
 
   return results.map((r) => ({
     ...r,
     findings: r.findings.filter((f) => {
       if (gate.minConfidence !== undefined && f.confidence < gate.minConfidence) return false;
-      if (floor !== undefined && (rank[f.severity] ?? 9) > floor) return false;
+      if (floor !== undefined && !severityAtLeast(f.severity, floor)) return false;
       if (excluded.has(f.category.toLowerCase())) return false;
       return true;
     }),

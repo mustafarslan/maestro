@@ -1,4 +1,4 @@
-import type { Finding, Severity } from "@maestro/agents";
+import { type Finding, type Severity, severityRank } from "@maestro/agents";
 import type { PlaybookDocument } from "@maestro/playbook";
 
 export interface AgentFindings {
@@ -29,13 +29,8 @@ export interface TriageResult {
   summary: string;
 }
 
-const SEVERITY_RANK: Record<Severity, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  info: 4,
-};
+/** One ordering for the whole codebase; see severityRank's comment for why. */
+const SEVERITY_RANK = (s: Severity): number => severityRank(s);
 
 /**
  * Deterministic triage.
@@ -76,7 +71,7 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
         1,
         Math.max(existing.confidence, finding.confidence) + agreementBoost,
       );
-      if (SEVERITY_RANK[finding.severity] < SEVERITY_RANK[existing.severity]) {
+      if (SEVERITY_RANK(finding.severity) < SEVERITY_RANK(existing.severity)) {
         existing.severity = finding.severity;
       }
 
@@ -103,7 +98,7 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
   }
 
   const ranked = [...groups].sort((a, b) => {
-    const bySeverity = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+    const bySeverity = SEVERITY_RANK(a.severity) - SEVERITY_RANK(b.severity);
     if (bySeverity !== 0) return bySeverity;
     // Within a severity, a confident finding outranks a speculative one.
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
