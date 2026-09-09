@@ -182,7 +182,20 @@ export class GitHubClient {
         base,
         head,
       });
-      return (data.files ?? []).map((f) => f.filename);
+
+      // GitHub caps the files a single compare returns. A truncated list read as
+      // complete turns "we did not see this file" into "this file did not change" —
+      // exactly the shape of the defect this method was added to fix, and a partial
+      // "no" is still a verdict. Unknown is the honest answer.
+      const files = data.files ?? [];
+      if (data.total_commits > 0 && files.length >= 300) {
+        logger.warn(
+          { pr: pr.number, files: files.length },
+          "compare response may be truncated; treating the delta as unknown",
+        );
+        return null;
+      }
+      return files.map((f) => f.filename);
     } catch {
       // Unknown rather than empty: an empty list would read as "nothing was addressed"
       // and silently settle nothing, which is the safer failure but a different claim.

@@ -613,10 +613,27 @@ These are recorded because each was invisible to the test suite that existed at 
     `closed` event for one repository aborted the review of any other with the same number.
     Anyone able to open and close pull requests in one repository could sweep numbers and kill
     reviews of private repositories they cannot read. Both the new cancel path and the
-    pre-existing supersede path had it; the new one copied the old rather than noticing. Both go
-    through one repository-scoped helper now.
+    pre-existing supersede path had it; the new one copied the old rather than noticing.
 
-Findings 75-79 were reported by **Maestro reviewing this session's own commits** — the first two
+    **The first attempt at this fix did not land.** The edit script raised on its second
+    replacement before writing, so the first was discarded too; only the supersede path was
+    fixed, and the commit message and this document both claimed otherwise. Maestro caught the
+    live code and the false claim as separate findings on the next review. Both paths go through
+    one repository-scoped helper now, asserted by a test that fails against the state the code
+    was actually in.
+
+80. **Cache-hit snapshots became permanently unreapable.** The fail-closed age guard added in 75
+    skips any image it cannot date — and `refreshCheckout`, the dependency-cache path taken by
+    every review of a repo after the first, committed without a creation label. So the images on
+    the hottest path, which can be gigabytes, were skipped by every ten-minute sweep for ever. A
+    fix that was correct in isolation created a leak through a path that did not stamp the label
+    it now depends on.
+81. **A truncated compare was read as an authoritative delta.** GitHub caps the files one compare
+    returns, and past that cap the tail was silently dropped — turning "we did not see this file"
+    into "this file did not change", which is the same shape as the defect the method was added
+    to fix. A partial "no" is still a verdict; it returns unknown now.
+
+Findings 75-81 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.

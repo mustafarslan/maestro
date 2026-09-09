@@ -614,6 +614,13 @@ async function refreshCheckout(
         `LABEL ${LABEL_MANAGED}=true`,
         "--change",
         `LABEL ${LABEL_REVIEW}=${reviewId}`,
+        // The created label matters as much here as on the cold path. The age guard
+        // fails closed on an image it cannot date, so a cache-hit snapshot without this
+        // was skipped by every periodic sweep for ever — on the hottest path there is,
+        // since every review of a repo after the first hits the cache, and a dependency
+        // layer can be gigabytes.
+        "--change",
+        `LABEL ${LABEL_CREATED}=${new Date().toISOString()}`,
         containerId,
         `maestro/snapshot:${id}`,
       ],
