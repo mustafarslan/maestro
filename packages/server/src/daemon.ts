@@ -352,8 +352,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Containers and snapshot images outlive a crashed process; sweeping on an interval is
   // what stops a long-running daemon from filling the disk.
   const reaperTimer = setInterval(() => {
+    // Two guards, because either alone has failed here. The age filter was passed and
+    // ignored by the driver, so this swept containers of every age; and the sweep never
+    // named the reviews it must not touch, so it was destroying the containers its own
+    // in-flight reviews were using, every ten minutes.
+    const active = db
+      .prepare(
+        `SELECT id FROM reviews WHERE state IN ('queued','preparing','analyzing','triaging','posting')`,
+      )
+      .all<{ id: string }>()
+      .map((r) => r.id);
+
     void driver
-      .reap({ olderThanMs: 2 * 60 * 60_000 })
+      .reap({ olderThanMs: 2 * 60 * 60_000, protectReviewIds: active })
       .catch((err) => logger.warn({ err }, "reap failed"));
   }, 10 * 60_000);
 

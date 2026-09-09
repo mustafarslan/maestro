@@ -90,6 +90,26 @@ describe("prepare phase", () => {
 
 describe("analyze phase security posture", () => {
   itDocker(
+    "leaves a container younger than the age cutoff alone",
+    async () => {
+      // `olderThanMs` was accepted and ignored. The daemon's periodic sweep passes a
+      // two-hour age and runs every ten minutes, so it deleted containers of every age —
+      // including the ones its own reviews were using at that moment.
+      const sandbox = await driver.analyze(env!, { spec });
+      try {
+        const result = await driver.reap({ olderThanMs: 60 * 60_000 });
+        expect(result.protected).toBeGreaterThan(0);
+
+        const alive = await sandbox.exec("echo still-here");
+        expect(alive.stdout).toContain("still-here");
+      } finally {
+        await sandbox.destroy();
+      }
+    },
+    180_000,
+  );
+
+  itDocker(
     "leaves a protected review's containers alone when reaping",
     async () => {
       // An unscoped sweep matches every Maestro-labelled container, which includes the ones

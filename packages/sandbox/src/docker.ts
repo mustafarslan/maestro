@@ -463,12 +463,20 @@ export class DockerSandboxDriver implements SandboxDriver {
     const filterArgs = filters.flatMap((f) => ["--filter", f]);
 
     const protectedIds = new Set(opts.protectReviewIds ?? []);
+    const cutoff = opts.olderThanMs ? Date.now() - opts.olderThanMs : undefined;
     const allContainers = await listIds(["ps", "-aq", ...filterArgs]);
     const containers: string[] = [];
     let skipped = 0;
     for (const c of allContainers) {
-      const owner = await containerReviewId(c);
-      if (owner && protectedIds.has(owner)) {
+      const { reviewId, createdAt } = await containerLabels(c);
+      if (reviewId && protectedIds.has(reviewId)) {
+        skipped++;
+        continue;
+      }
+      // `olderThanMs` was accepted and ignored, so the daemon's periodic sweep — which
+      // passes a two-hour age — deleted containers of every age, including the ones its
+      // own reviews were using at that moment.
+      if (cutoff !== undefined && createdAt !== undefined && createdAt > cutoff) {
         skipped++;
         continue;
       }
@@ -493,14 +501,26 @@ export class DockerSandboxDriver implements SandboxDriver {
   }
 }
 
-/** Which review a container belongs to, from the label the driver stamps on it. */
-async function containerReviewId(containerId: string): Promise<string | undefined> {
+/** The review a container belongs to and when it was created, from its own labels. */
+async function containerLabels(
+  containerId: string,
+): Promise<{ reviewId?: string; createdAt?: number }> {
   const res = await docker(
-    ["inspect", "--format", `{{index .Config.Labels "${LABEL_REVIEW}"}}`, containerId],
+    [
+      "inspect",
+      "--format",
+      `{{index .Config.Labels "${LABEL_REVIEW}"}}|{{index .Config.Labels "${LABEL_CREATED}"}}`,
+      containerId,
+    ],
     { timeoutMs: 20_000 },
   );
-  const value = res.stdout.trim();
-  return value && value !== "<no value>" ? value : undefined;
+  const [review, created] = res.stdout.trim().split("|");
+  const usable = (v?: string) => (v && v !== "<no value>" ? v : undefined);
+  const createdAt = usable(created) ? Date.parse(usable(created) as string) : Number.NaN;
+  return {
+    reviewId: usable(review),
+    createdAt: Number.isFinite(createdAt) ? createdAt : undefined,
+  };
 }
 
 /**

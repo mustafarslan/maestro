@@ -516,6 +516,22 @@ These are recorded because each was invisible to the test suite that existed at 
     routed it to "ignored". Found by checking every variant of the union against what the
     consumer handles.
 
+70. **The daemon's own reaper destroyed its own in-flight reviews, every ten minutes.** The
+    periodic sweep calls `reap({ olderThanMs: 2 hours })`, and the driver accepted that option
+    and ignored it entirely — so the sweep matched every Maestro container regardless of age.
+    The call also never named the reviews it must not touch. Any review still running when the
+    timer fired had its containers removed underneath it.
+
+    This is the most damaging defect found in the session, and it was invisible from every
+    angle tried before: the option is passed, the parameter is declared, the types line up, and
+    the only way to see it is to ask whether anything reads the field. Found by sweeping
+    interface fields that nothing sets or reads.
+
+    Both guards are in place now — the age filter is implemented, and the daemon passes the
+    reviews currently in flight. Asserted against real containers: removing the age filter makes
+    the test fail *and* takes down the sandbox the following tests depend on, which is precisely
+    the failure it describes.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
