@@ -15,10 +15,26 @@ interface Check {
   detail?: string;
 }
 
+/** First line only — for version strings. Counting anything needs probeLines. */
 async function probe(cmd: string, args: string[]): Promise<string | null> {
+  const lines = await probeLines(cmd, args);
+  return lines === null ? null : (lines[0] ?? "");
+}
+
+/**
+ * Every line of stdout.
+ *
+ * Counting leaks needs all of them. `probe()` returns only the first line, and both the
+ * stray-container count and the snapshot count were built on it — so a host with forty
+ * leaked containers reported "1 leaked container(s)". The magnitude is the entire point
+ * of a leak check: an operator sees a number that never grows, concludes there is
+ * nothing to clean, and the disk fills anyway.
+ */
+async function probeLines(cmd: string, args: string[]): Promise<string[] | null> {
   try {
     const { stdout } = await exec(cmd, args, { timeout: 10_000 });
-    return stdout.trim().split("\n")[0] ?? "";
+    const trimmed = stdout.trim();
+    return trimmed ? trimmed.split("\n") : [];
   } catch {
     return null;
   }
@@ -62,8 +78,8 @@ export async function doctor(): Promise<number> {
   });
 
   if (docker) {
-    const out = await probe("docker", ["ps", "-aq", "--filter", "label=maestro.managed=true"]);
-    const strays = out ? out.split("\n").filter(Boolean).length : 0;
+    const out = await probeLines("docker", ["ps", "-aq", "--filter", "label=maestro.managed=true"]);
+    const strays = out?.filter(Boolean).length ?? 0;
     checks.push({
       status: strays === 0 ? "ok" : "warn",
       label: "sandboxes",
@@ -142,22 +158,33 @@ export async function doctor(): Promise<number> {
   // call here, for its 10s timeout: `doctor` is what people run when something is
   // already broken, and a wedged daemon must not hang it with no output.
   if (docker) {
-    const out = await probe("docker", [
-      "images",
-      "-q",
-      "--filter",
-      "label=maestro.managed=true",
-      "--filter",
-      "reference=maestro/snapshot",
-    ]);
-    const snapshots = out ? out.split("\n").filter(Boolean).length : 0;
+    const all =
+      (
+        await probeLines("docker", [
+          "images",
+          "-q",
+          "--filter",
+          "label=maestro.managed=true",
+          "--filter",
+          "reference=maestro/snapshot",
+        ])
+      )?.filter(Boolean) ?? [];
+    // Only cache-shared snapshots survive a reap: reap() skips an image whose id is also
+    // a cache id and deletes every other labelled snapshot. Reporting all of them as
+    // "reap leaves those" would tell an operator to ignore exactly the ones leaking.
+    const cacheIds = new Set(
+      (await probeLines("docker", ["images", "-q", "maestro/deps"]))?.filter(Boolean) ?? [],
+    );
+    const leaked = all.filter((id) => !cacheIds.has(id));
     checks.push({
-      status: "info",
+      status: leaked.length === 0 ? "info" : "warn",
       label: "snapshots",
       detail:
-        snapshots === 0
+        all.length === 0
           ? "no snapshot images"
-          : `${snapshots} snapshot image(s) - shared with the dependency cache; 'maestro reap' leaves those`,
+          : leaked.length === 0
+            ? `${all.length} snapshot image(s), all shared with the dependency cache`
+            : `${leaked.length} of ${all.length} snapshot image(s) not cache-shared - run 'maestro reap'`,
     });
   }
 
