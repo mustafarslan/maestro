@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { promisify } from "node:util";
 import {
   dayAgo,
@@ -16,6 +16,23 @@ import { PlaybookStore, validateGraph } from "@maestro/playbook";
 import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
+
+/**
+ * The database file's size, once it is worth mentioning.
+ *
+ * Nothing here ever deleted anything until `maestro prune` existed, so this grows for the
+ * life of the install — roughly a hundred rows per review, dominated by the per-step trace.
+ * Silent below 50MB, because a number nobody needs to act on is noise.
+ */
+function databaseSize(): string {
+  try {
+    const mb = statSync(dbPath()).size / 1e6;
+    if (mb < 50) return "";
+    return `, ${mb.toFixed(0)} MB - 'maestro prune' drops the step trace of old reviews`;
+  } catch {
+    return "";
+  }
+}
 
 /** `docker images -q` prints one line per tag; the same image can appear several times. */
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
@@ -121,7 +138,7 @@ export async function doctor(): Promise<number> {
       label: "database",
       detail:
         state.pending.length === 0
-          ? `schema v${state.current} at ${dbPath()}`
+          ? `schema v${state.current} at ${dbPath()}${databaseSize()}`
           : `schema v${state.current}, ${state.pending.length} migration(s) pending - run 'maestro init'`,
     });
 

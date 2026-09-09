@@ -7,6 +7,7 @@ import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { mcp } from "./commands/mcp.js";
 import { playbook } from "./commands/playbook.js";
+import { prune } from "./commands/prune.js";
 import { reap } from "./commands/reap.js";
 import { review } from "./commands/review.js";
 import { serve } from "./commands/serve.js";
@@ -32,6 +33,7 @@ ${color.bold("COMMANDS")}
   mcp                  stdio MCP server for Claude Code
   eval <sub>           score reviews against golden-PR fixtures
   reap                 sweep leaked containers and snapshot images
+  prune [--days <n>]   delete the step trace of reviews older than n days (default 30)
   version              print the version
 
 
@@ -65,6 +67,8 @@ async function main(): Promise<number> {
       return playbook(rest);
     case "reap":
       return reap(rest);
+    case "prune":
+      return prune(rest);
     case "review":
       return review(rest);
     case "serve":

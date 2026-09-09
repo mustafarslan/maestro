@@ -255,6 +255,11 @@ store-driver contract on both runtimes, the binary build, and the MCP protocol a
 binary. `scripts/gate.sh` is the local equivalent, plus the clean-checkout property CI gets for
 free from `actions/checkout`.
 
+Nothing is deleted automatically. `maestro prune [--days 30]` drops the per-step trace —
+`spans` and `llm_calls` — of reviews finished before the cutoff, and keeps reviews, findings and
+feedback, which are the quality history and are small. `doctor` mentions the database size once
+it passes 50MB.
+
 The daemon's recurring work and what each costs:
 
 | runs | cost |

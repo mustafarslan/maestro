@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { newId } from "./ids.js";
 import { ReviewStore } from "./reviews.js";
-import { checkSpend, dayAgo, spendSince } from "./spend.js";
+import { checkSpend, dayAgo, pruneTelemetry, spendSince } from "./spend.js";
 import { openStore } from "./store/db.js";
 import type { SqlDatabase } from "./store/driver.js";
 
@@ -82,5 +82,58 @@ describe("whether another review may start", () => {
   it("ignores spend that has aged out of the window", () => {
     spend(review("acme", "web", 1), 900, new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString());
     expect(checkSpend(db, { dailyCapCents: 100 }).allowed).toBe(true);
+  });
+});
+
+describe("pruning old telemetry", () => {
+  // Nothing in this system had ever deleted anything: every table grew for the life of the
+  // install, roughly four and a half million rows a year at a hundred reviews a day,
+  // dominated by the per-step trace.
+  const trace = (reviewId: string) => {
+    db.prepare(
+      "INSERT INTO spans (id, review_id, name, status, started_at) VALUES (?,?,?,?,?)",
+    ).run(newId("sp"), reviewId, "n", "ok", new Date().toISOString());
+    db.prepare(
+      `INSERT INTO llm_calls (id, review_id, provider_id, model, cost_cents, created_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run(newId("call"), reviewId, "ollama", "m", 1, new Date().toISOString());
+  };
+  const aged = (reviewId: string, days: number) =>
+    db
+      .prepare("UPDATE reviews SET state='done', finished_at=? WHERE id=?")
+      .run(new Date(Date.now() - days * 24 * 60 * 60_000).toISOString(), reviewId);
+
+  it("drops the step trace of reviews past the cutoff", () => {
+    const r = review("acme", "web", 1);
+    trace(r);
+    aged(r, 90);
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 1, llmCalls: 1 });
+  });
+
+  it("keeps the review and its findings, which the quality loop is measured from", () => {
+    // The trace is the bulk; the verdicts are the value, and they are small.
+    const r = review("acme", "web", 2);
+    trace(r);
+    aged(r, 90);
+    pruneTelemetry(db, 30 * 24 * 60 * 60_000);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM reviews").get<{ n: number }>()?.n).toBe(1);
+  });
+
+  it("leaves a recent review alone", () => {
+    const r = review("acme", "web", 3);
+    trace(r);
+    aged(r, 1);
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 0, llmCalls: 0 });
+  });
+
+  it("leaves a review that is still running alone, however old its row is", () => {
+    // An in-flight review's trace is the one somebody is most likely to be reading.
+    const r = review("acme", "web", 4);
+    trace(r);
+    db.prepare("UPDATE reviews SET state='analyzing', created_at=? WHERE id=?").run(
+      new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString(),
+      r,
+    );
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 0, llmCalls: 0 });
   });
 });

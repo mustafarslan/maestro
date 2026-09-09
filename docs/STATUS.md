@@ -1650,6 +1650,28 @@ It does not make the class impossible, and nothing here pretends it does. What i
 the question unavoidable at the moment somebody adds recurring work, which is when it is cheap
 to answer.
 
+147. **Nothing in this system had ever deleted anything.** Every table grows for the life of the
+    install: reviews, tasks, environments, findings, feedback, spans, llm_calls, jobs. The only
+    `DELETE` statements anywhere removed a provider, refreshed a model catalog, and replaced a
+    re-review's findings. At a hundred reviews a day that is roughly four and a half million rows
+    a year, dominated by `spans` and `llm_calls` — one row per model step.
+
+    Not a crash, and not urgent, which is exactly why it would never have been noticed: the
+    database is simply larger every month for ever, and the first person to care is whoever runs
+    out of disk. The same class as 145 and 146 — correct at every scale it would be tested at.
+
+    `maestro prune` deletes the step trace of reviews finished more than N days ago, and it is
+    deliberately narrow. Reviews, findings and feedback stay for ever: they carry the
+    accepted/dismissed history the whole quality loop is measured from, and they are small.
+    `jobs` stays because its `dedupe_key` *is* the idempotency record — deleting a row would let
+    a redelivered webhook start a second review of the same head SHA years later.
+
+    Explicit rather than automatic, on purpose. A timer that removes somebody's history while
+    they are not looking is a worse first version of retention than a command they run. `doctor`
+    mentions the file size once it passes 50MB, so the growth is visible before it is a problem,
+    and `prune` says plainly that SQLite reuses freed pages rather than shrinking — otherwise
+    "removed 40,000 rows" beside an unchanged file size reads as a failure.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

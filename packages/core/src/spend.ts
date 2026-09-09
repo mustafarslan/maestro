@@ -93,3 +93,43 @@ export function checkSpend(
   }
   return { allowed: true, spentCents, repoSpentCents };
 }
+
+/**
+ * Deletes the bulky per-step telemetry of old reviews.
+ *
+ * Nothing in this system has ever deleted anything. Every table grows for the life of the
+ * install — at a hundred reviews a day that is roughly four and a half million rows a
+ * year, dominated by `spans` and `llm_calls`, which are one row per model step and are
+ * worth reading for about as long as somebody is still asking why a particular review said
+ * what it said.
+ *
+ * Deliberately narrow. `reviews` and `findings` stay for ever, because they carry the
+ * accepted/dismissed history the whole quality loop is measured from and they are small.
+ * `jobs` stays because its `dedupe_key` is the idempotency record: deleting a row would let
+ * a redelivered webhook start a second review of the same head SHA, years later. What goes
+ * is the step-by-step trace, which is the bulk and the part nobody reads after the fact.
+ */
+export function pruneTelemetry(
+  db: SqlDatabase,
+  olderThanMs: number,
+): { spans: number; llmCalls: number } {
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  const old = db
+    .prepare(
+      `SELECT id FROM reviews
+        WHERE state IN ('done','failed','cancelled','superseded')
+          AND COALESCE(finished_at, created_at) < ?`,
+    )
+    .all<{ id: string }>(cutoff);
+  if (!old.length) return { spans: 0, llmCalls: 0 };
+
+  return db.transaction(() => {
+    let spans = 0;
+    let llmCalls = 0;
+    for (const { id } of old) {
+      spans += db.prepare("DELETE FROM spans WHERE review_id=?").run(id).changes;
+      llmCalls += db.prepare("DELETE FROM llm_calls WHERE review_id=?").run(id).changes;
+    }
+    return { spans, llmCalls };
+  });
+}
