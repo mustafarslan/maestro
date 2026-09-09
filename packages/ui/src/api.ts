@@ -202,6 +202,8 @@ export interface PlaybookResponse {
     pinned: boolean;
     description: string;
   }[];
+  /** What a persona may reference. Served, never hardcoded here — see the API handler. */
+  templateVariables: { path: string; untrusted: boolean; description: string }[];
 }
 
 export interface ProvidersResponse {

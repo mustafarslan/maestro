@@ -363,10 +363,27 @@ button:disabled {
   padding: 10px;
   margin-bottom: 12px;
 }
-.issues .issue {
+.issues .issue,
+.issue {
   color: var(--err);
   font-size: 12px;
   margin-bottom: 4px;
+}
+
+/* Template-variable buttons beside the persona slot. */
+.chip {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.chip:hover {
+  color: inherit;
+  border-color: var(--muted);
 }
 .muted {
   color: var(--muted);

@@ -72,6 +72,30 @@ for (const doc of docs) {
   }
 }
 
+// 5. The documented persona template variables are exactly the ones the code offers.
+//
+// This table is the one a persona author copies from, and a variable that is documented
+// but not offered renders as nothing while the validator refuses the publish — the
+// document would be actively instructing somebody into an error. Checked against the
+// source rather than a build so it holds before anything is compiled.
+{
+  const prompt = readFileSync("packages/playbook/src/prompt.ts", "utf8");
+  const block = prompt.slice(
+    prompt.indexOf("export const TEMPLATE_VARIABLES = ["),
+    prompt.indexOf("] as const;"),
+  );
+  const code = new Set([...block.matchAll(/path:\s*"([\w.]+)"/g)].map((m) => m[1]));
+  const doc = new Set(
+    [...readFileSync("docs/CONFIGURATION.md", "utf8").matchAll(/\| `\{\{([\w.]+)\}\}` \|/g)].map(
+      (m) => m[1],
+    ),
+  );
+  if (!code.size) fail("could not read TEMPLATE_VARIABLES out of packages/playbook/src/prompt.ts");
+  for (const v of code) if (!doc.has(v)) fail(`docs/CONFIGURATION.md omits template variable ${v}`);
+  for (const v of doc)
+    if (!code.has(v)) fail(`docs/CONFIGURATION.md documents ${v}, which does not exist`);
+}
+
 console.log(
   bad ? `\n${bad} broken reference(s)` : "\nevery documented link, script, command and task exists",
 );

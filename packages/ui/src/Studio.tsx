@@ -9,7 +9,7 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AgentDef,
   api,
@@ -605,16 +605,11 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   </span>
                 </div>
 
-                <label className="field">
-                  <span className="field-label">
-                    Persona — Maestro always wraps this in a fixed preamble and output contract,
-                    which cannot be edited
-                  </span>
-                  <textarea
-                    value={agent.persona}
-                    onChange={(e) => updateAgent(agent.id, { persona: e.target.value })}
-                  />
-                </label>
+                <PersonaEditor
+                  value={agent.persona}
+                  variables={data.templateVariables}
+                  onChange={(persona) => updateAgent(agent.id, { persona })}
+                />
               </div>
             </>
           )}
@@ -916,5 +911,101 @@ function VersionDiff() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The persona slot, with the vocabulary beside it.
+ *
+ * The plan asks for "template-variable autocomplete". What a persona author actually
+ * needs is narrower and more useful than a popup: the list of what exists, insertion that
+ * cannot be mistyped, and — the part that catches real mistakes — a warning naming any
+ * `{{…}}` that resolves to nothing. An unknown variable renders empty at run time, so a
+ * persona reading `Criteria: {{linear.acceptance_criteria}}` (the spelling in Maestro's
+ * own design document, against a field named `acceptanceCriteria`) reviews against no
+ * acceptance criteria at all and says nothing about it. The server refuses to publish
+ * that; this is where somebody sees it while they are still typing.
+ *
+ * The list is served with the playbook rather than written here. Two copies of a
+ * vocabulary is one of them going stale, and a stale copy here offers a variable the
+ * validator then rejects.
+ */
+function PersonaEditor({
+  value,
+  variables,
+  onChange,
+}: {
+  value: string;
+  variables: PlaybookResponse["templateVariables"];
+  onChange: (persona: string) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const known = useMemo(() => new Set(variables.map((v) => v.path)), [variables]);
+  const unknown = useMemo(() => {
+    const found = new Set<string>();
+    for (const m of value.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)) {
+      const path = m[1];
+      if (path && !known.has(path)) found.add(path);
+    }
+    return [...found];
+  }, [value, known]);
+
+  // Inserted at the caret, not appended: a persona is prose, and the variable belongs in
+  // the sentence being written.
+  const insert = (path: string) => {
+    const el = ref.current;
+    const token = `{{${path}}}`;
+    if (!el) {
+      onChange(value + token);
+      return;
+    }
+    const at = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? at;
+    onChange(value.slice(0, at) + token + value.slice(end));
+    // Restore the caret after React re-renders with the new value, so a second insert
+    // does not land back at the start.
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(at + token.length, at + token.length);
+    });
+  };
+
+  return (
+    <label className="field">
+      <span className="field-label">
+        Persona — Maestro always wraps this in a fixed preamble and output contract, which cannot be
+        edited
+      </span>
+      <textarea ref={ref} value={value} onChange={(e) => onChange(e.target.value)} />
+
+      {unknown.length > 0 && (
+        <div className="issue" style={{ fontSize: 12, marginTop: 6 }}>
+          {unknown.map((u) => `{{${u}}}`).join(", ")} {unknown.length === 1 ? "is" : "are"} not a
+          template variable and will render as nothing. Publishing is blocked until it is fixed.
+        </div>
+      )}
+
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        Click to insert at the cursor. Values marked{" "}
+        <span style={{ color: "var(--warn)" }}>author-written</span> are fenced and labelled as
+        untrusted data before they reach the model — a pull request description interpolated into a
+        system prompt is otherwise a direct write into it.
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+        {variables.map((v) => (
+          <button
+            key={v.path}
+            type="button"
+            className="chip"
+            title={`${v.description}${v.untrusted ? " — author-written, fenced as untrusted" : ""}`}
+            onClick={() => insert(v.path)}
+            style={v.untrusted ? { borderColor: "var(--warn)" } : undefined}
+          >
+            {v.path}
+          </button>
+        ))}
+      </div>
+    </label>
   );
 }

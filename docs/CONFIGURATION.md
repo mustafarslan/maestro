@@ -156,6 +156,44 @@ server works with no daemon running. An earlier socket-path variable documented 
 described a bridge that was never built; it is gone rather than left as configuration that
 reads well and does nothing.
 
+## Persona template variables
+
+A persona may interpolate context with `{{…}}`. The Studio lists these beside the editor and
+inserts them at the cursor; the same list is what the validator enforces.
+
+| Variable | What it is | Source |
+| --- | --- | --- |
+| `{{pr.number}}` | Pull request number | Maestro |
+| `{{pr.title}}` | Pull request title | author-written — fenced |
+| `{{pr.description}}` | Pull request body | author-written — fenced |
+| `{{pr.author}}` | Login of whoever opened it | author-written — fenced |
+| `{{repo.owner}}` | Repository owner | Maestro |
+| `{{repo.name}}` | Repository name | Maestro |
+| `{{repo.defaultBranch}}` | Default branch name | Maestro |
+| `{{diff.summary}}` | Human-readable summary of the diff | author-written — fenced |
+| `{{diff.changedFiles}}` | Changed file paths, comma-joined | author-written — fenced |
+| `{{diff.changedLines}}` | Total lines added and removed | Maestro |
+| `{{linear.identifier}}` | Linear issue key, e.g. ENG-412 | author-written — fenced |
+| `{{linear.title}}` | Linear issue title | author-written — fenced |
+| `{{linear.description}}` | Linear issue description | author-written — fenced |
+| `{{linear.acceptanceCriteria}}` | Acceptance criteria from the Linear issue | author-written — fenced |
+| `{{commands}}` | Commands this agent is allowed to run, comma-joined | Maestro |
+| `{{carriedFindings}}` | Titles of unresolved findings from the previous round | Maestro |
+
+Two rules make this safe rather than merely convenient.
+
+**A variable that does not exist blocks the publish.** Rendering an unknown variable as empty is
+the right behaviour at run time — a pull request with no Linear issue must still be reviewed — but
+it makes a typo invisible: `{{linear.acceptance_criteria}}` against a field named
+`acceptanceCriteria` leaves the product agent checking a change against no acceptance criteria at
+all, silently. The editor warns while you type and `POST /api/playbook` refuses it.
+
+**Author-written values are fenced, not spliced.** The persona is rendered into the *system*
+prompt, beside the injection defenses. Interpolating a pull request description there unlabelled
+would hand whoever opened it a direct write into that prompt. Those values arrive inside the same
+nonce-delimited untrusted-content block the user prompt uses, so a description reading "ignore
+previous instructions" is presented as data to review.
+
 ## Spend caps
 
 A router tier caps one review and a model binding caps one agent. Neither can see that a

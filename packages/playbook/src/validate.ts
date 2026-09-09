@@ -1,4 +1,5 @@
 import { NODE_SPECS, type PortType } from "./nodes.js";
+import { unknownTemplateVariables } from "./prompt.js";
 import { type PlaybookDocument, PlaybookDocumentSchema } from "./schema.js";
 
 export interface ValidationIssue {
@@ -235,6 +236,25 @@ export function validateGraph(doc: PlaybookDocument): ValidationIssue[] {
         code: "unsafe-command",
         message: `allowedCommands entry '${cmd}' contains a shell metacharacter or network tool`,
         target: cmd,
+      });
+    }
+  }
+
+  // ── Persona template variables ────────────────────────────────────────────
+  // A misspelt variable renders empty, so `{{linear.acceptance_criteria}}` (the spelling
+  // in Maestro's own design document, against a field named `acceptanceCriteria`) leaves
+  // the product agent reviewing a change with no acceptance criteria at all, and nothing
+  // anywhere says so. Refusing the publish is the only point at which a person is looking.
+  const personas: { text: string; target: string }[] = [
+    ...doc.agents.map((a) => ({ text: a.persona, target: a.id })),
+    { text: doc.triage.persona, target: "triage" },
+  ];
+  for (const { text, target } of personas) {
+    for (const name of unknownTemplateVariables(text)) {
+      issues.push({
+        code: "unknown-template-variable",
+        message: `persona for '${target}' references {{${name}}}, which is not a template variable`,
+        target,
       });
     }
   }

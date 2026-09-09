@@ -10,7 +10,13 @@ import {
 import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
-import { diffPlaybooks, NODE_SPECS, PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
+import {
+  diffPlaybooks,
+  NODE_SPECS,
+  PlaybookStore,
+  safeParsePlaybook,
+  TEMPLATE_VARIABLES,
+} from "@maestro/playbook";
 
 export interface ApiContext {
   db: SqlDatabase;
@@ -101,6 +107,10 @@ const routes: Route[] = [
           createdAt: v.createdAt,
         })),
         nodeRegistry: Object.values(NODE_SPECS),
+        // The persona editor's vocabulary, served rather than retyped in the browser.
+        // A second copy in the UI is a second thing to forget when a context field is
+        // added, and the validator would then reject a variable the editor offered.
+        templateVariables: TEMPLATE_VARIABLES,
       };
     },
   },

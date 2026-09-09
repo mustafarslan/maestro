@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultPlaybook } from "./default-playbook.js";
+import { TEMPLATE_VARIABLES } from "./prompt.js";
 import type { PlaybookDocument } from "./schema.js";
 import { safeParsePlaybook, validateGraph } from "./validate.js";
 
@@ -293,5 +294,30 @@ describe("the rule the canvas enforces while an edge is drawn", () => {
     // Already wired; adding the same edge twice is what a careless drag would do.
     doc.graph.edges.push({ from: agentNode?.id as string, to: triage?.id as string });
     expect(validateGraph(doc).some((i) => i.code === "port-type")).toBe(false);
+  });
+});
+
+describe("persona template variables", () => {
+  it("refuses a persona that references a variable which does not exist", () => {
+    const doc = defaultPlaybook();
+    // The spelling used in Maestro's own design document. The field is
+    // `acceptanceCriteria`; this one renders empty, and the product agent then reviews
+    // against no acceptance criteria at all with nothing anywhere reporting it.
+    doc.agents[0]!.persona += "\n\nCriteria: {{linear.acceptance_criteria}}";
+    const issues = validateGraph(doc);
+    expect(issues.map((i) => i.code)).toContain("unknown-template-variable");
+    expect(issues[0]!.target).toBe(doc.agents[0]!.id);
+  });
+
+  it("checks the triage persona too", () => {
+    const doc = defaultPlaybook();
+    doc.triage.persona += " {{pr.tite}}";
+    expect(validateGraph(doc).map((i) => i.target)).toContain("triage");
+  });
+
+  it("accepts every variable the Studio offers", () => {
+    const doc = defaultPlaybook();
+    doc.agents[0]!.persona += TEMPLATE_VARIABLES.map((v) => `{{${v.path}}}`).join(" ");
+    expect(validateGraph(doc)).toEqual([]);
   });
 });
