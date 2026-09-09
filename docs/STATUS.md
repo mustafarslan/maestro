@@ -2247,6 +2247,20 @@ the server never sends fails it, and removing `live` from the server's response 
     Both found by running the binary rather than reading it, which is the third time
     today that has been the difference. Small on their own; the pattern is not.
 
+178. **`maestro llm add` silently replaced an existing provider.** It called the store's
+    `upsert` directly, so typing an id that already exists repointed that provider and
+    still printed "✓ registered" — as though something new had been created.
+
+    `maestro llm add ollama --kind openai-compatible --base-url http://x/v1` moved every
+    agent bound to `ollama` onto a different endpoint. Nothing in the output said anything
+    had been replaced, and nothing anywhere records what it used to be.
+
+    `upsert` is right as a store primitive — `ensureDefaults` needs it — so the refusal
+    belongs in the command, which is also where the convention already lives:
+    `github-app create` refuses an existing configuration unless `--force`. This did not.
+    It now refuses, names what it would have replaced, and says "replaced" rather than
+    "registered" when it does.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

@@ -8,7 +8,7 @@ import {
   runConformance,
   secretStore,
 } from "@maestro/llm";
-import { arg, rejectUnknownFlags } from "../args.js";
+import { arg, has, rejectUnknownFlags } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -30,7 +30,7 @@ ${color.bold("maestro llm")} <subcommand>
                               usage accounting, error mapping) against real providers
   key set <provider>          store an API key in the OS keychain (reads stdin)
   key rm <provider>
-  add <id> --kind <kind> [--base-url <url>]
+  add <id> --kind <kind> [--base-url <url>] [--force]
                               register another provider instance (e.g. a vLLM server)
   remove <id>                 unregister one
 `);
@@ -38,7 +38,7 @@ ${color.bold("maestro llm")} <subcommand>
 }
 
 export async function llm(argv: string[]): Promise<number> {
-  rejectUnknownFlags(argv, ["--base-url", "--kind", "--model", "--provider"]);
+  rejectUnknownFlags(argv, ["--base-url", "--force", "--kind", "--model", "--provider"]);
   const sub = argv[0];
   if (sub === "help" || sub === "--help" || sub === "-h") return usage(0);
   if (!sub) return usage();
@@ -212,8 +212,27 @@ export async function llm(argv: string[]): Promise<number> {
         const id = argv[1];
         const kind = arg(argv, "--kind") as ProviderKind | undefined;
         if (!id || !kind) return usage();
+
+        // `add` used the store's upsert directly, so re-using an existing id silently
+        // repointed that provider and still said "registered". Typing `ollama` when a
+        // provider called `ollama` already exists moved every agent bound to it onto a
+        // different endpoint, with nothing in the output saying anything had been
+        // replaced. `github-app create` already refuses this way; this did not.
+        const existing = store.list().find((x) => x.id === id);
+        if (existing && !has(argv, "--force")) {
+          console.log(
+            checkLine(
+              "fail",
+              "already registered",
+              `${id} is ${existing.kind}${existing.baseUrl ? ` at ${existing.baseUrl}` : ""} - ` +
+                "pass --force to replace it, or 'maestro llm remove' first",
+            ),
+          );
+          return 1;
+        }
+
         store.upsert({ id, kind, baseUrl: arg(argv, "--base-url"), enabled: true });
-        console.log(checkLine("ok", "registered", `${id} (${kind})`));
+        console.log(checkLine("ok", existing ? "replaced" : "registered", `${id} (${kind})`));
         return 0;
       }
 

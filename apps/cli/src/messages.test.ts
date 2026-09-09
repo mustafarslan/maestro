@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { evaluate } from "./commands/evaluate.js";
+import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
 
 /**
@@ -63,5 +64,69 @@ describe("errors that name the actual problem", () => {
     const said = logs.join("\n");
     expect(said).toContain("no such file");
     expect(said).not.toContain("ENOENT");
+  });
+});
+
+describe("registering a provider does not quietly replace one", () => {
+  let home: string;
+  let originalHome: string | undefined;
+  let logs: string[];
+
+  beforeEach(() => {
+    originalHome = process.env.MAESTRO_HOME;
+    home = mkdtempSync(join(tmpdir(), "maestro-llm-"));
+    process.env.MAESTRO_HOME = home;
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((...a) => {
+      logs.push(a.join(" "));
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    rmSync(home, { recursive: true, force: true });
+    if (originalHome === undefined) delete process.env.MAESTRO_HOME;
+    else process.env.MAESTRO_HOME = originalHome;
+  });
+
+  const baseUrlOf = async (id: string) => {
+    const { openStore } = await import("@maestro/core");
+    const { ProviderConfigStore } = await import("@maestro/llm");
+    const db = await openStore();
+    return new ProviderConfigStore(db).list().find((p) => p.id === id)?.baseUrl;
+  };
+
+  it("refuses an id that already exists, and changes nothing", async () => {
+    // `add` went straight to the store's upsert, so reusing an id repointed that
+    // provider and still said "registered". Every agent bound to it then called a
+    // different endpoint, with nothing in the output saying so.
+    expect(
+      await llm(["add", "ollama", "--kind", "openai-compatible", "--base-url", "http://x/v1"]),
+    ).toBe(1);
+    expect(logs.join("\n")).toContain("already registered");
+    expect(await baseUrlOf("ollama")).not.toBe("http://x/v1");
+  });
+
+  it("replaces it when asked, and says 'replaced' rather than 'registered'", async () => {
+    expect(
+      await llm([
+        "add",
+        "ollama",
+        "--kind",
+        "openai-compatible",
+        "--base-url",
+        "http://x/v1",
+        "--force",
+      ]),
+    ).toBe(0);
+    expect(logs.join("\n")).toContain("replaced");
+    expect(await baseUrlOf("ollama")).toBe("http://x/v1");
+  });
+
+  it("registers a genuinely new one", async () => {
+    expect(
+      await llm(["add", "my-vllm", "--kind", "openai-compatible", "--base-url", "http://y/v1"]),
+    ).toBe(0);
+    expect(logs.join("\n")).toContain("registered");
+    expect(await baseUrlOf("my-vllm")).toBe("http://y/v1");
   });
 });
