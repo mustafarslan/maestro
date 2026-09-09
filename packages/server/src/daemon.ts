@@ -135,6 +135,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       }
       return;
     }
+    // A closed or drafted pull request: stop the review rather than letting it finish a
+    // comment nobody will read. The `cancel` variant existed and nothing produced or
+    // consumed it, so this fell through to "ignored".
+    if (t.kind === "cancel") {
+      for (const [reviewId, controller] of inFlight) {
+        const meta = reviews.get(reviewId);
+        if (meta && meta.pr_number === t.pr.number) {
+          logger.info(
+            { reviewId, reason: t.reason },
+            "cancelling review for a closed pull request",
+          );
+          controller.abort();
+        }
+      }
+      return;
+    }
+
     if (t.kind !== "review") {
       logger.debug({ reason: t.reason }, "trigger ignored");
       return;

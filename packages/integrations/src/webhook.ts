@@ -70,6 +70,18 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
         // A new push invalidates the in-flight review for the previous SHA. Both the
         // cancel and the new review are needed: the stale one is holding a container.
         return { kind: "review", pr: ref, headSha, reason: "pull_request.synchronize" };
+      // Closing a pull request, or sending it back to draft, means the review in flight
+      // is producing a comment nobody will read while holding three containers for
+      // several more minutes. `cancel` was declared in this union for exactly that and
+      // nothing ever constructed it.
+      case "closed":
+      case "converted_to_draft":
+        return {
+          kind: "cancel",
+          pr: ref,
+          staleSha: headSha,
+          reason: `pull_request.${body.action}`,
+        };
       default:
         return { kind: "ignore", reason: `pull_request.${body.action} is not actionable` };
     }

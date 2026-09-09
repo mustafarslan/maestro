@@ -49,8 +49,10 @@ describe("event interpretation", () => {
     expect(t.kind).toBe("review");
   });
 
-  it("ignores actions that are not actionable", () => {
-    for (const action of ["labeled", "assigned", "closed", "edited"]) {
+  it("ignores actions that change nothing about whether to review", () => {
+    // `closed` was in this list and is not: a closed pull request should stop a review
+    // that is still running, not be shrugged at.
+    for (const action of ["labeled", "assigned", "edited"]) {
       expect(interpretEvent("pull_request", { ...pr(), action }).kind, action).toBe("ignore");
     }
   });
@@ -153,5 +155,37 @@ describe("triggering a review from a comment", () => {
       comment: { body: "@maestro review" },
     });
     expect(t.kind).toBe("ignore");
+  });
+});
+
+describe("pull requests that stop being worth reviewing", () => {
+  const prEvent = (action: string) =>
+    interpretEvent("pull_request", {
+      action,
+      repository: { name: "web", owner: { login: "acme" } },
+      pull_request: { number: 7, head: { sha: "a".repeat(40) } },
+    });
+
+  it("cancels the review when the pull request is closed", () => {
+    // Otherwise it runs to completion, holding containers for several minutes to produce
+    // a comment on a closed pull request. `cancel` was declared in the trigger union for
+    // this and nothing ever constructed it.
+    const t = prEvent("closed");
+    expect(t.kind).toBe("cancel");
+    if (t.kind === "cancel") expect(t.pr).toMatchObject({ owner: "acme", repo: "web", number: 7 });
+  });
+
+  it("cancels when a pull request goes back to draft", () => {
+    expect(prEvent("converted_to_draft").kind).toBe("cancel");
+  });
+
+  it("still ignores actions that change nothing, like a label", () => {
+    expect(prEvent("labeled").kind).toBe("ignore");
+  });
+
+  it("still reviews the actions that should start one", () => {
+    for (const action of ["opened", "reopened", "ready_for_review", "synchronize"]) {
+      expect(prEvent(action).kind, `${action} should trigger a review`).toBe("review");
+    }
   });
 });

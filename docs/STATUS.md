@@ -508,6 +508,14 @@ These are recorded because each was invisible to the test suite that existed at 
     timeout, fewer commands and fewer egress hosts; asking for more has no effect. Tested with the
     attack the file exists to prevent — a "test command" that is really `curl … | sh`.
 
+69. **Closing a pull request did not stop its review.** `pull_request.closed` and
+    `converted_to_draft` fell through to "not actionable", so a review kept running — three
+    containers for several more minutes — to produce a comment on a pull request nobody was
+    going to read. The `cancel` variant was declared in the trigger union for exactly this, and
+    nothing constructed it and nothing consumed it: the daemon's `t.kind !== "review"` guard
+    routed it to "ignored". Found by checking every variant of the union against what the
+    consumer handles.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
