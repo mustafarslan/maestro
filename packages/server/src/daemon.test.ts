@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { JobQueue, newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningDaemon, startDaemon, supersedes } from "./daemon.js";
@@ -418,5 +418,59 @@ describe("a delivery whose body arrives in pieces", () => {
     expect(split).toBeGreaterThan(2);
 
     expect(await deliverSplit(running?.webhookPort as number, body, split)).toBe(202);
+  }, 15_000);
+});
+
+describe("backpressure when the disk is full", () => {
+  /**
+   * Phase 7 asks for "backpressure when Docker, disk or budget saturates". Only the
+   * budget half existed. A review clones a repository, installs its dependencies and
+   * commits a snapshot image; started with no space it fails at a different point every
+   * time — `docker commit`, the install, a SQLite write — and none of those failures says
+   * the disk is full.
+   */
+  let db: SqlDatabase;
+  let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    new PlaybookStore(db).publish(defaultPlaybook(), { activate: true });
+  });
+  afterEach(async () => {
+    await running?.stop();
+    running = undefined;
+  });
+
+  const attempts = (): number =>
+    db.prepare("SELECT attempts FROM jobs WHERE kind='review-pr'").get<{ attempts: number }>()
+      ?.attempts ?? -1;
+
+  const queueOne = () =>
+    new JobQueue(db).enqueue({
+      kind: "review-pr",
+      payload: { owner: "acme", repo: "maestro", number: 7 },
+      dedupeKey: "acme/maestro#7@abc",
+    });
+
+  it("leaves queued work queued rather than claiming it", async () => {
+    queueOne();
+    running = await startDaemon({ db, minFreeBytes: Number.MAX_SAFE_INTEGER });
+    await new Promise((r) => setTimeout(r, 300));
+    // Never claimed: `claim` increments `attempts`, so zero attempts is the evidence.
+    // Unclaimed work waits for room and runs when there is some — refusing at enqueue
+    // instead would drop the webhook that asked, and nothing asks twice.
+    expect(attempts()).toBe(0);
+  }, 15_000);
+
+  it("claims it when there is room", async () => {
+    // The other half of the assertion: without this, a worker that never claims anything
+    // would pass the test above for the wrong reason.
+    queueOne();
+    running = await startDaemon({ db, minFreeBytes: 1 });
+    await new Promise((r) => setTimeout(r, 500));
+    // Claimed. It then fails for want of a GitHub credential and is requeued for a
+    // retry, so `state` is 'queued' again by now — which is why this asserts on
+    // `attempts` rather than on the state, and why the pause test does too.
+    expect(attempts()).toBeGreaterThan(0);
   }, 15_000);
 });

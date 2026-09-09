@@ -219,6 +219,21 @@ where the total stands. `maestro doctor` shows spend against the daily cap. Spen
 `llm_calls` rather than finished reviews, so a review still running counts — which is the money a
 cap most needs to see.
 
+## Disk
+
+Reviews clone repositories, install their dependencies and commit snapshot images, so disk is
+the resource they consume that nothing else reclaims. The daemon stops claiming new work when
+free space falls below **5 GiB or 5%**, whichever bites first, and resumes on its own when
+space returns. Queued work waits rather than being dropped — refusing at the moment a webhook
+arrives would lose the request, and nothing asks twice.
+
+The pause is logged once a minute, and `maestro doctor` reports the same number. To recover:
+
+```
+maestro reap      # remove stray containers and snapshot images — usually enough
+maestro prune     # delete the step-by-step trace of old reviews
+```
+
 ## Sandbox networking
 
 > **The prepare-phase allowlist is advisory.** The container is pointed at the proxy with

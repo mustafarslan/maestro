@@ -19,7 +19,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160), **gate nodes with per-node failure policy** (162) and **rewiring with live port checking** (163), **template variables with the untrusted ones fenced** (164, 165) and **the golden-set findings delta under the persona slot** (168) — every item the phase names | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
-| 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
+| 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
 | 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
@@ -2174,6 +2174,29 @@ the server never sends fails it, and removing `live` from the server's response 
     The test writes the request over a raw socket in two pieces, splitting inside the
     character, because `fetch` will not produce that shape and it is the only shape that
     shows it. Mutation-checked by restoring the per-chunk decode.
+
+174. **Half of "backpressure when Docker, disk or budget saturates" was missing.** Phase 7
+    names three. The budget half refuses a review before the job exists. The disk half did
+    not exist — and it is the one that matters most for a system whose whole job is
+    creating containers and committing snapshot images.
+
+    With no space left, a review fails at a different point every time: `docker commit`,
+    the dependency install, a SQLite write. None of those failures says "the disk is
+    full", so the operator sees three unrelated errors and a queue that is not moving.
+
+    Workers now check before claiming, not before enqueuing. That distinction is the whole
+    design: an unclaimed job waits and runs when there is room, while refusing at enqueue
+    would drop the webhook that asked and nothing asks twice. Two floors — five gigabytes,
+    and five percent for a disk small enough that five gigabytes is most of it — because
+    they answer different questions. `doctor` reports the same number, since "the queue is
+    not moving" and "the disk is full" look nothing alike from outside.
+
+    `statfsSync` rather than parsing `df`: one call, and identical under `node:fs` and
+    Bun's implementation, which the compiled binary depends on and a `df` parser would not
+    have guaranteed. Checked on both runtimes before it was used.
+
+    An unreadable filesystem is not a stop. Refusing every review because a volume is
+    unusual would be worse than the thing this guards against.
 
 ### Found by mechanical sweep, still open
 

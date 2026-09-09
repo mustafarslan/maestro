@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { promisify } from "node:util";
 import {
+  checkDisk,
   dayAgo,
   dbPath,
   detectRuntime,
@@ -341,6 +342,27 @@ export async function doctor(): Promise<number> {
             : `${leaked.length} of ${all.length} snapshot image(s) not cache-shared - run 'maestro reap'`,
     });
   }
+
+  // Disk, which the daemon now pauses on. Reported here as well because `doctor` is what
+  // somebody runs when reviews have stopped, and "the queue is not moving" and "the disk
+  // is full" look nothing alike from the outside.
+  const disk = checkDisk(maestroHome());
+  const gib = (n: number) => `${(n / 1024 ** 3).toFixed(1)}GiB`;
+  checks.push(
+    !disk.space
+      ? { status: "info", label: "disk", detail: "free space could not be read on this filesystem" }
+      : disk.ok
+        ? {
+            status: "ok",
+            label: "disk",
+            detail: `${gib(disk.space.freeBytes)} free (${(disk.space.freeRatio * 100).toFixed(0)}%) where reviews are prepared`,
+          }
+        : {
+            status: "fail",
+            label: "disk",
+            detail: `${disk.reason} - the daemon pauses reviews below this; free space or run 'maestro reap'`,
+          },
+  );
 
   console.log(color.bold("\nmaestro doctor\n"));
   for (const c of checks) console.log(checkLine(c.status, c.label, c.detail));

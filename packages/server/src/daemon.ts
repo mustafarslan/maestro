@@ -2,11 +2,13 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  checkDisk,
   checkSpend,
   hasPendingReviewJob,
   IN_FLIGHT_STATES,
   JobQueue,
   logger,
+  maestroHome,
   ReviewStore,
   recoverStaleReviews,
   reviewsForPullRequest,
@@ -53,6 +55,11 @@ export interface DaemonOptions {
   poll?: { repos: string[]; intervalMs: number };
   limits?: SchedulerLimits;
   concurrentReviews?: number;
+  /**
+   * Free-space floor below which workers stop claiming. Defaults to `MIN_FREE_BYTES`.
+   * Exposed so the pause can be exercised without filling a disk.
+   */
+  minFreeBytes?: number;
 }
 
 export interface RunningDaemon {
@@ -331,6 +338,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
 
   // ── worker loop ─────────────────────────────────────────────────────────
+  // Shared across workers on purpose: three workers each logging the same disk warning
+  // is three times the noise about one condition.
+  let lastDiskWarning = 0;
   const workers: Promise<void>[] = [];
   const workerCount = opts.concurrentReviews ?? 3;
 
@@ -385,6 +395,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     workers.push(
       (async () => {
         while (!stopping) {
+          // Backpressure, which Phase 7 names and only the budget half of which existed.
+          //
+          // Checked before claiming rather than before enqueuing: a job that is never
+          // claimed waits and runs when there is room again, while refusing to enqueue
+          // would drop the webhook that asked for it and nothing would ever ask twice.
+          // A review clones a repository, installs its dependencies and commits a
+          // snapshot image; running one with no disk left fails at a different point
+          // every time — `docker commit`, the install, a SQLite write — and none of
+          // those failures says "the disk is full".
+          const disk = checkDisk(maestroHome(), { minFreeBytes: opts.minFreeBytes });
+          if (!disk.ok) {
+            // Logged once a minute rather than once a second: this is the state an
+            // operator must be able to see, and a thousand identical lines hides it.
+            if (Date.now() - lastDiskWarning > 60_000) {
+              lastDiskWarning = Date.now();
+              logger.error(
+                { free: disk.space?.freeBytes },
+                `pausing reviews: ${disk.reason}. Queued work waits. ` +
+                  "Free space, or run 'maestro reap' to remove stray containers and snapshot images.",
+              );
+            }
+            await sleep(5000);
+            continue;
+          }
+
           const job = queue.claim(LEASE_MS, ["review-pr"]);
           if (!job) {
             await sleep(1000);

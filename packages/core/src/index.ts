@@ -1,3 +1,4 @@
+export * from "./disk.js";
 export * from "./finding-status.js";
 export * from "./ids.js";
 export * from "./incremental.js";
