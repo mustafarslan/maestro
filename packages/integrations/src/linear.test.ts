@@ -257,3 +257,41 @@ describe("against Linear's real API contract", () => {
     }
   });
 });
+
+describe("proving the key works, for doctor", () => {
+  // `doctor` reported "issue lookup enabled" on the strength of LINEAR_API_KEY existing.
+  // The client degrades gracefully when a call fails — correctly, a tracker being
+  // unreachable must never fail a code review — so a wrong or revoked key meant every
+  // review quietly ran without ticket context and nothing anywhere said so.
+  const client = (body: unknown, status = 200) =>
+    new LinearClient(
+      "key",
+      undefined,
+      (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch,
+    );
+
+  it("names who the key belongs to", async () => {
+    const who = await client({
+      data: { viewer: { name: "ada", displayName: "Ada L" } },
+    }).identity();
+    expect(who).toEqual({ ok: true, name: "Ada L" });
+  });
+
+  it("reports a rejected key as rejected rather than as enabled", async () => {
+    const who = await client({ errors: [{ message: "Authentication required" }] }).identity();
+    expect(who).toMatchObject({ ok: false });
+    expect((who as { reason: string }).reason).toContain("Authentication");
+  });
+
+  it("does not claim success on a response with no viewer", async () => {
+    // A 200 with an empty body would otherwise read as a working key.
+    expect(await client({ data: {} }).identity()).toMatchObject({ ok: false });
+  });
+
+  it("treats a transport failure as a failure, not as an outage to ignore", async () => {
+    const c = new LinearClient("key", undefined, (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch);
+    expect(await c.identity()).toMatchObject({ ok: false, reason: "network down" });
+  });
+});

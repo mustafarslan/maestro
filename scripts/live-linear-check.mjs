@@ -11,7 +11,7 @@
  *
  *   pnpm build && node scripts/live-linear-check.mjs
  */
-import { ISSUE_QUERY } from "../packages/integrations/dist/index.js";
+import { ISSUE_QUERY, VIEWER_QUERY } from "../packages/integrations/dist/index.js";
 
 const ENDPOINT = process.env.LINEAR_API_URL || "https://api.linear.app/graphql";
 
@@ -41,12 +41,24 @@ if (codeOf(control) !== "GRAPHQL_VALIDATION_FAILED") {
 }
 console.log("  ok   control: the endpoint rejects a field that does not exist");
 
-const real = await post(ISSUE_QUERY);
-const code = codeOf(real);
-if (code === "GRAPHQL_VALIDATION_FAILED") {
-  console.log(`  FAIL query: ${real.errors?.[0]?.message}`);
-  console.log("\nLinear's schema has moved. Maestro's issue lookup would return nothing.\n");
+let failed = 0;
+for (const [name, query] of [
+  ["issue lookup", ISSUE_QUERY],
+  // `doctor` calls this one to prove a configured key actually works, so its shape
+  // matters as much as the lookup's.
+  ["viewer (doctor's credential check)", VIEWER_QUERY],
+]) {
+  const res = await post(query);
+  const code = codeOf(res);
+  if (code === "GRAPHQL_VALIDATION_FAILED") {
+    console.log(`  FAIL ${name}: ${res.errors?.[0]?.message}`);
+    failed++;
+  } else {
+    console.log(`  ok   ${name}: validates against the live schema (stopped at ${code})`);
+  }
+}
+if (failed) {
+  console.log("\nLinear's schema has moved.\n");
   process.exit(1);
 }
-console.log(`  ok   query: validates against the live schema (stopped at ${code})`);
 console.log("\nquery shape verified — no API key needed\n");

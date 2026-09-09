@@ -1798,6 +1798,27 @@ to answer.
     that a mutation which failed to apply looked exactly like a guard that holds, and the second
     time I caught it only because the result was too convenient.
 
+155. **`doctor` reported Linear as working because a variable was set.** "issue lookup
+    enabled" came from `LINEAR_API_KEY` existing, and nothing had ever called Linear with it.
+    The client degrades gracefully when a call fails — correctly, since a tracker being
+    unreachable must never fail a code review — which is exactly what makes a wrong or revoked
+    key invisible: every review quietly runs without ticket context, the product agent judges
+    the diff against the author's own description instead of the acceptance criteria, and no
+    output anywhere mentions it.
+
+    The same defect as the GitHub credential earlier in this session, one integration over, and
+    the same fix: make a real call. `doctor` now reports "issue lookup enabled as Ada L", or
+    "LINEAR_API_KEY is set but rejected: …" and fails. Verified against the live endpoint with a
+    deliberately invalid key.
+
+    The `viewer` query it uses was shape-checked before being written, the same way the issue
+    lookup was — accepted by the live schema, with a bogus field on `User` refused — and
+    `scripts/live-linear-check.mjs` now validates both queries, since `doctor`'s credential check
+    is as exposed to schema drift as the lookup it guards.
+
+    This is the class 154 named, applied to the product rather than to a script: a check that
+    proves something exists where what matters is whether it works.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

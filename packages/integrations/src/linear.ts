@@ -137,6 +137,19 @@ export const ISSUE_QUERY = `query Issue($id: String!) {
   issue(id: $id) { identifier title description url state { name } }
 }`;
 
+/**
+ * Confirms the key works, for `maestro doctor`.
+ *
+ * `doctor` used to report "issue lookup enabled" purely because `LINEAR_API_KEY` was set.
+ * A wrong or revoked key then reported enabled and every review silently ran without
+ * ticket context, because the client degrades gracefully by design — which is right, and
+ * which is exactly why the failure is invisible without a call like this.
+ *
+ * Validated against the live schema the same way `ISSUE_QUERY` is: `viewer { name }` is
+ * accepted, and a bogus field on `User` is refused before authentication.
+ */
+export const VIEWER_QUERY = `query Viewer { viewer { name displayName } }`;
+
 export class LinearClient {
   constructor(
     private readonly apiKey: string,
@@ -149,6 +162,26 @@ export class LinearClient {
     const key = process.env.LINEAR_API_KEY?.trim();
     if (!key) return undefined;
     return new LinearClient(key, process.env.LINEAR_API_URL || undefined, fetchImpl);
+  }
+
+  /** Who the key belongs to, or a reason it does not work. */
+  async identity(): Promise<{ ok: true; name: string } | { ok: false; reason: string }> {
+    try {
+      const res = await this.fetchImpl(this.endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: this.apiKey },
+        body: JSON.stringify({ query: VIEWER_QUERY }),
+      });
+      const json = (await res.json()) as {
+        data?: { viewer?: { name?: string; displayName?: string } };
+        errors?: { message: string }[];
+      };
+      if (json.errors?.length) return { ok: false, reason: json.errors[0]?.message ?? "refused" };
+      const name = json.data?.viewer?.displayName ?? json.data?.viewer?.name;
+      return name ? { ok: true, name } : { ok: false, reason: "no viewer in the response" };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   async getIssue(identifier: string): Promise<LinearIssue | undefined> {

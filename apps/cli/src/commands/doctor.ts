@@ -10,7 +10,7 @@ import {
   openStore,
   spendSince,
 } from "@maestro/core";
-import { GitHubClient, storedGitHubApp } from "@maestro/integrations";
+import { GitHubClient, LinearClient, storedGitHubApp } from "@maestro/integrations";
 import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
 import { checkLine, color } from "../ui.js";
@@ -258,17 +258,38 @@ export async function doctor(): Promise<number> {
         : `model prices cached ${PRICING_FETCHED_AT}`,
   });
 
+  // A key that is SET is not a key that works. This said "issue lookup enabled" on the
+  // strength of an environment variable existing, and the Linear client degrades
+  // gracefully when a call fails — so a wrong or revoked key meant every review quietly
+  // ran without ticket context and nothing anywhere said so. Same defect as the GitHub
+  // credential, one integration over.
+  let linearIdentity = "issue lookup enabled";
+  const linear = LinearClient.fromEnv();
+  if (linear) {
+    let timer: NodeJS.Timeout | undefined;
+    const who = await Promise.race([
+      linear.identity(),
+      new Promise<{ ok: false; reason: string }>((r) => {
+        timer = setTimeout(() => r({ ok: false, reason: "timed out after 10s" }), 10_000);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    const prefixes = process.env.LINEAR_TEAM_PREFIXES
+      ? `, prefixes: ${process.env.LINEAR_TEAM_PREFIXES}`
+      : "";
+    linearIdentity = who.ok
+      ? `issue lookup enabled as ${who.name}${prefixes}`
+      : `LINEAR_API_KEY is set but rejected: ${who.reason}`;
+  }
+
   // Optional integration: its absence is information, not a problem. Saying nothing at
   // all is worse — a product agent reviewing against no acceptance criteria looks the
   // same as one reviewing against the wrong ones.
   checks.push(
     process.env.LINEAR_API_KEY
       ? {
-          status: "ok",
+          status: linearIdentity.startsWith("LINEAR_API_KEY is set but rejected") ? "fail" : "ok",
           label: "linear",
-          detail: process.env.LINEAR_TEAM_PREFIXES
-            ? `issue lookup enabled, prefixes: ${process.env.LINEAR_TEAM_PREFIXES}`
-            : "issue lookup enabled",
+          detail: linearIdentity,
         }
       : {
           status: "info",
