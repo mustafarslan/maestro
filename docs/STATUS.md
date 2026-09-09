@@ -1072,6 +1072,22 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
 - **`repos.config_json`, `repos.installation_id` and the whole `installations` table are unused**,
   since no GitHub App exists yet.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
+- **Reaction feedback is ungated, and its delivery is unproven.** `interpretEvent` handles an
+  event named `reaction` and `ingestReaction` settles every finding on the comment it names, with
+  no check on who reacted — while the *comment* trigger beside it is gated on
+  `author_association`, because that one spends money. Reactions spend nothing and steer
+  something arguably more important: they are the signal noise tuning is meant to be driven by,
+  so on a public repository a stranger's 👎 moves the precision numbers for a whole review.
+
+  Recorded rather than fixed, deliberately, because the obvious fix rests on two things not
+  established here. First, whether GitHub delivers a `reaction` webhook at all — the App manifest
+  this project generates requests `pull_request`, `issue_comment` and
+  `pull_request_review_comment`, and no reaction event, which suggests the branch may never fire
+  in production. Second, whether a reaction payload even carries `author_association`; if it does
+  not, reusing the existing gate would fail closed and silently switch the entire feedback signal
+  off, which is worse than the hole. Both are answerable in minutes against a live App, and that
+  is the same live GitHub run the rest of the unverified list is waiting on. Settling it by
+  guessing is how a check that looks right and does nothing gets written.
 
 Findings 75-87 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
