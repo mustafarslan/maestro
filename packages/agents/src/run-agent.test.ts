@@ -210,3 +210,59 @@ describe("structured output contract", () => {
     expect(result.parseError).toContain("before submitting findings");
   });
 });
+
+describe("model settings reaching the provider", () => {
+  it("forwards every configured model setting, not just the ones anyone remembered", async () => {
+    // thinkingBudget was handled correctly by the provider and never passed to it: the
+    // agent runner forwarded temperature and maxTokens and silently dropped the rest.
+    // The same shape of bug as maxPromptChars — a knob wired at one end only, which no
+    // type error catches because every field is optional.
+    const seen: Record<string, unknown>[] = [];
+    const provider = {
+      id: "fake",
+      kind: "anthropic" as const,
+      capabilities: () => ({
+        tools: true,
+        jsonSchema: true,
+        thinking: true,
+        vision: false,
+        caching: false,
+        contextWindow: 200_000,
+      }),
+      chat: async (req: Record<string, unknown>) => {
+        seen.push(req);
+        return {
+          text: "",
+          toolCalls: [{ id: "1", name: "submit_findings", input: { findings: [] } }],
+          finishReason: "tool-calls" as const,
+          usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          latencyMs: 1,
+          model: "claude-opus-5",
+          providerId: "fake",
+        };
+      },
+    };
+
+    await runReviewAgent({
+      ...baseReq,
+      // biome-ignore lint/suspicious/noExplicitAny: a hand-rolled provider double
+      provider: provider as any,
+      model: "claude-opus-5",
+      agent: {
+        ...agent,
+        model: {
+          ...agent.model,
+          temperature: 0.3,
+          maxTokens: 4096,
+          thinkingBudget: 8192,
+        },
+      },
+    });
+
+    expect(seen[0]).toMatchObject({
+      temperature: 0.3,
+      maxTokens: 4096,
+      thinkingBudget: 8192,
+    });
+  });
+});

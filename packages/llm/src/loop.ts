@@ -71,6 +71,8 @@ export interface RunAgentOptions {
   budget: Budget;
   temperature?: number;
   maxOutputTokens?: number;
+  /** Extended thinking. The provider translates it to the shape its model accepts. */
+  thinkingBudget?: number;
   signal?: AbortSignal;
   onStep?: (step: LoopStep) => void | Promise<void>;
   /** Retry policy for transient provider failures. */
@@ -244,6 +246,7 @@ async function callWithRetry(
         tools: opts.tools,
         temperature: opts.temperature,
         maxTokens: opts.maxOutputTokens,
+        thinkingBudget: opts.thinkingBudget,
         signal: opts.signal,
       });
     } catch (err) {

@@ -1,0 +1,104 @@
+# Configuration
+
+Maestro's review pipeline lives in the **playbook**, which is data in the database and edited in
+the Studio — not here. This file covers the things that must be settled before the process starts:
+where state lives, how credentials are found, and how sandboxes reach the network.
+
+## Credentials
+
+### Model providers
+
+Resolution order, first match wins:
+
+1. `MAESTRO_KEY_<PROVIDER_ID>` — per provider *instance*, uppercased with `-` as `_`. A second
+   Ollama instance called `ollama-gpu0` reads `MAESTRO_KEY_OLLAMA_GPU0`. This is the only way to
+   give two instances of the same kind different keys.
+2. The conventional variable for the provider kind: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+   `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY`.
+3. The OS keychain — `security` on macOS, `secret-tool` on Linux — written by
+   `maestro llm set-key` and never readable through the API or UI.
+
+Environment variables deliberately win over the keychain, so CI and one-off runs need no
+interactive keychain prompt.
+
+`MAESTRO_SECRETS=file` forces a `0600` file under `$MAESTRO_HOME` instead of a keychain. That is
+the automatic fallback where no keychain tool exists; set it explicitly on a headless host to avoid
+depending on what happens to be installed.
+
+`openai-compatible` instances have no conventional variable. Give them
+`MAESTRO_KEY_<ID>`, or nothing at all for a local Ollama that needs no key.
+
+### GitHub
+
+A GitHub App is preferred; a PAT works for a single user.
+
+| Variable | Purpose |
+| --- | --- |
+| `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` | App credentials |
+| `GITHUB_TOKEN` | PAT, used when no App is configured |
+| `GITHUB_WEBHOOK_SECRET` | Required by `serve --webhook-port`; deliveries without a valid HMAC are refused |
+
+Agents never see any of these. They run offline in a container with no credentials, and the
+orchestrator is the only writer.
+
+### Linear (optional)
+
+| Variable | Purpose |
+| --- | --- |
+| `LINEAR_API_KEY` | Enables issue lookup; absent means reviews run without ticket context |
+| `LINEAR_TEAM_PREFIXES` | e.g. `ENG,DES`. Restricts which key-shaped strings are treated as issues — `fix/utf-8-encoding` otherwise looks exactly like issue `UTF-8` |
+
+## State
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAESTRO_HOME` | `~/.maestro` | Database, workspaces, fixtures, the file secret store |
+| `MAESTRO_DB` | `$MAESTRO_HOME/maestro.db` | Override the SQLite path alone |
+| `MAESTRO_SOCKET` | `$MAESTRO_HOME/maestro.sock` | Unix socket the MCP server bridges over |
+| `MAESTRO_LOG_LEVEL` | `info` | `trace`…`fatal`. Logs go to **stderr**, so stdout stays parseable |
+
+## Sandbox networking
+
+Only the `prepare` phase has any network, and only through an allowlist proxy. `analyze` runs with
+`--network none` regardless of everything below.
+
+The one question these settings answer is: *how does a sandbox container reach the proxy?*
+
+| Variable | When you need it |
+| --- | --- |
+| `MAESTRO_SANDBOX_NETWORK` | **Maestro is itself a container** (the Compose deployment). Names the Docker network the prepare sandbox joins, so it reaches Maestro by name. This is the right answer for containerised deployments |
+| `MAESTRO_PROXY_HOST` | Manual override of the address sandboxes dial. Defaults to Maestro's own hostname when a sandbox network is set, `host.docker.internal` otherwise |
+| `MAESTRO_PROXY_BIND` | Which interface the proxy binds. Defaults to loopback on macOS, the docker bridge on Linux, all interfaces inside a container |
+| `MAESTRO_PROXY_PORT_RANGE` | e.g. `7790-7799`. Pins the proxy to a fixed range instead of an ephemeral port, for deployments that must publish it. The range width caps concurrent prepare phases |
+
+Getting this wrong has one symptom: every dependency install fails or times out, and nothing in the
+error names this setting. `maestro doctor` reports what is configured.
+
+## Admin surface
+
+| Variable | Purpose |
+| --- | --- |
+| `MAESTRO_ADMIN_TOKEN` | Bearer token for the admin API and UI. Generated per run if unset |
+
+The admin API binds `127.0.0.1` by default and refuses to bind elsewhere without a token. The
+webhook receiver is a separate listener on its own port, because it is the only thing that must be
+reachable from the internet and it does signature verification and nothing else.
+
+## Self-hosting
+
+`maestro serve` on a host is the simplest deployment: one binary, the installer is the whole setup.
+
+```sh
+maestro init
+maestro doctor          # checks Docker, git, database, playbook, Linear
+maestro serve --poll owner/repo --admin-port 7777
+```
+
+`--poll` needs no public URL and no App, which makes it the right starting point. Move to
+`--webhook-port` once an App exists.
+
+For the container deployment see `docker-compose.yml`. It mounts the Docker socket, which grants
+Maestro control of the host daemon — run it on a host you would trust with that. Agent containers
+never receive the socket.
+
+What is verified and what is not is recorded in [STATUS.md](./STATUS.md).

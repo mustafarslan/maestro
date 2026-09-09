@@ -152,6 +152,11 @@ its sandboxes are siblings on the host daemon, so the egress proxy has to bind a
 fixed and published for them to reach it (`MAESTRO_PROXY_PORT_RANGE`, published on the bridge
 gateway). That is wired and unit-tested; it has never been run on a real Linux host.
 
+## Reference
+
+- [Configuration](docs/CONFIGURATION.md) — credentials, state, sandbox networking, self-hosting
+- [Status](docs/STATUS.md) — what is verified against reality, and what is not
+
 ## Status
 
 All ten phases of the implementation plan are landed. What is verified, and what is not, is

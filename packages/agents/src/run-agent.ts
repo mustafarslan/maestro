@@ -69,6 +69,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
     budget: req.budget,
     temperature: req.agent.model.temperature,
     maxOutputTokens: req.agent.model.maxTokens,
+    thinkingBudget: req.agent.model.thinkingBudget,
     signal: req.signal,
     onStep: (s) => req.onStep?.({ index: s.index, costCents: s.costCents }),
   });
