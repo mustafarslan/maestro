@@ -20,6 +20,17 @@ const WORKDIR = "/work";
 /** Caches must live somewhere writable, because the analyze rootfs is read-only. */
 const CACHE_DIR = "/tmp/maestro-cache";
 
+/**
+ * Where corepack keeps the package-manager binary it downloads.
+ *
+ * Deliberately NOT under CACHE_DIR. The analyze phase mounts a tmpfs over `/tmp`, which
+ * shadows everything the prepare phase baked in there — so a package manager downloaded
+ * during prepare was invisible by the time an agent tried to use it, and every
+ * allowlisted command died in 0.1s trying to fetch it with no network. Outside `/tmp`
+ * the download survives `docker commit` and is simply read from the read-only rootfs.
+ */
+const COREPACK_HOME = "/opt/maestro-corepack";
+
 interface RunOptions {
   timeoutMs: number;
   input?: string;
@@ -209,6 +220,8 @@ export class DockerSandboxDriver implements SandboxDriver {
           `npm_config_cache=${CACHE_DIR}/npm`,
           "--env",
           `XDG_CACHE_HOME=${CACHE_DIR}`,
+          "--env",
+          `COREPACK_HOME=${COREPACK_HOME}`,
           "--workdir",
           WORKDIR,
           image,
@@ -229,7 +242,9 @@ export class DockerSandboxDriver implements SandboxDriver {
       const start = await docker(["start", containerId], { timeoutMs: 30_000 });
       if (start.exitCode !== 0) throw new Error(`docker start failed: ${start.stderr}`);
 
-      await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR], { timeoutMs: 20_000 });
+      await docker(["exec", containerId, "mkdir", "-p", CACHE_DIR, COREPACK_HOME], {
+        timeoutMs: 20_000,
+      });
 
       // The checkout is copied in from the host, so its files are owned by the host uid
       // and git refuses to touch it ("dubious ownership"). Without this every git tool
@@ -348,6 +363,8 @@ export class DockerSandboxDriver implements SandboxDriver {
       `npm_config_cache=${CACHE_DIR}/npm`,
       "--env",
       `XDG_CACHE_HOME=${CACHE_DIR}`,
+      "--env",
+      `COREPACK_HOME=${COREPACK_HOME}`,
       "--workdir",
       WORKDIR,
     ];

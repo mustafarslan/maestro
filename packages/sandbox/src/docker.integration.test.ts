@@ -89,6 +89,21 @@ describe("prepare phase", () => {
 });
 
 describe("analyze phase security posture", () => {
+  itDocker("keeps the package-manager cache outside the tmpfs that shadows /tmp", async () => {
+    // The analyze phase mounts a tmpfs over /tmp, which shadows anything prepare baked in
+    // there. With corepack's download under /tmp it was invisible by analyze time, so
+    // every allowlisted command exited in 0.1s trying to fetch a package manager with no
+    // network — and the agent saw a bare exit 1, indistinguishable from a real failure.
+    // Measured on a real pull request: six commands, six instant failures.
+    const home = await box!.exec("printenv COREPACK_HOME");
+    expect(home.exitCode).toBe(0);
+    expect(home.stdout.trim()).not.toMatch(/^\/tmp\b/);
+
+    // The location must survive the commit, not merely be pointed at.
+    const survives = await box!.exec(`test -d ${home.stdout.trim()} && echo present`);
+    expect(survives.stdout.trim()).toBe("present");
+  });
+
   itDocker("has a working git, which every git tool depends on", async () => {
     // The slim base images ship without git; that silently broke git_diff/git_log and
     // cost every review its diff.
