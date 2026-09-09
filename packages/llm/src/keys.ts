@@ -1,5 +1,13 @@
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { maestroHome } from "@maestro/core";
@@ -25,30 +33,68 @@ function filePath(): string {
   return join(maestroHome(), "secrets.json");
 }
 
+/**
+ * Reads the store, treating an unreadable file as empty rather than throwing.
+ *
+ * A truncated or hand-edited secrets.json would otherwise crash every command that
+ * resolves a key, with a JSON parse error that names neither the file nor the fix. An
+ * empty store degrades to "no key configured", which the callers already handle and which
+ * says something true.
+ */
+function readAll(path: string): Record<string, string> {
+  if (!existsSync(path)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Writes the store atomically.
+ *
+ * Every key lives in one JSON object, so a partial write does not corrupt one entry — it
+ * destroys all of them. Writing a temp file in the same directory and renaming makes the
+ * replacement atomic on POSIX: a crash leaves either the old file or the new one, never
+ * a half-written one. The temp file is created 0600 so the secret is never briefly
+ * readable by anyone else.
+ */
+function writeAll(path: string, data: Record<string, string>): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, path);
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      // Nothing useful to do; the original file is intact either way.
+    }
+    throw err;
+  }
+}
+
 const fileStore: SecretStore = {
   backend: "file",
   async get(account) {
-    const path = filePath();
-    if (!existsSync(path)) return undefined;
-    const data = JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
-    return data[account];
+    return readAll(filePath())[account];
   },
   async set(account, secret) {
     const path = filePath();
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    const data = existsSync(path)
-      ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, string>)
-      : {};
+    const data = readAll(path);
     data[account] = secret;
-    writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
-    chmodSync(path, 0o600);
+    writeAll(path, data);
   },
   async delete(account) {
     const path = filePath();
     if (!existsSync(path)) return;
-    const data = JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
+    const data = readAll(path);
     delete data[account];
-    writeFileSync(path, JSON.stringify(data, null, 2), { mode: 0o600 });
+    writeAll(path, data);
   },
 };
 

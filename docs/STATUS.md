@@ -329,6 +329,16 @@ These are recorded because each was invisible to the test suite that existed at 
     error. This is a self-hosted code-review tool, so private forks are the expected case, not an
     edge one.
 
+45. **Writing one API key could destroy every other one.** The file secret store keeps all keys
+    in a single JSON object and rewrote the whole file in place, so an interrupted write did not
+    corrupt one entry — it lost the lot. Now written to a sibling temp file at 0600 and renamed,
+    which is atomic on POSIX: a crash leaves either the old file or the new one. Found by looking
+    for source files no test imported; credential handling was the largest of them, at 169 lines
+    with no test at all.
+46. **A corrupt secrets file crashed every command that resolved a key**, with a JSON parse error
+    naming neither the file nor the fix. An unreadable store is now treated as empty, which
+    degrades to "no key configured" — something the callers already handle and which is true.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 
