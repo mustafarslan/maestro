@@ -1,11 +1,7 @@
 import { openStore } from "@maestro/core";
 import { startDaemon } from "@maestro/server";
+import { arg } from "../args.js";
 import { checkLine, color } from "../ui.js";
-
-function arg(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
-}
 
 export async function serve(argv: string[]): Promise<number> {
   if (argv.includes("--help")) {

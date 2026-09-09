@@ -8,6 +8,7 @@ import {
   runConformance,
   secretStore,
 } from "@maestro/llm";
+import { arg } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 function usage(): number {
@@ -25,11 +26,6 @@ ${color.bold("maestro llm")} <subcommand>
                               register another provider instance (e.g. a vLLM server)
 `);
   return 1;
-}
-
-function arg(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
 }
 
 export async function llm(argv: string[]): Promise<number> {

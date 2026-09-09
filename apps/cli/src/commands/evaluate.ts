@@ -18,6 +18,7 @@ import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/i
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
+import { arg } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
@@ -36,11 +37,6 @@ A fixture is a repository state with a known answer key. Scoring against it turn
 two pipelines can actually be compared.
 `);
   return 1;
-}
-
-function arg(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
 }
 
 const scoresDir = () => join(maestroHome(), "eval-scores");

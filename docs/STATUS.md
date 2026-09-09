@@ -22,7 +22,7 @@ the README so the claims in that file stay short and true.
 | Prompt injection defenses | Structural: no write/network/GitHub tool exists, the allowlist is exact-match, untrusted text is fenced, and a hostile persona cannot displace the fixed preamble or contract |
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
-| **Container deployment** | The image builds and runs: migrations apply, both listeners bind, the admin API returns 200 with a token and 401 without, the UI serves, and the webhook port rejects an unsigned body |
+| **The Compose deployment, end to end** | `docker compose up` starts, both listeners bind and are reachable through their published ports, the admin API is 200 with a token and 401 without, a correctly signed webhook returns 202 and is logged as a review trigger while an unsigned one returns 401, and a sibling container on the sandbox network reaches Maestro **by hostname** — the exact path a sandbox uses to reach the egress proxy. Only driving a full model review through it is outstanding, which needs provider credentials |
 | **Linear's query against the live schema** | Linear validates GraphQL *before* authentication: a query naming a nonexistent field returns 400 `GRAPHQL_VALIDATION_FAILED` unauthenticated, while Maestro's query returns 401. Every field it selects therefore provably exists on the live `Issue` type. Its real 401 and 400 bodies are now the test fixtures |
 | Compose sandbox-to-proxy routing | A sibling container on a shared network reaches another by name (HTTP 200) and a container off that network cannot (unreachable). An integration test then drives the real driver: the prepare sandbox joins a named network, and the analyze container still has no default route |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
@@ -68,10 +68,9 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **No GitHub App exists.** Webhook deliveries were verified by signing real payloads with the
   configured secret and posting them to the running daemon, which is the same code path GitHub
   exercises; what has not been done is registering an App so GitHub itself sends them.
-- **Compose has never been run end to end on a Linux host with a real pull request.** Every
-  component is verified — the image builds and runs, both listeners bind, the admin token is
-  enforced, and the prepare sandbox joins Maestro's network while analyze keeps `--network none` —
-  but no full review has been driven through a Compose deployment.
+- **No full model review has been driven through Compose.** Everything up to that point is
+  verified against a running deployment, including the sandbox-network path the egress proxy
+  depends on. What has not run is a review that actually calls a model, which needs credentials.
 - **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
   across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
   found a fairness bug; it does not start 40 real containers.
@@ -110,6 +109,18 @@ model schema is read by something that runs, every `MAESTRO_` variable the code 
 the configuration reference, and the loop carries each setting through to the provider. It is crude
 — it reads source text — because the property is about the repository rather than any one module.
 Both historical bugs were reintroduced to confirm it fails on them, and it does.
+
+### What the guard did not cover
+
+The wiring guard catches configuration declared and never read. It does not catch configuration
+that is read *in a form nobody passes* — which is the next defect it failed to prevent: six
+commands each carried their own flag parser handling only `--flag value`, while
+`docker-compose.yml` passes `--flag=value`. The daemon started, ignored `--webhook-port=8080` and
+`--admin-host=0.0.0.0`, warned that no trigger was configured as though the operator had forgotten
+one, and bound the admin API where the published port could not reach it. The documented container
+deployment came up and did nothing, and said nothing true about why.
+
+Found by running `docker compose up` rather than by reading anything.
 
 ## Bugs found by running it, and fixed
 
@@ -301,6 +312,13 @@ These are recorded because each was invisible to the test suite that existed at 
     would make a quiet agent look accurate.
 42. **Seven environment variables were read by code and documented nowhere**, which for a
     self-hosted tool means undiscoverable. `docs/CONFIGURATION.md` now covers them.
+
+43. **The whole Compose deployment silently did nothing.** Six commands each reimplemented flag
+    parsing, all handling only `--flag value`, while the compose file uses `--flag=value`. The
+    daemon started, ignored its webhook port and admin host, and warned about a missing trigger as
+    though the operator were at fault. One shared parser now accepts both spellings, refuses to
+    read a following flag as a value — `reap --review --all` must not treat `--all` as a review id,
+    because the unscoped sweep is destructive — and keeps `=` inside values intact.
 
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.

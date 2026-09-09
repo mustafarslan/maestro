@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { openStore } from "@maestro/core";
 import { NODE_SPECS, PlaybookStore, parseYaml, safeParsePlaybook, toYaml } from "@maestro/playbook";
+import { arg } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 function usage(): number {
@@ -45,9 +46,8 @@ export async function playbook(argv: string[]): Promise<number> {
       }
 
       case "show": {
-        const idx = argv.indexOf("--version");
-        const record =
-          idx >= 0 && argv[idx + 1] ? store.getVersion(argv[idx + 1] as string) : store.getActive();
+        const version = arg(argv, "--version");
+        const record = version ? store.getVersion(version) : store.getActive();
         if (!record) {
           console.error("no such playbook version");
           return 1;

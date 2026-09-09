@@ -1,4 +1,5 @@
 import { runStdioServer } from "@maestro/mcp";
+import { arg } from "../args.js";
 
 /**
  * stdio MCP server.
@@ -8,8 +9,7 @@ import { runStdioServer } from "@maestro/mcp";
  * client silently disconnects.
  */
 export async function mcp(argv: string[]): Promise<number> {
-  const dbIndex = argv.indexOf("--db");
-  await runStdioServer(dbIndex >= 0 ? argv[dbIndex + 1] : undefined);
+  await runStdioServer(arg(argv, "--db"));
   // The transport owns the process lifetime; returning here would close stdin.
   await new Promise(() => {});
   return 0;

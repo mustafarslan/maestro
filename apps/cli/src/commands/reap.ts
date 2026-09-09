@@ -1,5 +1,6 @@
 import { openStore } from "@maestro/core";
 import { DockerSandboxDriver } from "@maestro/sandbox";
+import { arg, has } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -29,18 +30,14 @@ by default because they are what makes later reviews fast.
     return 1;
   }
 
-  const reviewIndex = argv.indexOf("--review");
-  let reviewId: string | undefined;
-  if (reviewIndex >= 0) {
-    const value = argv[reviewIndex + 1];
-    // `maestro reap --review` with the id forgotten used to fall through to the
-    // UNSCOPED sweep, tearing down every in-flight review's containers. The most
-    // destructive action must never be what a typo produces.
-    if (!value || value.startsWith("--")) {
-      console.error("--review requires a review id, e.g. --review rv_1a2b3c");
-      return 1;
-    }
-    reviewId = value;
+  // `maestro reap --review` with the id forgotten used to fall through to the UNSCOPED
+  // sweep, tearing down every in-flight review's containers. The most destructive action
+  // must never be what a typo produces, so the flag being present without a usable value
+  // is an error rather than a silent widening.
+  const reviewId = arg(argv, "--review");
+  if (has(argv, "--review") && !reviewId) {
+    console.error("--review requires a review id, e.g. --review rv_1a2b3c");
+    return 1;
   }
 
   console.log(color.bold("\nmaestro reap\n"));
