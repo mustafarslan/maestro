@@ -94,6 +94,23 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **The line-changed feedback signal is file-level**, not line-level: computing the latter needs the
   patch of every intermediate commit, and a file being edited is already meaningful evidence.
 
+## The one recurring bug class, and what now stops it
+
+Five separate defects in this project shared a single shape: configuration declared at one end and
+read at neither. The scheduler was constructed and never called. `maxPromptChars` existed in the
+loop and no caller could reach it. Linear context was rendered into the prompt and never populated.
+`thinkingBudget` was dead — then still dead after the fix that was supposed to revive it, because
+the provider learned the right shape while nothing passed the value in.
+
+None produced a type error. Every field is optional, so a consumer that simply never mentions one
+compiles perfectly. Every one of the five was caught by a person noticing, which is not a control.
+
+`packages/playbook/src/wiring.test.ts` now asserts the property directly: every tunable in the
+model schema is read by something that runs, every `MAESTRO_` variable the code reads appears in
+the configuration reference, and the loop carries each setting through to the provider. It is crude
+— it reads source text — because the property is about the repository rather than any one module.
+Both historical bugs were reintroduced to confirm it fails on them, and it does.
+
 ## Bugs found by running it, and fixed
 
 These are recorded because each was invisible to the test suite that existed at the time.
