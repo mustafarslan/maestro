@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AgentDef,
   api,
+  type EvalResponse,
   type Issue,
   type PlaybookDiff,
   type PlaybookDoc,
@@ -610,6 +611,8 @@ export function Studio({ providers }: { providers: ProvidersResponse | null }) {
                   variables={data.templateVariables}
                   onChange={(persona) => updateAgent(agent.id, { persona })}
                 />
+
+                <GoldenSet />
               </div>
             </>
           )}
@@ -1007,5 +1010,91 @@ function PersonaEditor({
         ))}
       </div>
     </label>
+  );
+}
+
+/**
+ * "Test against golden PR", the last thing Phase 6 asks of the persona editor.
+ *
+ * What it shows is the recorded findings delta: on each fixture, what the newest playbook
+ * version started catching and what it stopped catching, against the last version that
+ * ran the same fixture. Two aggregate percentages — which the Quality page already has —
+ * do not answer the question somebody has after rewriting a persona, and a small movement
+ * in recall hides one finding being swapped for another.
+ *
+ * It does not run the golden set. Doing that takes minutes, starts containers and spends
+ * real money, and a button on a config screen that quietly does all three is not a
+ * button; the command that does it is named instead, the same choice the MCP server's
+ * `run_eval` made.
+ */
+function GoldenSet() {
+  const [deltas, setDeltas] = useState<EvalResponse["deltas"] | null>(null);
+
+  useEffect(() => {
+    api
+      .evalScores()
+      .then((r) => setDeltas(r.deltas))
+      .catch(() => setDeltas([]));
+  }, []);
+
+  if (!deltas) return null;
+
+  return (
+    <div style={{ marginTop: 16, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+      <div className="field-label" style={{ marginBottom: 6 }}>
+        Against the golden set
+      </div>
+
+      {deltas.length === 0 ? (
+        <div className="muted" style={{ fontSize: 12 }}>
+          Nothing to compare yet. Score this playbook version against a fixture with{" "}
+          <code>maestro eval run</code>, publish an edit, and score it again — the findings each
+          version started and stopped catching appear here. Running the set takes minutes and spends
+          real money, so it is a command rather than a button on this screen.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {deltas.map((d) => (
+            <div key={d.fixture} style={{ fontSize: 12 }}>
+              <div style={{ fontWeight: 550 }}>
+                {d.fixture}{" "}
+                <span className="muted mono" style={{ fontWeight: 400 }}>
+                  {d.from} → {d.to}
+                </span>
+              </div>
+              {d.gained.map((g) => (
+                <div key={`+${g}`} style={{ color: "var(--ok)" }}>
+                  + now catches {g}
+                </div>
+              ))}
+              {d.lost.map((l) => (
+                <div key={`-${l}`} style={{ color: "var(--err)" }}>
+                  − stopped catching {l}
+                </div>
+              ))}
+              {d.fixedFalsePositives.map((f) => (
+                <div key={`fp-${f}`} style={{ color: "var(--ok)" }}>
+                  + stopped reporting {f}
+                </div>
+              ))}
+              {d.newFalsePositives.map((f) => (
+                <div key={`fp+${f}`} style={{ color: "var(--err)" }}>
+                  − started reporting {f}
+                </div>
+              ))}
+              {!d.gained.length &&
+                !d.lost.length &&
+                !d.fixedFalsePositives.length &&
+                !d.newFalsePositives.length && (
+                  <div className="muted">
+                    same findings, {d.costCentsDelta >= 0 ? "+" : ""}
+                    {(d.costCentsDelta / 100).toFixed(3)} in cost
+                  </div>
+                )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

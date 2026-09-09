@@ -26,7 +26,7 @@ export function Quality() {
     api
       .evalScores()
       .then(setEvals)
-      .catch(() => setEvals({ scores: [], comparisons: [] }));
+      .catch(() => setEvals({ scores: [], comparisons: [], deltas: [] }));
   }, []);
 
   if (error) return <div className="empty">could not load feedback: {error}</div>;
@@ -135,8 +135,8 @@ function Golden({ evals }: { evals: EvalResponse | null }) {
       <div className="panel">
         <div className="panel-head">Golden set by playbook version</div>
         <div className="panel-body muted" style={{ fontSize: 12 }}>
-          No scored runs yet. Add a fixture with <code>maestro evaluate add</code> and score it with{" "}
-          <code>maestro evaluate run</code>; the results appear here grouped by the playbook version
+          No scored runs yet. Add a fixture with <code>maestro eval add</code> and score it with{" "}
+          <code>maestro eval run</code>; the results appear here grouped by the playbook version
           that produced them, which is what makes a prompt or model change measurable rather than
           guessed at.
         </div>

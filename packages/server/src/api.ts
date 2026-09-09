@@ -7,7 +7,13 @@ import {
   maestroHome,
   type SqlDatabase,
 } from "@maestro/core";
-import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
+import {
+  compareVersions,
+  type EvalScore,
+  fixtureDeltas,
+  loadScores,
+  scoresDir,
+} from "@maestro/engine";
 import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
 import {
@@ -199,11 +205,14 @@ const routes: Route[] = [
     handler: async () => {
       let scores: EvalScore[] = [];
       try {
-        scores = loadScores(fixturesDir(maestroHome()));
+        scores = loadScores(scoresDir(maestroHome()));
       } catch {
         // No fixtures directory yet is the ordinary state of a fresh install.
       }
-      return { scores, comparisons: compareVersions(scores) };
+      // `deltas` is what the persona editor shows: two percentages do not answer "did
+      // my rewrite start catching the thing I wrote it for", and a small movement in
+      // recall hides one finding being swapped for another.
+      return { scores, comparisons: compareVersions(scores), deltas: fixtureDeltas(scores) };
     },
   },
   {

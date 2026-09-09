@@ -13,6 +13,7 @@ import {
   runReview,
   saveScore,
   scoreOutcome,
+  scoresDir,
 } from "@maestro/engine";
 import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
@@ -49,8 +50,6 @@ two pipelines can actually be compared.
 `);
   return 1;
 }
-
-const scoresDir = () => join(maestroHome(), "eval-scores");
 
 export async function evaluate(argv: string[]): Promise<number> {
   const sub = argv[0];
@@ -97,7 +96,7 @@ export async function evaluate(argv: string[]): Promise<number> {
   }
 
   if (sub === "report") {
-    const scores = loadScores(scoresDir());
+    const scores = loadScores(scoresDir(maestroHome()));
     if (!scores.length) {
       console.log("no scores yet - run 'maestro eval run'");
       return 1;
@@ -220,7 +219,7 @@ export async function evaluate(argv: string[]): Promise<number> {
       }
 
       const score = scoreOutcome(fixture, outcome, playbookRecord.id);
-      saveScore(scoresDir(), score);
+      saveScore(scoresDir(maestroHome()), score);
 
       const ok = score.misses.length === 0 && score.falsePositives.length === 0;
       if (!ok) failures++;

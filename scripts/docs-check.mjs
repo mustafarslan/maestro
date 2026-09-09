@@ -72,6 +72,29 @@ for (const doc of docs) {
   }
 }
 
+// 4b. The same rule for commands printed to a user by the product itself.
+//
+// The Quality page told people to run `maestro evaluate add`; the command is
+// `maestro eval`, and the CLI answers `maestro evaluate` with a usage error. Check 3
+// covers the four documents and stopped at their edge, so a wrong command in the admin
+// UI — read by exactly the person who is about to type it — went unnoticed.
+{
+  const surfaces = [
+    "packages/ui/src/Quality.tsx",
+    "packages/ui/src/Studio.tsx",
+    "packages/ui/src/App.tsx",
+    "apps/cli/src/commands/evaluate.ts",
+    "apps/cli/src/commands/doctor.ts",
+    "apps/cli/src/commands/init.ts",
+  ].filter(existsSync);
+  for (const file of surfaces) {
+    for (const m of readFileSync(file, "utf8").matchAll(/\bmaestro ([a-z][\w-]*)/g)) {
+      if (!known.has(m[1]))
+        fail(`${file}: prints 'maestro ${m[1]}', which the CLI does not accept`);
+    }
+  }
+}
+
 // 5. The documented persona template variables are exactly the ones the code offers.
 //
 // This table is the one a persona author copies from, and a variable that is documented

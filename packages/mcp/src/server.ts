@@ -8,7 +8,7 @@ import {
   ReviewStore,
   type SqlDatabase,
 } from "@maestro/core";
-import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
+import { compareVersions, type EvalScore, loadScores, scoresDir } from "@maestro/engine";
 import { findingCountsByAgent, parsePullRequestRef } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
@@ -388,7 +388,7 @@ export function buildServer(deps: McpDeps): McpServer {
       inputSchema: { fixture: z.string().optional() },
     },
     async ({ fixture }) => {
-      const dir = fixturesDir(maestroHome());
+      const dir = scoresDir(maestroHome());
       let scores: EvalScore[];
       try {
         scores = loadScores(dir);

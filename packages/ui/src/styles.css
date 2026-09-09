@@ -363,11 +363,15 @@ button:disabled {
   padding: 10px;
   margin-bottom: 12px;
 }
-.issues .issue,
+/* Bare `.issue` first: the nested selector is more specific, so listing it second keeps
+   biome's descending-specificity rule satisfied. Both say the same thing today. */
 .issue {
   color: var(--err);
   font-size: 12px;
   margin-bottom: 4px;
+}
+.issues .issue {
+  color: var(--err);
 }
 
 /* Template-variable buttons beside the persona slot. */

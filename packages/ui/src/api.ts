@@ -271,6 +271,17 @@ export interface EvalResponse {
     falsePositives: number;
     costCents: number;
   }[];
+  /** Per fixture: what the newest version started and stopped catching. */
+  deltas: {
+    fixture: string;
+    from: string;
+    to: string;
+    gained: string[];
+    lost: string[];
+    newFalsePositives: string[];
+    fixedFalsePositives: string[];
+    costCentsDelta: number;
+  }[];
 }
 
 /** One real round trip through a provider. Costs a little; answers the whole question. */

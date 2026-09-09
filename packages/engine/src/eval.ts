@@ -78,6 +78,12 @@ export interface EvalScore {
   costCents: number;
   durationMs: number;
   agentsRun: number;
+  /**
+   * When the run was scored. Ordering is what a delta needs and nothing carried it:
+   * `readdirSync` makes no promise about order, so "the previous version's score" was
+   * whatever the filesystem happened to hand back first.
+   */
+  recordedAt?: string;
 }
 
 export function scoreOutcome(
@@ -141,6 +147,7 @@ export function scoreOutcome(
     costCents: outcome.costCents,
     durationMs: outcome.durationMs,
     agentsRun: outcome.nodes.filter((n) => n.kind === "agent" && n.state === "done").length,
+    recordedAt: new Date().toISOString(),
   };
 }
 
@@ -153,6 +160,20 @@ function severityOk(expected: ExpectedFinding, finding: Finding): boolean {
 
 export function fixturesDir(home: string): string {
   return join(home, "fixtures");
+}
+
+/**
+ * Where scored runs are written. Beside `fixturesDir` because the two were three
+ * separate opinions: the CLI wrote here, and the admin API and MCP server both read
+ * `fixturesDir` — so both parsed fixture definitions as scores and `compareVersions`
+ * reached `.length` on an absent `falsePositives`. The golden-set panel broke as soon as
+ * a fixture existed, which is the only state in which it has anything to show.
+ *
+ * They also cannot share a directory: `loadFixtures` and `loadScores` each read every
+ * `*.json` in the one they are given.
+ */
+export function scoresDir(home: string): string {
+  return join(home, "eval-scores");
 }
 
 export function loadFixtures(dir: string, only?: string): Fixture[] {
@@ -170,11 +191,27 @@ export function saveScore(dir: string, score: EvalScore): string {
   return path;
 }
 
+/**
+ * Scores oldest first.
+ *
+ * `readdirSync` returns whatever order the filesystem gives — alphabetical on some, and
+ * on APFS not reliably anything — so "the newest run" was previously a coin toss. The
+ * filename's `Date.now()` is the fallback for scores written before `recordedAt` existed.
+ */
 export function loadScores(dir: string): EvalScore[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as EvalScore);
+    .map((f) => ({
+      score: JSON.parse(readFileSync(join(dir, f), "utf8")) as EvalScore,
+      fallback: Number(f.match(/-(\d+)\.json$/)?.[1] ?? 0),
+    }))
+    .sort(
+      (a, b) =>
+        (a.score.recordedAt ? Date.parse(a.score.recordedAt) : a.fallback) -
+        (b.score.recordedAt ? Date.parse(b.score.recordedAt) : b.fallback),
+    )
+    .map((e) => e.score);
 }
 
 /** Aggregates scores per playbook version so two pipelines can be compared directly. */
@@ -218,4 +255,71 @@ export function compareVersions(scores: EvalScore[]): VersionComparison[] {
       // `undefined` in a numeric comparison would otherwise leave it.
       .sort((a, b) => (b.recall ?? -1) - (a.recall ?? -1))
   );
+}
+
+/**
+ * What changed on one fixture between the two most recent playbook versions to run it.
+ *
+ * Phase 6 asks the persona editor for "test against golden PR … showing the findings
+ * delta". Two aggregate percentages do not answer the question a person has after
+ * rewriting a persona — *which* defect did it start catching, and what did it stop
+ * catching — and a 3% recall movement hides a swap of one finding for another entirely.
+ */
+export interface FixtureDelta {
+  fixture: string;
+  from: string;
+  to: string;
+  /** Expected findings the newer version caught and the older one missed. */
+  gained: string[];
+  /** Expected findings the newer version stopped catching. These are the regressions. */
+  lost: string[];
+  /** Forbidden findings the newer version started reporting. */
+  newFalsePositives: string[];
+  /** Forbidden findings it stopped reporting. */
+  fixedFalsePositives: string[];
+  costCentsDelta: number;
+}
+
+/**
+ * One delta per fixture: its newest score against its newest score from a different
+ * playbook version.
+ *
+ * "A different version" rather than "the previous version" because re-running the same
+ * version twice is the ordinary way to check a fixture is stable, and comparing a version
+ * against itself would report nothing changed — true, and useless.
+ */
+export function fixtureDeltas(scores: EvalScore[]): FixtureDelta[] {
+  const byFixture = new Map<string, EvalScore[]>();
+  for (const s of scores) byFixture.set(s.fixture, [...(byFixture.get(s.fixture) ?? []), s]);
+
+  const deltas: FixtureDelta[] = [];
+  for (const [fixture, runs] of byFixture) {
+    // loadScores hands these back oldest first.
+    const to = runs[runs.length - 1];
+    if (!to?.playbookVersionId) continue;
+    const from = [...runs]
+      .reverse()
+      .find((r) => r.playbookVersionId && r.playbookVersionId !== to.playbookVersionId);
+    if (!from?.playbookVersionId) continue;
+
+    // Matched against the answer-key entry, not the agent's wording: two versions phrase
+    // the same finding differently, and comparing titles would report every run as a
+    // total rewrite.
+    const hitsOf = (s: EvalScore) => new Set(s.hits.map((h) => h.expected));
+    const fpOf = (s: EvalScore) => new Set(s.falsePositives.map((f) => f.pattern));
+    const [before, after] = [hitsOf(from), hitsOf(to)];
+    const [fpBefore, fpAfter] = [fpOf(from), fpOf(to)];
+
+    deltas.push({
+      fixture,
+      from: from.playbookVersionId,
+      to: to.playbookVersionId,
+      gained: [...after].filter((h) => !before.has(h)),
+      lost: [...before].filter((h) => !after.has(h)),
+      newFalsePositives: [...fpAfter].filter((f) => !fpBefore.has(f)),
+      fixedFalsePositives: [...fpBefore].filter((f) => !fpAfter.has(f)),
+      costCentsDelta: to.costCents - from.costCents,
+    });
+  }
+  return deltas;
 }
