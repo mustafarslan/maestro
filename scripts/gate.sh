@@ -42,6 +42,12 @@ echo "=== build ==="    && pnpm run build:binary >/dev/null 2>&1
 # The binary's own surfaces, which no unit test reaches: the MCP server only exists as a
 # subprocess with stdout as a pipe, and the admin server only serves the embedded UI once
 # it is embedded. Both had defects that were invisible until run this way.
+# Five processes contending for one SQLite file: the queue's core promise is that no job is
+# claimed twice, and a single-process test cannot exercise it.
+echo "=== queue race ==="
+node scripts/queue-race-check.mjs 2>/dev/null | grep -E "safe under|FAIL" || true
+node scripts/queue-race-check.mjs >/dev/null 2>&1
+
 echo "=== mcp protocol ==="
 node scripts/mcp-protocol-check.mjs ./dist/maestro | grep -E "verified|FAIL" || true
 node scripts/mcp-protocol-check.mjs ./dist/maestro >/dev/null 2>&1

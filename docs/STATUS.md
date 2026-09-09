@@ -1873,6 +1873,36 @@ is the only one asserted.
 Verified in both directions rather than assumed: adding a field to the UI's `EnvironmentRow` that
 the server never sends fails it, and removing `live` from the server's response fails it too.
 
+159. **Claiming a job was safe by timing, not by construction.** `claim` selects a free job
+    and then updates it, and the update said only `WHERE id=?`. Nothing in that statement
+    prevented a second worker from having taken the row in between — the `BEGIN IMMEDIATE`
+    transaction was the whole defence, so correctness rested on lock timing. A job claimed twice
+    is a review that runs twice: two comments, twice the spend, two sets of containers.
+
+    The update is a compare-and-swap now, repeating the condition the select matched on and
+    treating zero changed rows as "somebody else got it". The transaction stays; correctness no
+    longer depends on it alone.
+
+    Verified what could be verified, and said what could not. Five processes contending for one
+    SQLite file claim 200 jobs with no duplicate — `scripts/queue-race-check.mjs`, now in the
+    gate and CI — and the same five processes produced no duplicate *with the transaction
+    removed*, because the window between the two statements is microseconds. So the race is
+    real, rare, and unprovokable on demand: exactly the kind that surfaces once in production
+    and never in a test.
+
+    Three attempts at testing it went wrong in instructive ways. The first race script let one
+    process drain the queue before the others started, proving only that a queue can be emptied.
+    The first mutation left a bound parameter behind, so it broke the SQL rather than the
+    property and failed unrelated tests. And the tests I wrote for the guard executed a *copy* of
+    the statement, which would keep passing after somebody changed the real one — the
+    duplication defect this codebase has found in itself repeatedly, written into a test meant to
+    prevent it. Those are gone, replaced by a note saying plainly which property is checked
+    where, and which one is defence in depth.
+
+    Also confirmed while looking: the store sets `journal_mode=WAL`, `foreign_keys=ON`,
+    `busy_timeout=5000` and `synchronous=NORMAL`, and five processes writing the same database
+    concurrently completed 1500 transactions with no `SQLITE_BUSY`.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

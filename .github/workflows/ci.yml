@@ -52,6 +52,10 @@ jobs:
       # forgot it belongs on stderr corrupts the stream and every client disconnects with
       # a parse error naming nothing. That only exists once the server is a subprocess
       # with stdout as a pipe, which no unit test reproduces.
+      # The queue's core promise — no job claimed twice — only exists across processes.
+      - name: Queue claim race, five processes on one database
+        run: node scripts/queue-race-check.mjs
+
       - name: MCP protocol, against the compiled binary
         # The script provisions and cleans up its own MAESTRO_HOME: it used to inherit
         # whatever the caller had, which made the result depend on ambient state.

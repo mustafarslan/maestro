@@ -80,12 +80,34 @@ export class JobQueue {
         .get<JobRow>(nowIso, nowIso, ...(kinds ?? []));
       if (!row) return null;
 
-      this.db
+      // Compare-and-swap, not a bare `WHERE id=?`.
+      //
+      // The select and the update are two statements, and the transaction around them is
+      // what stopped two workers claiming one job — which means correctness rested
+      // entirely on lock timing. Removing the transaction and running five processes
+      // against one database did not produce a single double claim, because the window
+      // between the two statements is microseconds: a race that is real, rare, and
+      // therefore exactly the kind that surfaces once in production and never in testing.
+      //
+      // The guard repeats the condition the select matched on, so if another worker took
+      // the row in between, this updates nothing and says so. The transaction stays —
+      // belt and braces — but correctness no longer depends on it alone.
+      const taken = this.db
         .prepare(
           `UPDATE jobs SET state='running', locked_by=?, locked_until=?, attempts=attempts+1,
-                           updated_at=? WHERE id=?`,
+                           updated_at=?
+             WHERE id=? AND (locked_until IS NULL OR locked_until < ?)`,
         )
-        .run(this.workerId, new Date(now.getTime() + leaseMs).toISOString(), nowIso, row.id);
+        .run(
+          this.workerId,
+          new Date(now.getTime() + leaseMs).toISOString(),
+          nowIso,
+          row.id,
+          nowIso,
+        );
+      // Somebody else got there first. The caller polls, so returning null is the same as
+      // "nothing to do right now" and the job stays available to whoever holds it.
+      if (taken.changes === 0) return null;
 
       return {
         id: row.id,

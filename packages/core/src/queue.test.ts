@@ -143,3 +143,43 @@ describe("leases on work that outlives them", () => {
     expect(b.claim(60_000)).toBeTruthy();
   });
 });
+
+describe("claiming under contention", () => {
+  // The guard on the UPDATE — `AND (locked_until IS NULL OR locked_until < ?)` — is what
+  // makes a double claim impossible rather than merely unlikely. It is deliberately NOT
+  // asserted here.
+  //
+  // It only matters in the window between the select and the update, which cannot be
+  // interleaved from inside one process, and the obvious workaround — running the same
+  // statement from a test — pins a copy of the SQL rather than the statement the queue
+  // uses, so it would keep passing after somebody changed the real one. A test that
+  // duplicates the thing it checks is the defect this codebase has found in itself half a
+  // dozen times.
+  //
+  // `scripts/queue-race-check.mjs` is the check: five processes, one database, no
+  // duplicate claims. It cannot reliably provoke the window either — five processes with
+  // the transaction removed produced no double claim, because the window is microseconds —
+  // so the guard is defence in depth against a race that is real, rare, and would surface
+  // once in production and never in a test. That is stated rather than papered over.
+
+  it("does not hand out a job whose lease is still live", () => {
+    const a = new JobQueue(db, "worker-a");
+    a.enqueue({ kind: "k", payload: {} });
+    expect(a.claim(60_000, ["k"])).toBeTruthy();
+    expect(new JobQueue(db, "worker-b").claim(60_000, ["k"])).toBeNull();
+  });
+
+  it("hands it to somebody else once the lease expires", () => {
+    // A worker that dies must not hold a job for ever.
+    const a = new JobQueue(db, "worker-a");
+    a.enqueue({ kind: "k", payload: {} });
+    const claimed = a.claim(1, ["k"]);
+    expect(claimed).toBeTruthy();
+
+    db.prepare("UPDATE jobs SET locked_until=? WHERE id=?").run(
+      new Date(Date.now() - 60_000).toISOString(),
+      claimed?.id,
+    );
+    expect(new JobQueue(db, "worker-b").claim(60_000, ["k"])?.id).toBe(claimed?.id);
+  });
+});
