@@ -164,6 +164,18 @@ export const GraphEdgeSchema = z.object({
 });
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>;
 
+/**
+ * Aggregate spend limits, measured over a rolling 24 hours.
+ *
+ * A router tier caps one review and a model binding caps one agent; neither can see that
+ * a repository has run two hundred reviews today. Both are optional and unset by default,
+ * because a cap that arrives without being asked for silently stops reviewing.
+ */
+export const SpendCapsSchema = z.object({
+  dailyCapCents: z.number().positive().optional(),
+  perRepoDailyCapCents: z.number().positive().optional(),
+});
+
 export const PlaybookDocumentSchema = z.object({
   schemaVersion: z.literal(PLAYBOOK_SCHEMA_VERSION),
   name: z.string().min(1),
@@ -176,5 +188,6 @@ export const PlaybookDocumentSchema = z.object({
   router: RouterSchema.prefault({}),
   triage: TriageSchema,
   envSpec: EnvSpecSchema.prefault({}),
+  budget: SpendCapsSchema.prefault({}),
 });
 export type PlaybookDocument = z.infer<typeof PlaybookDocumentSchema>;

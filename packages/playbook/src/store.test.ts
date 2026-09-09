@@ -1,4 +1,4 @@
-import { openStore, type SqlDatabase } from "@maestro/core";
+import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { defaultPlaybook } from "./default-playbook.js";
 import { fromYaml, toYaml } from "./serialize.js";
@@ -84,5 +84,48 @@ describe("YAML round trip", () => {
   it("survives export and re-import unchanged", () => {
     const original = defaultPlaybook();
     expect(fromYaml(toYaml(original))).toEqual(original);
+  });
+});
+
+describe("assigning a playbook to one repository", () => {
+  // `repos.playbook_id` was in the first migration, `resolveForRepo` read it from the
+  // day the daemon learned to, and nothing anywhere could write it — so a mobile repo and
+  // a backend repo wanting different personas, the reason the column exists, was a
+  // documented capability with no way to reach it. It is also what makes one repository
+  // review only on request while another reviews every push.
+  it("makes resolveForRepo return the assigned playbook, not the default", () => {
+    const store = new PlaybookStore(db);
+    store.ensureDefault();
+    const mobile = { ...defaultPlaybook(), name: "mobile" };
+    store.publish(mobile, { name: "mobile", activate: true });
+
+    const repoId = new ReviewStore(db).ensureRepo("acme", "ios");
+    expect(store.resolveForRepo(repoId)?.doc.name).toBe("default");
+
+    expect(store.assignToRepo(repoId, "mobile")).toBe(true);
+    expect(store.resolveForRepo(repoId)?.doc.name).toBe("mobile");
+    expect(store.assignmentFor(repoId)).toBe("mobile");
+  });
+
+  it("goes back to the global default", () => {
+    const store = new PlaybookStore(db);
+    store.ensureDefault();
+    store.publish({ ...defaultPlaybook(), name: "mobile" }, { name: "mobile", activate: true });
+    const repoId = new ReviewStore(db).ensureRepo("acme", "ios");
+    store.assignToRepo(repoId, "mobile");
+
+    store.assignToRepo(repoId, null);
+    expect(store.assignmentFor(repoId)).toBeNull();
+    expect(store.resolveForRepo(repoId)?.doc.name).toBe("default");
+  });
+
+  it("refuses a name that does not exist rather than assigning nothing", () => {
+    // A typo that silently left the repository on the default would look identical to
+    // success, and the next review would quietly use the wrong personas.
+    const store = new PlaybookStore(db);
+    store.ensureDefault();
+    const repoId = new ReviewStore(db).ensureRepo("acme", "ios");
+    expect(store.assignToRepo(repoId, "typo")).toBe(false);
+    expect(store.assignmentFor(repoId)).toBeNull();
   });
 });

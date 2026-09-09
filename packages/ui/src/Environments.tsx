@@ -16,9 +16,12 @@ function age(iso: string | null): string {
   if (!iso) return "—";
   const secs = (Date.now() - Date.parse(iso)) / 1000;
   if (Number.isNaN(secs)) return "—";
+  // Magnitude only: the caller supplies the direction ("4m left" / "expired 4m ago").
+  // Rounding the signed value printed a healthy container's lease as `-4m left`.
   const abs = Math.abs(secs);
-  const unit = abs < 90 ? [secs, "s"] : abs < 5400 ? [secs / 60, "m"] : [secs / 3600, "h"];
-  return `${Math.round(unit[0] as number)}${unit[1]}`;
+  const unit: [number, string] =
+    abs < 90 ? [abs, "s"] : abs < 5400 ? [abs / 60, "m"] : [abs / 3600, "h"];
+  return `${Math.round(unit[0])}${unit[1]}`;
 }
 
 export function Environments() {
@@ -52,7 +55,9 @@ export function Environments() {
   }
 
   const live = rows.filter((r) => LIVE.has(r.state));
-  const leaked = rows.filter((r) => r.state === "leaked");
+  // A leaked row keeps its state for ever — that a review could not clean up after
+  // itself is worth remembering — so "still leaking" is the ones no sweep has collected.
+  const leaked = rows.filter((r) => r.state === "leaked" && !r.destroyed_at);
 
   return (
     <>
@@ -65,8 +70,9 @@ export function Environments() {
         </div>
         {leaked.length ? (
           <div className="notice" style={{ margin: "8px 12px" }}>
-            {leaked.length} environment(s) could not be destroyed. Run <code>maestro reap</code> to
-            collect them; their containers and snapshot images are still using disk.
+            {leaked.length} environment(s) could not be destroyed by the review that created them.
+            Run <code>maestro reap</code> to collect them; until then their containers and snapshot
+            images are still using disk.
           </div>
         ) : null}
         <table>
@@ -103,8 +109,13 @@ export function Environments() {
                   </td>
                   <td className="muted">{age(r.created_at)}</td>
                   <td className={expired && LIVE.has(r.state) ? "" : "muted"}>
-                    {/* An expired lease on something still marked live is what the reaper
-                        looks for; saying so here is why the page is worth opening. */}
+                    {/* `lease_until` is stamped once, at creation, as prepare plus analyze
+                        timeouts; nothing renews it. So an expired lease on a row still
+                        marked live means the environment has outlived the entire time
+                        both its phases were allowed — which nothing legitimate does. It
+                        is not what `reap` keys on: that sweeps by Docker label and age,
+                        which is why this is a signal to look rather than a duplicate of
+                        the reaper's own state. */}
                     {LIVE.has(r.state)
                       ? expired
                         ? `expired ${age(r.lease_until)} ago`

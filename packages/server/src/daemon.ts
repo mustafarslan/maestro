@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  checkSpend,
   hasPendingReviewJob,
   IN_FLIGHT_STATES,
   JobQueue,
@@ -266,6 +267,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       t.source === "comment"
         ? `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@comment-${t.commentId}`
         : `${t.pr.owner}/${t.pr.repo}#${t.pr.number}@${t.headSha || "latest"}`;
+    // Aggregate spend. A router tier caps one review and a model binding caps one agent;
+    // neither can see that this repository has run two hundred reviews today, and with
+    // `@maestro review` now able to re-review an unchanged head, nothing else would. Both
+    // caps are unset by default, so this is a no-op until somebody asks for one.
+    //
+    // Checked here rather than in the worker: refusing before the job exists means the
+    // queue does not fill with work that will be declined, and the log line lands at the
+    // moment somebody is looking at their pull request wondering where the review is.
+    {
+      const repoId = reviews.ensureRepo(t.pr.owner, t.pr.repo);
+      const caps = playbooks.resolveForRepo(repoId)?.doc.budget ?? {};
+      const verdict = checkSpend(db, caps, { repoId });
+      if (!verdict.allowed) {
+        logger.warn(
+          {
+            pr: t.pr.number,
+            spentCents: verdict.spentCents,
+            repoSpentCents: verdict.repoSpentCents,
+          },
+          `refusing to start a review: ${verdict.reason}`,
+        );
+        return;
+      }
+    }
+
     // Two people asking within a minute of each other are asking for one review, and the
     // comment they will both read is updated in place. The permanent dedupe key cannot
     // express that — it would drop the second for ever — so the transient question is

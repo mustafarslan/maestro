@@ -1,7 +1,15 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { promisify } from "node:util";
-import { dbPath, detectRuntime, maestroHome, migrationState, openStore } from "@maestro/core";
+import {
+  dayAgo,
+  dbPath,
+  detectRuntime,
+  maestroHome,
+  migrationState,
+  openStore,
+  spendSince,
+} from "@maestro/core";
 import { GitHubClient } from "@maestro/integrations";
 import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
@@ -174,6 +182,34 @@ export async function doctor(): Promise<number> {
         ? { status: "fail", label: "github", detail: `credential rejected: ${identity.slice(1)}` }
         : { status: "ok", label: "github", detail: `authenticated as ${identity}` },
     );
+  }
+
+  // What has actually been spent, against whatever cap is configured. A cap nobody can
+  // see the balance of is a cap people find out about by reviews silently stopping.
+  try {
+    const db2 = await openStore();
+    try {
+      const caps = new PlaybookStore(db2).getActive("default")?.doc.budget ?? {};
+      const spent = spendSince(db2, dayAgo());
+      checks.push({
+        status:
+          caps.dailyCapCents !== undefined && spent >= caps.dailyCapCents
+            ? "warn"
+            : caps.dailyCapCents !== undefined
+              ? "ok"
+              : "info",
+        label: "spend",
+        detail:
+          caps.dailyCapCents === undefined
+            ? `$${(spent / 100).toFixed(2)} in the last 24h, no daily cap set`
+            : `$${(spent / 100).toFixed(2)} of $${(caps.dailyCapCents / 100).toFixed(2)} in the last 24h`,
+      });
+    } finally {
+      db2.close();
+    }
+  } catch {
+    // The database check above already reports a store that cannot be opened; saying it
+    // twice adds noise to the thing people run when something is already wrong.
   }
 
   // Cost figures in every PR comment come from a table cached by hand. Nothing said how

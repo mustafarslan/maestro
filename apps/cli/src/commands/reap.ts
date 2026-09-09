@@ -90,11 +90,18 @@ reviews that are still running are left alone unless --force is given.
 
   // Mark environments the database still believes are alive, so the UI stops showing
   // containers that no longer exist.
+  //
+  // Leaked rows are stamped rather than rewritten: they keep `state='leaked'`, because
+  // that a review could not tear its own containers down is worth remembering, and gain a
+  // `destroyed_at` saying this sweep collected them. Excluding them entirely — which is
+  // what this did — meant the environments page went on telling an operator to run
+  // `maestro reap` after they had run it, about containers that no longer existed.
   try {
     const orphaned = db
       .prepare(
-        `UPDATE environments SET state='destroyed', destroyed_at=?
-         WHERE state NOT IN ('destroyed','leaked')${reviewId ? " AND review_id=?" : ""}`,
+        `UPDATE environments SET state=CASE WHEN state='leaked' THEN 'leaked' ELSE 'destroyed' END,
+                                 destroyed_at=?
+         WHERE destroyed_at IS NULL${reviewId ? " AND review_id=?" : ""}`,
       )
       .run(...(reviewId ? [new Date().toISOString(), reviewId] : [new Date().toISOString()]));
     if (orphaned.changes) {

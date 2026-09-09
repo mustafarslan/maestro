@@ -58,7 +58,14 @@ maestro playbook import playbook.yaml
 ```
 
 or flip "Review every pull request automatically" in the Studio's settings panel. Playbooks
-are assignable per repository, so one repository can be manual-only while another is not.
+are assignable per repository, so one repository can be manual-only while another is not:
+
+```
+maestro playbook import mobile.yaml     # publishes a playbook named in the file
+maestro playbook assign acme/ios mobile
+maestro playbook assign acme/ios --default   # back to the global default
+maestro playbook assignments            # who uses what
+```
 Lifecycle events are then ignored and `@maestro review` is the only way in — still subject
 to the association check above.
 
@@ -133,6 +140,25 @@ over a socket. That is what WAL mode and `BEGIN IMMEDIATE` are for, and it means
 server works with no daemon running. An earlier socket-path variable documented here
 described a bridge that was never built; it is gone rather than left as configuration that
 reads well and does nothing.
+
+## Spend caps
+
+A router tier caps one review and a model binding caps one agent. Neither can see that a
+repository has run two hundred reviews today, so there are two aggregate caps, both measured
+over a rolling 24 hours and both **unset by default** — a cap nobody asked for silently stops
+reviewing:
+
+```
+# playbook.yaml
+budget:
+  dailyCapCents: 2000          # $20/day across everything
+  perRepoDailyCapCents: 500    # and no single repo may take more than $5 of it
+```
+
+Reached caps refuse the review before the job is created, with a log line saying which cap and
+where the total stands. `maestro doctor` shows spend against the daily cap. Spend is summed from
+`llm_calls` rather than finished reviews, so a review still running counts — which is the money a
+cap most needs to see.
 
 ## Sandbox networking
 

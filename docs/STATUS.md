@@ -858,11 +858,46 @@ The observability phase names an environments page — running containers, TTLs,
 left behind — and it was the one page that did not exist. `maestro doctor` counts strays, which
 tells an operator that something leaked but not what. `/api/environments` joins each row to its
 pull request and puts leaked and running ones first, and the UI shows the lease with an explicit
-"expired 4m ago" on anything still marked live — which is exactly what the reaper looks for. Rows
-are kept after teardown, so a leak has a history rather than only a present.
+"expired 4m ago" on anything still marked live. That is deliberately *not* what `reap` keys on —
+the sweep goes by Docker label and age — so it is a second, independent signal rather than a copy
+of the reaper's own state: `lease_until` is stamped once at creation as prepare plus analyze
+timeouts, so exceeding it means the environment has outlived the entire time both its phases were
+allowed. Rows are kept after teardown, so a leak has a history rather than only a present.
+
+Shipping it produced three of its own, all found by checking its claims rather than by running it.
+`age()` rounded a signed value, so a healthy lease printed as `-4m left`. The reaper's row-closing
+statement excluded `state='leaked'` — exactly the rows the page tells an operator to run `maestro
+reap` about — so the warning survived the action it asked for, about containers that no longer
+existed; leaked rows now keep their state and gain a `destroyed_at`, which keeps the history and
+makes "still leaking" mean what it says. And the first version of this paragraph claimed the lease
+was what the reaper looks for, which it is not.
 
 Container and image leaks are a named risk of this design: every review starts several containers
 and commits a snapshot image, and a crash between prepare and teardown leaves them behind.
+
+107. **Per-repo playbook assignment was documented and unreachable.** `repos.playbook_id` has
+    been in the schema since the first migration and `resolveForRepo` has read it since the
+    daemon learned to; nothing anywhere wrote it. A mobile repo and a backend repo wanting
+    different personas is the reason the column exists, it is what `docs/CONFIGURATION.md`
+    promised, and it was the stated justification for putting `router.automaticTriggers` in the
+    playbook rather than on a flag — so the argument for that decision rested on a feature with
+    no writer. `maestro playbook assign <owner/repo> <name>`, `--default` to undo, and
+    `assignments` to see who uses what. A name that does not exist is refused rather than
+    silently leaving the repository on the default, which would look identical to success.
+    Run end to end on the compiled binary: publish a second playbook, assign it, mistype a name
+    and see it refused, list who uses what.
+
+108. **Nothing bounded aggregate spend.** The plan lists per-task, per-review, per-repo and daily
+    caps as the control on cost blowup. The first two existed; the two that bound *totals* did
+    not, so a busy repository — or a retry loop across many reviews — could spend without limit,
+    and a per-review cap cannot see that by construction. Made worse by the change earlier in
+    this session that lets `@maestro review` re-review an unchanged head. `budget.dailyCapCents`
+    and `budget.perRepoDailyCapCents` are checked before the job is created, summed from
+    `llm_calls` over a rolling 24 hours rather than from finished reviews, because a review still
+    running has spent money that has not been rolled up and that is precisely what a cap needs to
+    see. Both unset by default: a cap nobody asked for silently stops reviewing. `maestro doctor`
+    shows the balance, since a cap whose balance is invisible is one people discover by reviews
+    quietly stopping.
 
 ### Found by mechanical sweep, still open
 

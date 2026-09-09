@@ -118,6 +118,41 @@ export class PlaybookStore {
     return row ? hydrate(row) : null;
   }
 
+  /**
+   * Points a repository at a named playbook, or back at the global default.
+   *
+   * `repos.playbook_id` has been in the schema since the first migration and
+   * `resolveForRepo` has read it since the daemon learned to, and nothing anywhere could
+   * write it — so per-repo assignment was a documented capability with no way to use it.
+   * A mobile repo and a backend repo wanting different personas is the reason the column
+   * exists; since the router's `automaticTriggers` also lives in the playbook, it is also
+   * the only way one repository reviews on demand while another reviews everything.
+   *
+   * Returns false when the playbook does not exist, so a typo does not silently assign
+   * nothing.
+   */
+  assignToRepo(repoId: string, playbookName: string | null): boolean {
+    if (playbookName === null) {
+      this.db.prepare("UPDATE repos SET playbook_id=NULL WHERE id=?").run(repoId);
+      return true;
+    }
+    const pb = this.db
+      .prepare("SELECT id FROM playbooks WHERE name=?")
+      .get<{ id: string }>(playbookName);
+    if (!pb) return false;
+    this.db.prepare("UPDATE repos SET playbook_id=? WHERE id=?").run(pb.id, repoId);
+    return true;
+  }
+
+  /** Which playbook a repository is assigned, or null when it follows the global default. */
+  assignmentFor(repoId: string): string | null {
+    return (
+      this.db
+        .prepare("SELECT p.name FROM repos r JOIN playbooks p ON p.id=r.playbook_id WHERE r.id=?")
+        .get<{ name: string }>(repoId)?.name ?? null
+    );
+  }
+
   /** Resolves the playbook a repo should use: its own assignment, else the global default. */
   resolveForRepo(repoId: string): PlaybookVersionRecord | null {
     const row = this.db

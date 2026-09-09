@@ -5,6 +5,7 @@ export * from "./paths.js";
 export * from "./queue.js";
 export * from "./reviews.js";
 export * from "./spans.js";
+export * from "./spend.js";
 export * from "./store/db.js";
 export * from "./store/driver.js";
 export * from "./store/migrate.js";

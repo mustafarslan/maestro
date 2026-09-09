@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { openStore, type SqlDatabase } from "@maestro/core";
+import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningDaemon, startDaemon, supersedes } from "./daemon.js";
@@ -198,6 +198,86 @@ describe("manual-only reviews", () => {
     const port = await start(true);
     expect(await deliver(port, "pull_request", opened)).toBe(202);
     expect(queuedReviews()).toBe(1);
+  });
+});
+
+describe("spend caps stop a review before it starts", () => {
+  // A router tier caps one review and a model binding caps one agent; neither can see
+  // that a repository has run two hundred today. With `@maestro review` able to
+  // re-review an unchanged head, nothing else bounds aggregate spend.
+  const secret = "s3cret";
+  const deliver = async (port: number, event: string, payload: unknown): Promise<number> => {
+    const raw = JSON.stringify(payload);
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": event,
+        "x-hub-signature-256": `sha256=${createHmac("sha256", secret).update(raw).digest("hex")}`,
+      },
+      body: raw,
+    });
+    return res.status;
+  };
+  const opened = {
+    action: "opened",
+    repository: { name: "maestro", owner: { login: "acme" } },
+    pull_request: { number: 7, head: { sha: "abc123" } },
+  };
+
+  const spend = (cents: number) => {
+    const pb = new PlaybookStore(db).getActive("default");
+    const { id } = new ReviewStore(db).create({
+      repoOwner: "acme",
+      repoName: "maestro",
+      prNumber: 1,
+      headSha: "old",
+      playbookVersionId: pb?.id as string,
+    });
+    db.prepare(
+      `INSERT INTO llm_calls (id, review_id, provider_id, model, cost_cents, created_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run(newId("call"), id, "ollama", "m", cents, new Date().toISOString());
+  };
+
+  const startWithCap = async (dailyCapCents?: number): Promise<number> => {
+    const base = defaultPlaybook();
+    new PlaybookStore(db).publish(
+      { ...base, budget: dailyCapCents === undefined ? {} : { dailyCapCents } },
+      { activate: true },
+    );
+    running = await startDaemon({
+      db,
+      webhookPort: 0,
+      webhookSecret: secret,
+      concurrentReviews: 0,
+    });
+    return running.webhookPort as number;
+  };
+
+  const queued = (): number =>
+    db.prepare("SELECT COUNT(*) as n FROM jobs WHERE kind='review-pr'").get<{ n: number }>()?.n ??
+    -1;
+
+  it("refuses once the cap is reached", async () => {
+    spend(500);
+    const port = await startWithCap(500);
+    expect(await deliver(port, "pull_request", opened)).toBe(202);
+    expect(queued()).toBe(0);
+  });
+
+  it("reviews normally below the cap", async () => {
+    spend(100);
+    const port = await startWithCap(500);
+    await deliver(port, "pull_request", opened);
+    expect(queued()).toBe(1);
+  });
+
+  it("has no cap by default, so an install that asked for nothing gets nothing", async () => {
+    spend(100_000);
+    const port = await startWithCap(undefined);
+    await deliver(port, "pull_request", opened);
+    expect(queued()).toBe(1);
   });
 });
 

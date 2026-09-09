@@ -311,6 +311,10 @@ Write a short summary that says what the change does and whether it looks safe t
 findings that survived. If nothing survived, say that plainly — a clean review is a real outcome
 and is far better than inventing filler.`,
     },
+    // Unset by default: a cap nobody asked for silently stops reviewing, and there is
+    // no number that is right for every install. `maestro playbook export` is where
+    // to add one; `maestro doctor` shows spend against it once set.
+    budget: {},
     envSpec: {
       image: "auto",
       cpus: 2,
