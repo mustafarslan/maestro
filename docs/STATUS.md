@@ -2261,6 +2261,34 @@ the server never sends fails it, and removing `live` from the server's response 
     It now refuses, names what it would have replaced, and says "replaced" rather than
     "registered" when it does.
 
+179. **A review with nowhere to send a prompt prepared an environment first, then said
+    nothing useful.** Agent nodes are `skip-with-note`, deliberately — one agent timing out
+    must not kill a review. The consequence on a fresh install with no credentials is that
+    `maestro review .` clones the repository, installs its dependencies and commits a
+    snapshot image, then skips every agent and reports a completed review with no
+    findings. Minutes of real work to arrive at a result that reads like a clean bill of
+    health; the only sign was the partial-review warning in the comment.
+
+    It now resolves each enabled agent's binding before any of that and refuses when none
+    resolves, naming each agent and pointing at `maestro llm key set` and `maestro llm
+    test`. Resolution only, no request — so it costs nothing and cannot itself fail. Some
+    agents resolving is still a legitimate partial run.
+
+    What this deliberately does NOT catch: a provider that is configured but unreachable.
+    `ollama` is registered by default and needs no key, so it resolves whether or not
+    anything is listening. `maestro llm test` is what answers that, and the message says
+    so rather than implying more than it checked.
+
+    Two things about the test rather than the fix, both caught before shipping. The first
+    version drove the "partial is fine" case through `review()`, which got past the
+    pre-flight and started a real container — twelve seconds, and a suite nobody could run
+    offline; the decision is a pure function and is tested as one. And the remaining
+    end-to-end case reviewed `process.cwd()`, which passed locally and failed in the gate:
+    the clean-checkout gate copies tracked files into a plain directory with no `.git`, so
+    the review failed on a git error and never reached the check under test. It builds its
+    own repository now. A test that passes for a reason unrelated to what it asserts is
+    the thing this project keeps finding, and it is no different when I write it.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

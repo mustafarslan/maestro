@@ -10,8 +10,8 @@ import {
   parsePullRequestRef,
   reviewPullRequest,
 } from "@maestro/integrations";
-import { ProviderConfigStore } from "@maestro/llm";
-import { PlaybookStore } from "@maestro/playbook";
+import { ProviderConfigStore, type ProviderRegistry } from "@maestro/llm";
+import { type PlaybookDocument, PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { rejectUnknownFlags } from "../args.js";
 import { color } from "../ui.js";
@@ -47,6 +47,35 @@ function args(argv: string[], name: string): string[] {
 async function git(cwd: string, gitArgs: string[]): Promise<string> {
   const { stdout } = await exec("git", ["-C", cwd, ...gitArgs], { maxBuffer: 32 * 1024 * 1024 });
   return stdout.trim();
+}
+
+/**
+ * Refuses before the expensive part when no agent could talk to a model anyway.
+ *
+ * Preparing an environment clones the repository, installs its dependencies and commits
+ * a snapshot image — minutes of real work. Without this, a fresh install with no
+ * credentials did all of that and then skipped every agent, because agent nodes are
+ * `skip-with-note`: the review completed, reported no findings, and the only sign was
+ * the partial-review warning in the comment.
+ *
+ * Resolution only — no request is made, so this costs nothing and cannot itself fail.
+ * A provider that is configured but unreachable still gets past here; `maestro llm test`
+ * is what answers that, and the message says so.
+ */
+export function unresolvableAgents(
+  playbook: PlaybookDocument,
+  registry: ProviderRegistry,
+): { id: string; reason: string }[] {
+  const bad: { id: string; reason: string }[] = [];
+  for (const agent of playbook.agents) {
+    if (!agent.enabled) continue;
+    try {
+      registry.resolve(agent.model);
+    } catch (err) {
+      bad.push({ id: agent.id, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return bad;
 }
 
 export async function review(argv: string[]): Promise<number> {
@@ -126,6 +155,8 @@ export async function review(argv: string[]): Promise<number> {
 
       const providersPr = new ProviderConfigStore(db);
       providersPr.ensureDefaults();
+      const registryPr = await providersPr.buildRegistry();
+      if (refuseIfNoAgentCanRun(playbook, registryPr)) return 1;
 
       console.error(color.dim(`reviewing ${prRef.owner}/${prRef.repo}#${prRef.number}...`));
       const result = await reviewPullRequest({
@@ -133,7 +164,7 @@ export async function review(argv: string[]): Promise<number> {
         db,
         deps: {
           driver: driverForPr,
-          registry: await providersPr.buildRegistry(),
+          registry: registryPr,
           spans: new SpanRecorder(db),
         },
         playbook,
@@ -156,6 +187,14 @@ export async function review(argv: string[]): Promise<number> {
       return result.state === "failed" ? 1 : 0;
     }
 
+    const providers = new ProviderConfigStore(db);
+    providers.ensureDefaults();
+    const registry = await providers.buildRegistry();
+
+    // Before the diff, not after: "no changes since HEAD~1" is a true statement and the
+    // wrong thing to tell somebody whose real problem is that no agent can reach a model.
+    if (refuseIfNoAgentCanRun(playbook, registry)) return 1;
+
     let changedFiles: string[] = [];
     let changedLines = 0;
     try {
@@ -177,9 +216,6 @@ export async function review(argv: string[]): Promise<number> {
       return 1;
     }
 
-    const providers = new ProviderConfigStore(db);
-    providers.ensureDefaults();
-    const registry = await providers.buildRegistry();
     const driver = new DockerSandboxDriver();
     if (!(await driver.available())) {
       console.error("docker is not available - run 'maestro doctor'");
@@ -241,4 +277,22 @@ export async function review(argv: string[]): Promise<number> {
   } finally {
     db.close();
   }
+}
+
+/** Prints why nothing could run, and returns true when the caller should stop. */
+function refuseIfNoAgentCanRun(playbook: PlaybookDocument, registry: ProviderRegistry): boolean {
+  const enabled = playbook.agents.filter((a) => a.enabled);
+  const bad = unresolvableAgents(playbook, registry);
+  // Some agents resolving is a legitimate partial run; none resolving is not a review.
+  if (!enabled.length || bad.length < enabled.length) return false;
+
+  console.error(
+    `no agent can reach a model, so this review would prepare an environment and then ` +
+      `skip every agent.\n\n` +
+      bad.map((b) => `  ${b.id}: ${b.reason}`).join("\n") +
+      `\n\nConfigure a provider with 'maestro llm key set <provider>', check what is ` +
+      `configured with 'maestro llm providers', and check one really answers with ` +
+      `'maestro llm test'.`,
+  );
+  return true;
 }
