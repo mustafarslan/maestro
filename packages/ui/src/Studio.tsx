@@ -653,9 +653,11 @@ function VersionDiff() {
                   fontFamily: "ui-monospace, monospace",
                 }}
               >
-                {c.lines.map((l, i) => (
+                {/* Keyed by sign and content: an array index as a key is what the lint
+                    rule objects to, and a diff line is identified by what it says. */}
+                {c.lines.map((l) => (
                   <div
-                    key={`${l.sign}${i}`}
+                    key={`${l.sign}${l.text}`}
                     style={{ color: l.sign === "+" ? "var(--ok, #3fb950)" : "var(--warn)" }}
                   >
                     {l.sign} {l.text}

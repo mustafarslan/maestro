@@ -233,7 +233,17 @@ What is verified and what is not is recorded in [STATUS.md](./STATUS.md).
 scripts/gate.sh /tmp/maestro-gate
 ```
 
-It ends with `GATE PASSED` or `GATE FAILED (exit N)`, and that line is the verdict — the
+To commit only if it passes, let the exit code decide rather than reading the output:
+
+```
+scripts/ship.sh <<'MSG'
+Commit subject
+
+Body.
+MSG
+```
+
+The gate itself ends with `GATE PASSED` or `GATE FAILED (exit N)`, and that line is the verdict — the
 output before it includes other programs' summaries, one of which used to be the last thing
 printed and was read as the gate's own.
 
