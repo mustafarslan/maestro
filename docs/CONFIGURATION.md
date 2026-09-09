@@ -177,6 +177,12 @@ cap most needs to see.
 
 ## Sandbox networking
 
+> **The prepare-phase allowlist is advisory.** The container is pointed at the proxy with
+> `HTTP_PROXY` and friends, which well-behaved tools honour; nothing forces traffic through it,
+> and a direct socket from inside the container reaches the internet. `analyze` is different —
+> it runs with `--network none` and that is enforced. See finding 143 in `docs/STATUS.md` for
+> what this does and does not expose, and why the fix is not a one-line change.
+
 Only the `prepare` phase has any network, and only through an allowlist proxy. `analyze` runs with
 `--network none` regardless of everything below.
 

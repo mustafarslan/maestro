@@ -1531,6 +1531,31 @@ before a release, and either would catch the other side changing under us.
     `tail`'s status, the identical trap that had just been fixed in the gate script.
 
 
+- **The prepare-phase egress allowlist is advisory, not enforced.** The plan describes prepare as
+  running behind an "egress allowlist via proxy", and the proxy itself is correct — probed with
+  eleven cases, pinned by tests, mutation-checked. What is not true is that traffic has to go
+  through it. The container is told about the proxy with `HTTP_PROXY`/`HTTPS_PROXY` and their
+  lowercase forms, which well-behaved tools honour and anything else simply ignores, and no
+  `--network` restriction stands behind that. Verified against a prepare-shaped container: a
+  direct socket to `1.1.1.1:443` connects, and DNS resolves.
+
+  Severity, stated honestly rather than dramatised. `analyze` — where the agent and the model
+  actually run — is `--network none`, and that is real isolation, asserted by dialling an
+  address rather than reading a flag. Fork pull requests, the untrusted case the whole downgrade
+  exists for, run **no setup at all**, so nothing of theirs installs. Node installs use
+  `--ignore-scripts`, removing the usual lifecycle-script vector. And no credential is ever in
+  the prepare container: the clone happens host-side. What remains is a same-repository pull
+  request whose dependency tree runs code during a non-Node install (`uv sync`, `pip install`)
+  and chooses not to use the proxy — an author who already has push access. That is a real hole
+  in a documented control, and a narrow one.
+
+  The fix is not a patch: enforcing egress means the container must have no route except the
+  proxy, which means an `--internal` Docker network with the proxy attached to it. The proxy
+  currently runs inside the Maestro process, which on the host path is not on any Docker network
+  at all. Doing it properly changes how the proxy is hosted, and interacts with the Compose path,
+  the host path, and Linux versus Docker Desktop — too much to change and verify at the end of a
+  session. Recorded precisely instead, which is the point of this document.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
