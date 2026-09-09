@@ -1116,6 +1116,36 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     trusted-association list), `pull_request.number`, `.draft`, `.head.sha` — and they all
     matched. `issue.pull_request` was the one that did not.
 
+### The prompt fence, attacked rather than read
+
+Prompt injection is named as this project's dominant threat: pull request titles,
+descriptions, commit messages and code comments are attacker-controlled text flowing into a
+model operating inside somebody's GitHub, and `wrapUntrusted` is what makes that text data.
+
+Attacked with the payloads an attacker would actually send — a plain closing tag, one carrying
+a guessed id, uppercase, mixed case, a nested opening tag, extra whitespace, a homoglyph hyphen
+— against the real function. **All held.** The random per-call nonce is what does the work: none
+of those payloads carry the right id, and the preamble tells the model the fence ends at that id
+"and nowhere else".
+
+Two things came out of attacking it that reading would not have produced:
+
+131. **The label was interpolated into the opening tag unescaped.** Every caller passes a
+    literal today, so nothing was exploitable — but the signature invites
+    `wrapUntrusted(filename, snippet)` and file paths belong to the pull request author, which
+    is the same source finding 85 was about. `x" injected="yes` produced a second attribute on
+    the tag that frames the author's own content as data. Sanitised inside the function rather
+    than trusted to every future caller, because a defence that depends on remembering is not
+    one.
+
+132. **Seven of my own new tests passed for the wrong reason.** Removing the defang entirely
+    failed none of them — the nonce alone defeats every payload, so those tests say nothing
+    about defanging. That is the same defect this session has found four times in the
+    repository's tests and once in its gate, now in tests I had just written to check a
+    security control. The defang is defence in depth for a different reader — a model skimming
+    for structure should see nothing shaped like the boundary inside the data — and it is
+    asserted directly now, so deleting it fails.
+
 ### The egress allowlist, probed rather than read
 
 The wall between a stranger's dependency tree and the internet. `prepare` runs `npm install` on
