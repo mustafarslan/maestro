@@ -122,9 +122,28 @@ export const RouterSchema = z.object({
 
 // ── Triage ───────────────────────────────────────────────────────────────────
 export const TriageSchema = z.object({
+  /** Reserved: triage is deterministic today. See `persona`. */
   model: ModelBindingSchema,
+  /**
+   * RESERVED, and read by nothing at run time.
+   *
+   * Triage is deterministic — dedupe, agreement, thresholds and caps are mechanical and
+   * testable rather than re-litigated by a model on every run — so `buildTriageSystemPrompt`
+   * exists and has no caller. The text is kept because the narrative pass the plan
+   * describes attaches here, and rewriting it later from nothing would be worse than
+   * carrying it.
+   *
+   * Said here because it is exported to YAML and read by people: an agent's persona
+   * changes that agent's behaviour, and someone reasonably assumes this one does too.
+   * It does not, and nothing at run time would tell them.
+   */
   persona: z.string().min(1),
   minConfidence: z.number().min(0).max(1).default(0.6),
+  /**
+   * Caps the findings triage marks as posted, which is what the summary comment renders
+   * and what any inline comment is drawn from — so it bounds both. Named for the plan's
+   * wording rather than for the narrower thing it does.
+   */
   maxInlineComments: z.number().int().positive().default(15),
   /** Cross-agent agreement raises confidence rather than duplicating a comment. */
   agreementBoost: z.number().min(0).max(1).default(0.15),

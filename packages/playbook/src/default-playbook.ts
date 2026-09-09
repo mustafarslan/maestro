@@ -286,6 +286,9 @@ Be specific about which element and which state. "Improve accessibility" is not 
       minConfidence: 0.6,
       maxInlineComments: 15,
       agreementBoost: 0.15,
+      // Reserved along with the binding above, and read by nothing: the rules below are
+      // implemented in `triage.ts` rather than asked of a model. Editing this text
+      // changes no behaviour today.
       persona: `You are the last step before a human reads this. Your job is to make the review worth
 reading, which mostly means removing things.
 

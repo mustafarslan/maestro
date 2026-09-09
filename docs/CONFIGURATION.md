@@ -188,6 +188,12 @@ it makes a typo invisible: `{{linear.acceptance_criteria}}` against a field name
 `acceptanceCriteria` leaves the product agent checking a change against no acceptance criteria at
 all, silently. The editor warns while you type and `POST /api/playbook` refuses it.
 
+**`triage.persona` is reserved.** Triage is deterministic — dedupe, cross-agent agreement,
+thresholds and the comment cap are implemented in code rather than asked of a model on every
+run — so the triage persona and its model binding are carried for the narrative pass the design
+describes and are read by nothing today. An agent's persona changes that agent's behaviour;
+this one changes nothing, and nothing at run time would say so.
+
 **Author-written values are fenced, not spliced.** The persona is rendered into the *system*
 prompt, beside the injection defenses. Interpolating a pull request description there unlabelled
 would hand whoever opened it a direct write into that prompt. Those values arrive inside the same

@@ -77,14 +77,29 @@ function quote(text: string): string {
  * evidence — so without this, anyone can make Maestro ping arbitrary people and
  * back-reference arbitrary issues from a bot account the repository trusts. The HTML
  * comment is the standard neutraliser: it renders as nothing and breaks the token.
+ *
+ * `#` is neutralised only before a digit. GitHub autolinks `#123` and nothing else, so
+ * firing on every `#` would rewrite `#include`, `#pragma` and a CSS `#header` — including
+ * inside an inline code span, where the HTML comment renders literally and the reader
+ * sees the mangling rather than the code. Defusing something that was never live is not
+ * a free precaution; it damages the text.
  */
 function deactivate(text: string): string {
-  return text.replace(/(^|[^\w`])([@#])(?=[\w-])/g, "$1$2<!---->");
+  return text
+    .replace(/(^|[^\w`])@(?=[\w-])/g, "$1@<!---->")
+    .replace(/(^|[^\w`])#(?=\d)/g, "$1#<!---->");
 }
 
-/** Author- or model-written prose, rendered as prose and nothing else. */
+/**
+ * Author- or model-written prose, rendered as prose and nothing else.
+ *
+ * A leading `#` is escaped as well: a body is markdown by design, so a line reading
+ * `## Approved by Maestro` inside one becomes a heading at the same level as Maestro's
+ * own — the forgery the fence work closed for evidence, arriving by the front door.
+ * Escaping the marker keeps the character visible and takes away the structure.
+ */
 function prose(text: string): string {
-  return deactivate(text);
+  return deactivate(text).replace(/^(\s*)(#{1,6})(\s)/gm, "$1\\$2$3");
 }
 
 export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = {}): string {

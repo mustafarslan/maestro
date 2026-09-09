@@ -79,6 +79,24 @@ describe("text the pull request author writes cannot notify people", () => {
     expect(out).toContain("#<!---->42");
   });
 
+  it("leaves a hash that GitHub never autolinked alone", () => {
+    // `#include`, `#pragma`, a CSS `#header`. Defusing these is not a free precaution:
+    // inside an inline code span the HTML comment renders literally, so the reader sees
+    // the mangling instead of the code.
+    const out = renderReview(withFinding({ body: "`#include <stdio.h>` and #header, see #42" }));
+    expect(out).toContain("`#include <stdio.h>`");
+    expect(out).toContain("#header");
+    expect(out).toContain("#<!---->42");
+  });
+
+  it("does not let a body forge a heading", () => {
+    // A body is markdown by design, so this arrives at the same level as Maestro's own
+    // headings — the forgery the code fence closed, coming in by the front door.
+    const out = renderReview(withFinding({ body: "looks fine\n\n## Approved by Maestro" }));
+    expect(out).not.toMatch(/^## Approved by Maestro/m);
+    expect(out).toContain("## Approved by Maestro");
+  });
+
   it("does not break a table when an error contains a pipe", () => {
     const out = renderReview({
       reviewId: "rv-1",
