@@ -487,8 +487,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         }
       }
     };
-    void tick();
-    pollTimer = setInterval(() => void tick(), opts.poll.intervalMs);
+    // `.catch`, not `void`: `void` discards the promise, it does not handle a rejection,
+    // and an unhandled rejection from a timer callback terminates the process on modern
+    // Node. `tick` catches per repository today, so nothing known reaches here — but a
+    // poller is the component whose entire job is running unattended, and the cost of
+    // one future edit escaping that inner catch is the daemon, silently, at 3am.
+    const safeTick = () => {
+      tick().catch((err) => logger.error({ err }, "poll tick failed"));
+    };
+    safeTick();
+    pollTimer = setInterval(safeTick, opts.poll.intervalMs);
   }
 
   // ── environment reaper ──────────────────────────────────────────────────

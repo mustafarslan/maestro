@@ -990,6 +990,31 @@ and commits a snapshot image, and a crash between prepare and teardown leaves th
     length check, because that throws on mismatched lengths. The manifest's HTML escaping also
     covered `"` but not `&` or `<`, so an app name containing one would have broken the form.
 
+117. **Two unhandled rejections, either of which terminates the process.** `setInterval(() =>
+    void tick())` — `void` discards a promise, it does not handle its rejection, and an
+    unhandled rejection from a timer callback ends the process on modern Node. `tick` catches
+    per repository today, so nothing known reaches it; a poller is the component whose entire
+    job is running unattended, and the cost of one future edit escaping that inner catch is the
+    daemon, silently. The second was worse because it was on the shutdown path: `void
+    shutdown(signal)` with `await daemon.stop()` inside meant a stop that rejected crashed the
+    process with a rejection trace instead of exiting cleanly. Shutdown also had no way out if
+    `stop()` hung — a second Ctrl-C did nothing and SIGKILL was the only exit — so it now
+    force-exits on a second signal and after 60 seconds, pointing at `maestro reap`.
+
+118. **A guard I wrote on a premise that was false, and a test that proved nothing.** The first
+    version of 117 wrapped `GitHubClient.fromEnv()` in the poller because "the Octokit
+    constructor throws on a malformed private key", with a test asserting the daemon survived
+    one. The mutation check passed with the guard removed, which is the tell: Octokit's
+    constructor does not throw on a bad PEM — it rejects on the first request, which `tick`
+    already caught. Both the guard and the test are gone, and the remaining test asserts the
+    property the code can actually guarantee. Third time this session a check passed for the
+    wrong reason; the mutation check caught all three.
+
+119. **The formatter was never run over `scripts/`.** Every local format in this session was
+    `biome check --write packages apps`, which silently excluded the new `scripts/` directory —
+    so `live-github-check.mjs` was committed unformatted and only the clean-checkout gate said
+    so. `pnpm run format` covers the repository and is what to use.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

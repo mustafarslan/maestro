@@ -113,20 +113,31 @@ if (process.argv.includes("--write")) {
     if (!commentId) return;
     const res = await fetch(
       `https://api.github.com/repos/${ref.owner}/${ref.repo}/issues/comments/${commentId}`,
-      { method: "DELETE", headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" } },
+      {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" },
+      },
     );
-    console.log(res.ok ? `  ok   cleanup: deleted comment ${commentId}` : `  FAIL cleanup: ${res.status} — DELETE comment ${commentId} by hand`);
+    console.log(
+      res.ok
+        ? `  ok   cleanup: deleted comment ${commentId}`
+        : `  FAIL cleanup: ${res.status} — DELETE comment ${commentId} by hand`,
+    );
     if (!res.ok) failures++;
   };
 
   console.log("\n  write path (creates a comment and deletes it again)\n");
   try {
     await check("postReview", async () => {
-      const posted = await client.postReview(pr, `${MARKER}\nMaestro live check — this comment deletes itself.`);
+      const posted = await client.postReview(
+        pr,
+        `${MARKER}\nMaestro live check — this comment deletes itself.`,
+      );
       commentId = posted.id;
       // No inline anchors passed, so this must take the issue-comment path rather than
       // the review path: a review with no comments would still show as a review.
-      if (posted.mode !== "comment") throw new Error(`expected an issue comment, got ${posted.mode}`);
+      if (posted.mode !== "comment")
+        throw new Error(`expected an issue comment, got ${posted.mode}`);
       return `id ${posted.id} as a ${posted.mode}`;
     });
 

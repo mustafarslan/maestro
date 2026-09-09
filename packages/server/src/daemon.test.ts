@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
@@ -308,5 +309,23 @@ describe("what cancels a review already running", () => {
       commentId: 11,
     };
     expect(supersedes(t as never, "old")).toBe(false);
+  });
+});
+
+describe("the poller survives what it cannot control", () => {
+  it("handles a tick rejection rather than letting it terminate the process", async () => {
+    // Deliberately narrow, and titled for what it checks. The first version of this test
+    // asserted that a malformed stored private key could not crash the daemon, and passed
+    // with the guard removed — because the premise was wrong: Octokit's constructor does
+    // not throw on a bad PEM, it rejects on the first request, which `tick` already
+    // catches per repository. A test whose premise is false is worse than no test.
+    //
+    // What is actually true and worth keeping is the shape: `void p` discards a promise
+    // without handling its rejection, and a rejection from a timer callback terminates
+    // the process. So the property asserted is the one the code can guarantee — the
+    // timer callback attaches a handler.
+    const source = readFileSync(join(import.meta.dirname, "daemon.ts"), "utf8");
+    expect(source).not.toMatch(/setInterval\(\(\) => void tick\(\)/);
+    expect(source).toMatch(/tick\(\)\.catch\(/);
   });
 });

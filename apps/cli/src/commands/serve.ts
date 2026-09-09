@@ -103,12 +103,35 @@ ${color.bold("maestro serve")} [options]
 
   const shutdown = async (signal: string) => {
     console.log(color.dim(`\n${signal} received, finishing in-flight work...`));
-    await daemon.stop();
-    db.close();
+    // A second signal means the operator has stopped waiting. Without this, Ctrl-C twice
+    // did nothing the second time and the only way out was SIGKILL.
+    process.once(signal as NodeJS.Signals, () => {
+      console.log(color.dim("second signal — exiting now"));
+      process.exit(130);
+    });
+    // A stop that hangs must not hold the terminal for ever. Containers left behind are
+    // what `maestro reap` and the environments view exist for; an unkillable daemon has
+    // no equivalent.
+    const forced = setTimeout(() => {
+      console.log(color.dim("shutdown timed out after 60s — exiting; run 'maestro reap'"));
+      process.exit(1);
+    }, 60_000);
+    forced.unref();
+    try {
+      await daemon.stop();
+    } catch (err) {
+      // Exiting cleanly matters more than the reason, but the reason is worth printing:
+      // rejecting here used to be an unhandled rejection, so a failed stop terminated the
+      // process with a crash trace instead of the message above.
+      console.error(`shutdown failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      clearTimeout(forced);
+      db.close();
+    }
     process.exit(0);
   };
-  process.on("SIGINT", () => void shutdown("SIGINT"));
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
   await new Promise(() => {});
   return 0;
