@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { IN_FLIGHT_STATES, ReviewStore, recoverStaleReviews } from "./reviews.js";
+import {
+  IN_FLIGHT_STATES,
+  ReviewStore,
+  recoverStaleReviews,
+  reviewsForPullRequest,
+} from "./reviews.js";
 import { openStore } from "./store/db.js";
 import type { SqlDatabase } from "./store/driver.js";
 
@@ -131,5 +136,57 @@ describe("recovery closes what the review left open", () => {
 
     const row = db.prepare("SELECT state FROM tasks WHERE id='t3'").get<{ state: string }>();
     expect(row?.state).toBe("running");
+  });
+});
+
+describe("the tenant boundary on cancellation", () => {
+  /** Two repositories, each with a pull request numbered 7. */
+  const twoRepos = () => {
+    const a = store.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 7,
+      headSha: "a".repeat(40),
+      playbookVersionId: "pv",
+    });
+    const b = store.create({
+      repoOwner: "other",
+      repoName: "api",
+      prNumber: 7,
+      headSha: "b".repeat(40),
+      playbookVersionId: "pv",
+    });
+    return { a: a.id, b: b.id };
+  };
+
+  it("matches only the review belonging to the named repository", () => {
+    // Matching on the pull request number alone let a `closed` event in one repository
+    // abort reviews in another — including private repositories the sender cannot read.
+    // PR numbers are small dense integers, so a collision is the normal case, not an
+    // unlucky one.
+    const { a, b } = twoRepos();
+    const repoA = store.ensureRepo("acme", "web");
+
+    const matched = reviewsForPullRequest(db, [a, b], { repoId: repoA, number: 7 });
+    expect(matched).toEqual([a]);
+  });
+
+  it("matches nothing for a number that repository does not have", () => {
+    const { a, b } = twoRepos();
+    const repoA = store.ensureRepo("acme", "web");
+    expect(reviewsForPullRequest(db, [a, b], { repoId: repoA, number: 99 })).toEqual([]);
+  });
+
+  it("matches nothing for a repository with no reviews in flight", () => {
+    const { a, b } = twoRepos();
+    const unrelated = store.ensureRepo("third", "party");
+    expect(reviewsForPullRequest(db, [a, b], { repoId: unrelated, number: 7 })).toEqual([]);
+  });
+
+  it("ignores an id that is not a review", () => {
+    // The caller passes whatever is in its in-flight map; a stale key must not throw.
+    const { a } = twoRepos();
+    const repoA = store.ensureRepo("acme", "web");
+    expect(reviewsForPullRequest(db, [a, "rv_gone"], { repoId: repoA, number: 7 })).toEqual([a]);
   });
 });

@@ -52,24 +52,19 @@ describe("the webhook listener's secret", () => {
 });
 
 describe("cancellation is scoped to one repository", () => {
-  it("does not abort a review of a different repo with the same PR number", async () => {
-    // `inFlight` holds reviews for every repo the daemon serves and PR numbers are small
-    // dense integers, so matching on the number alone let a `closed` event in one
-    // repository abort reviews in another — including private repositories the sender
-    // cannot read. The fix was claimed in a commit message before it landed; this is the
-    // assertion that would have caught that.
+  it("routes both cancel paths through the shared predicate", () => {
+    // Deliberately narrow, and titled for what it is. The PROPERTY — that a `closed`
+    // event in one repository cannot abort another's review — is asserted behaviourally
+    // in packages/core/src/reviews.test.ts, against a real database with two
+    // repositories sharing a pull request number. That test fails for every wrong
+    // implementation; this one only checks the daemon still delegates rather than
+    // growing its own copy of the filter.
+    //
+    // The previous version of this test asserted the shape of daemon.ts's source and was
+    // described as proving the behaviour. It did not: a filter that kept the same words
+    // and matched the wrong rows passed it.
     const source = readFileSync(join(import.meta.dirname, "daemon.ts"), "utf8");
-
-    // Both paths must go through the repo-scoped helper, and no unscoped comparison of a
-    // pull request number against in-flight metadata may remain.
-    expect(source).toContain("const inFlightFor =");
-    expect(source).toContain("meta?.repo_id === repoId");
-    expect(
-      source.match(/meta\.pr_number === t\.pr\.number/g),
-      "an unscoped pr_number comparison remains",
-    ).toBeNull();
-
-    // Both call sites use it.
+    expect(source).toContain("reviewsForPullRequest(db, inFlight.keys()");
     expect(source.match(/inFlightFor\(t\.pr\)/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });

@@ -7,6 +7,7 @@ import {
   logger,
   ReviewStore,
   recoverStaleReviews,
+  reviewsForPullRequest,
   SpanRecorder,
   type SqlDatabase,
 } from "@maestro/core";
@@ -150,13 +151,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
    * numbers and abort reviews of private repositories they cannot read. Both the cancel
    * and supersede paths had it — the newer one copied the older rather than noticing.
    */
-  const inFlightFor = (pr: PullRequestRef): string[] => {
-    const repoId = reviews.ensureRepo(pr.owner, pr.repo);
-    return [...inFlight.keys()].filter((id) => {
-      const meta = reviews.get(id);
-      return meta?.repo_id === repoId && meta.pr_number === pr.number;
+  const inFlightFor = (pr: PullRequestRef): string[] =>
+    reviewsForPullRequest(db, inFlight.keys(), {
+      repoId: reviews.ensureRepo(pr.owner, pr.repo),
+      number: pr.number,
     });
-  };
 
   /** Enqueue rather than review inline: the HTTP handler must return immediately. */
   const enqueueTrigger = (t: ReviewTrigger): void => {

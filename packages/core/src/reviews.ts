@@ -196,3 +196,29 @@ export function recoverStaleReviews(db: SqlDatabase, olderThanMs: number): numbe
     return stale.length;
   });
 }
+
+/**
+ * Which of the given review ids belong to one pull request.
+ *
+ * A pure predicate rather than a loop inside the daemon, because the property it encodes
+ * is a tenant boundary: matching on the pull request number alone let a `closed` event in
+ * one repository abort reviews in another — including private repositories the sender
+ * cannot read. That was fixed once, claimed, and not actually applied; the test guarding
+ * it then asserted the SHAPE OF THE SOURCE rather than the behaviour, so it would have
+ * passed on a filter that kept the same words and matched the wrong rows.
+ *
+ * Exported so the boundary can be exercised directly with two repositories and one
+ * number, which is the only test that fails for every wrong implementation rather than
+ * for one spelling of the wrong implementation.
+ */
+export function reviewsForPullRequest(
+  db: SqlDatabase,
+  candidateIds: Iterable<string>,
+  pr: { repoId: string; number: number },
+): string[] {
+  const store = new ReviewStore(db);
+  return [...candidateIds].filter((id) => {
+    const meta = store.get(id);
+    return meta?.repo_id === pr.repoId && meta.pr_number === pr.number;
+  });
+}

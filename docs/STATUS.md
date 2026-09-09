@@ -619,8 +619,11 @@ These are recorded because each was invisible to the test suite that existed at 
     replacement before writing, so the first was discarded too; only the supersede path was
     fixed, and the commit message and this document both claimed otherwise. Maestro caught the
     live code and the false claim as separate findings on the next review. Both paths go through
-    one repository-scoped helper now, asserted by a test that fails against the state the code
-    was actually in.
+    one repository-scoped helper now. The first test guarding it asserted the SHAPE OF THE
+    SOURCE and was described here as proving the behaviour — it did not: a filter keeping the
+    same words while matching the wrong rows passed it. The boundary is now a pure exported
+    predicate tested against a real database with two repositories sharing a pull request
+    number, verified to fail both for the original bug and for that same-words variant.
 
 80. **Cache-hit snapshots became permanently unreapable.** The fail-closed age guard added in 75
     skips any image it cannot date — and `refreshCheckout`, the dependency-cache path taken by
@@ -642,7 +645,15 @@ These are recorded because each was invisible to the test suite that existed at 
     re-reviewable, and written by nothing — the ninth built-but-unwired capability found in this
     session, and the state the feature is named after.
 
-Findings 75-82 were reported by **Maestro reviewing this session's own commits** — the first two
+83. **The test guarding a tenant boundary tested the source text, not the boundary.** It read
+    `daemon.ts` and asserted substrings, which proves a spelling rather than a behaviour: a
+    filter that kept the words and matched the wrong rows would have passed, and a rename would
+    have broken it for no reason. Source-text guards are right where the text IS the artefact —
+    the severity list, the badge classes — and wrong where the artefact is control flow. The
+    predicate is exported and tested directly now, and the source check that remains is titled
+    for the narrow thing it actually does.
+
+Findings 75-83 were reported by **Maestro reviewing this session's own commits** — the first two
 on the six commits that introduced them, the rest on the eight before those. Three of the five are
 cases of fixing one half of something and leaving the other, which is the failure mode this
 session has repeated most.
