@@ -339,6 +339,17 @@ These are recorded because each was invisible to the test suite that existed at 
     naming neither the file nor the fix. An unreadable store is now treated as empty, which
     degrades to "no key configured" — something the callers already handle and which is true.
 
+47. **`gate` nodes were never executed.** The node registry advertised them, the Studio let you
+    add one, the validator accepted the graph, the plan lists them — and the engine never looked
+    for them. Someone who added a gate to drop low-confidence findings got no filtering and no
+    indication of it, which is worse than the feature being absent: they believed a safety filter
+    was in place while every speculative finding went straight through. Now implemented with a
+    typed config, and a malformed config passes findings through rather than dropping them, since
+    rejecting everything over a typo would hide real defects behind what looks like a clean review.
+48. **The canvas allowed graphs the engine silently ignores.** `router` and `triage` were declared
+    `cardinality: "any"`, but the engine reads `byKind(kind)[0]` — a second one was drawable,
+    passed validation, and never ran. Both are now `at-most-one` and the validator says so.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

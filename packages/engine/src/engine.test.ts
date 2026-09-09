@@ -234,3 +234,120 @@ describe("engine admission control", () => {
     expect(driver.destroyed.length).toBeGreaterThan(0);
   });
 });
+
+describe("gate nodes", () => {
+  /** A playbook with one gate between the agents and triage. */
+  function withGate(config: Record<string, unknown>): PlaybookDocument {
+    const doc = twoAgentPlaybook();
+    const agentNodes = doc.graph.nodes.filter((n) => n.kind === "agent");
+    const triageNode = doc.graph.nodes.find((n) => n.kind === "triage");
+    return {
+      ...doc,
+      graph: {
+        nodes: [
+          ...doc.graph.nodes,
+          {
+            id: "gate-1",
+            kind: "gate" as const,
+            failurePolicy: "skip-with-note" as const,
+            config,
+            position: { x: 0, y: 0 },
+          },
+        ],
+        edges: [
+          ...doc.graph.edges.filter(
+            (e) => !(e.to === triageNode?.id && agentNodes.some((a) => a.id === e.from)),
+          ),
+          ...agentNodes.map((a) => ({ from: a.id, to: "gate-1" })),
+          ...(triageNode ? [{ from: "gate-1", to: triageNode.id }] : []),
+        ],
+      },
+    };
+  }
+
+  /** A registry whose model submits findings at two different confidences. */
+  function findingRegistry() {
+    const registry = new ProviderRegistry();
+    const transport = anthropicTransport([
+      {
+        toolCalls: [
+          {
+            id: "1",
+            name: "submit_findings",
+            input: {
+              findings: [
+                {
+                  file: "a.ts",
+                  lineStart: 1,
+                  lineEnd: 1,
+                  category: "sure-thing",
+                  severity: "high",
+                  confidence: 0.95,
+                  title: "Confident",
+                  body: "b",
+                },
+                {
+                  file: "b.ts",
+                  lineStart: 1,
+                  lineEnd: 1,
+                  category: "speculation",
+                  severity: "low",
+                  // Above triage's own 0.6 floor on purpose: if this disappears, the
+                  // gate is the only thing that can have removed it. At 0.2 the test
+                  // passed with the gate ripped out, which is a test proving nothing.
+                  confidence: 0.75,
+                  title: "Speculative",
+                  body: "b",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+    registry.register(fakeConfig(transport, { id: "anthropic" }));
+    return registry;
+  }
+
+  it("drops findings below its confidence floor", async () => {
+    // Gate nodes were drawable, documented and never executed: a user who added one to
+    // filter speculation got no filtering and no sign of it, having been told the filter
+    // was in place.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: findingRegistry() },
+      request({ playbook: withGate({ minConfidence: 0.9 }) }),
+    );
+    const titles = (outcome.triage?.posted ?? []).map((f) => f.title);
+    expect(titles).toContain("Confident");
+    expect(titles).not.toContain("Speculative");
+  });
+
+  it("passes everything through when it has no settings", async () => {
+    // An empty gate on the canvas must do nothing, not reject every finding.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: findingRegistry() },
+      request({ playbook: withGate({}) }),
+    );
+    const all = [...(outcome.triage?.posted ?? []), ...(outcome.triage?.suppressed ?? [])];
+    expect(all.map((f) => f.title).sort()).toEqual(["Confident", "Speculative"]);
+  });
+
+  it("passes everything through when its config is malformed", async () => {
+    // Rejecting every finding because someone typed a bad threshold would hide real
+    // defects behind what looks like a clean review.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: findingRegistry() },
+      request({ playbook: withGate({ minConfidence: "very high" }) }),
+    );
+    const all = [...(outcome.triage?.posted ?? []), ...(outcome.triage?.suppressed ?? [])];
+    expect(all.length).toBeGreaterThan(0);
+  });
+
+  it("records the gate as a node in the outcome, so it is visible in the waterfall", async () => {
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: findingRegistry() },
+      request({ playbook: withGate({ minConfidence: 0.9 }) }),
+    );
+    expect(outcome.nodes.some((n) => n.kind === "gate")).toBe(true);
+  });
+});

@@ -16,8 +16,15 @@ export interface NodeSpec {
   outputs: PortType[];
   /** Pinned nodes cannot be added, removed or renamed in the editor. */
   pinned: boolean;
-  /** Exactly-one nodes are structural; any-number nodes are user-composable. */
-  cardinality: "exactly-one" | "any";
+  /**
+   * How many of this node a graph may contain.
+   *
+   * `at-most-one` exists because the engine reads `byKind(k)[0]` for router and triage:
+   * a second one was drawable, passed validation, and then silently never ran. A canvas
+   * that lets you build something the engine quietly ignores is worse than one that
+   * refuses it.
+   */
+  cardinality: "exactly-one" | "at-most-one" | "any";
   description: string;
 }
 
@@ -35,7 +42,8 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     inputs: ["Checkout"],
     outputs: ["RouteDecision"],
     pinned: false,
-    cardinality: "any",
+    // Optional — without one every agent runs — but never more than one.
+    cardinality: "at-most-one",
     description: "Decide which agents apply and at what budget tier.",
   },
   agent: {
@@ -59,7 +67,8 @@ export const NODE_SPECS: Record<NodeKind, NodeSpec> = {
     inputs: ["Finding[]"],
     outputs: ["Review"],
     pinned: false,
-    cardinality: "any",
+    // Triage is the fan-in: two of them would produce two reviews for one comment.
+    cardinality: "at-most-one",
     description: "Dedupe, calibrate and rank findings into one review.",
   },
   post: {

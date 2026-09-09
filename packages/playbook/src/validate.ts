@@ -30,12 +30,21 @@ export function validateGraph(doc: PlaybookDocument): ValidationIssue[] {
 
   // ── Cardinality of pinned structural nodes ────────────────────────────────
   for (const spec of Object.values(NODE_SPECS)) {
-    if (spec.cardinality !== "exactly-one") continue;
+    if (spec.cardinality === "any") continue;
     const count = nodes.filter((n) => n.kind === spec.kind).length;
-    if (count !== 1) {
+
+    if (spec.cardinality === "exactly-one" && count !== 1) {
       issues.push({
         code: "cardinality",
         message: `graph must contain exactly one '${spec.kind}' node (found ${count})`,
+        target: spec.kind,
+      });
+    }
+    // The engine executes only the first of these, so a second is silent dead work.
+    if (spec.cardinality === "at-most-one" && count > 1) {
+      issues.push({
+        code: "cardinality",
+        message: `graph may contain at most one '${spec.kind}' node (found ${count}); only the first would run`,
         target: spec.kind,
       });
     }

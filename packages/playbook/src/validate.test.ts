@@ -144,3 +144,52 @@ describe("safeParsePlaybook", () => {
     if (!result.ok) expect(result.issues.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("at-most-one nodes", () => {
+  it("rejects a second triage node, which the engine would silently ignore", () => {
+    // The engine reads byKind("triage")[0]. A second one was drawable, passed
+    // validation, and then never ran — the canvas letting you build something the
+    // engine quietly discards is worse than refusing it.
+    const doc = defaultPlaybook();
+    const triage = doc.graph.nodes.find((n) => n.kind === "triage")!;
+    const issues = validateGraph({
+      ...doc,
+      graph: { ...doc.graph, nodes: [...doc.graph.nodes, { ...triage, id: "triage-2" }] },
+    });
+    expect(issues.some((i) => i.code === "cardinality" && i.message.includes("triage"))).toBe(true);
+  });
+
+  it("rejects a second router for the same reason", () => {
+    const doc = defaultPlaybook();
+    const router = doc.graph.nodes.find((n) => n.kind === "router")!;
+    const issues = validateGraph({
+      ...doc,
+      graph: { ...doc.graph, nodes: [...doc.graph.nodes, { ...router, id: "router-2" }] },
+    });
+    expect(issues.some((i) => i.code === "cardinality" && i.message.includes("router"))).toBe(true);
+  });
+
+  it("still accepts a graph with no router at all, which is a valid choice", () => {
+    // Without a router every agent runs; that is a coarser review, not a broken one.
+    const doc = defaultPlaybook();
+    const router = doc.graph.nodes.find((n) => n.kind === "router")!;
+    const issues = validateGraph({
+      ...doc,
+      graph: {
+        nodes: doc.graph.nodes.filter((n) => n.id !== router.id),
+        edges: doc.graph.edges.filter((e) => e.from !== router.id && e.to !== router.id),
+      },
+    });
+    expect(issues.filter((i) => i.code === "cardinality")).toEqual([]);
+  });
+
+  it("still allows any number of agents and gates", () => {
+    const doc = defaultPlaybook();
+    const agent = doc.graph.nodes.find((n) => n.kind === "agent")!;
+    const issues = validateGraph({
+      ...doc,
+      graph: { ...doc.graph, nodes: [...doc.graph.nodes, { ...agent, id: "agent-extra" }] },
+    });
+    expect(issues.filter((i) => i.code === "cardinality")).toEqual([]);
+  });
+});

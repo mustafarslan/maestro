@@ -121,6 +121,21 @@ export const TriageSchema = z.object({
 });
 
 // ── Graph ────────────────────────────────────────────────────────────────────
+
+/**
+ * Configuration for a `gate` node.
+ *
+ * A gate drops findings before triage sees them. Everything is optional, and a gate with
+ * no settings is deliberately a pass-through rather than an error — an empty gate on the
+ * canvas should do nothing, not reject every finding.
+ */
+export const GateConfigSchema = z.object({
+  minConfidence: z.number().min(0).max(1).optional(),
+  minSeverity: z.enum(["critical", "high", "medium", "low", "info"]).optional(),
+  /** Category slugs to drop outright, e.g. a category a team has decided is noise. */
+  excludeCategories: z.array(z.string()).default([]),
+});
+export type GateConfig = z.infer<typeof GateConfigSchema>;
 export const GraphNodeSchema = z.object({
   id: Id,
   kind: z.enum(["prepare-env", "router", "agent", "gate", "triage", "post"]),

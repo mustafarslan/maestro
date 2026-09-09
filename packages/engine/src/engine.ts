@@ -1,10 +1,16 @@
 import { type Finding, runReviewAgent } from "@maestro/agents";
 import { logger, type SpanRecorder, type SqlDatabase } from "@maestro/core";
 import type { Provider, ProviderRegistry } from "@maestro/llm";
-import type { EnvSpec, GraphNode, PlaybookDocument, PromptContext } from "@maestro/playbook";
+import {
+  type EnvSpec,
+  GateConfigSchema,
+  type GraphNode,
+  type PlaybookDocument,
+  type PromptContext,
+} from "@maestro/playbook";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
 import { type RouteDecision, route } from "./router.js";
-import { type TriageResult, triage } from "./triage.js";
+import { type AgentFindings, type TriageResult, triage } from "./triage.js";
 
 export interface EngineDeps {
   driver: SandboxDriver;
@@ -49,6 +55,38 @@ export interface ReviewRequest {
 function promptCharBudget(provider: Provider, model: string): number | undefined {
   const window = provider.capabilities(model).contextWindow;
   return window ? Math.floor(window * 3 * 0.8) : undefined;
+}
+
+/**
+ * Applies one gate node's filter to the findings collected so far.
+ *
+ * A malformed config is a pass-through, not a silent drop: rejecting every finding
+ * because someone typed a bad threshold would hide real defects and look like a clean
+ * review, which is the most expensive way this could fail.
+ */
+function applyGate(node: GraphNode, results: AgentFindings[]): AgentFindings[] {
+  const parsed = GateConfigSchema.safeParse(node.config);
+  if (!parsed.success) {
+    logger.warn(
+      { nodeId: node.id, issues: parsed.error.issues.map((i) => i.message) },
+      "gate config is invalid; passing findings through unfiltered",
+    );
+    return results;
+  }
+  const gate = parsed.data;
+  const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  const floor = gate.minSeverity ? rank[gate.minSeverity] : undefined;
+  const excluded = new Set(gate.excludeCategories.map((c) => c.toLowerCase()));
+
+  return results.map((r) => ({
+    ...r,
+    findings: r.findings.filter((f) => {
+      if (gate.minConfidence !== undefined && f.confidence < gate.minConfidence) return false;
+      if (floor !== undefined && (rank[f.severity] ?? 9) > floor) return false;
+      if (excluded.has(f.category.toLowerCase())) return false;
+      return true;
+    }),
+  }));
 }
 
 export interface NodeOutcome {
@@ -345,7 +383,23 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       }),
     );
 
-    const collected = agentResults.filter((r): r is NonNullable<typeof r> => r !== null);
+    let collected: AgentFindings[] = agentResults.filter(
+      (r): r is NonNullable<typeof r> => r !== null,
+    );
+
+    // ── gates ──────────────────────────────────────────────────────────────
+    // Gate nodes were drawable, documented as "filter findings before triage", accepted
+    // by the validator — and never executed. A user who added one to drop low-confidence
+    // findings got no filtering and no indication of it, which is worse than the feature
+    // being absent: they believed a safety filter was in place.
+    for (const gateNode of byKind("gate")) {
+      const before = collected.reduce((n, r) => n + r.findings.length, 0);
+      collected = await timedNode(nodes, gateNode, deps.spans, req.reviewId, async () =>
+        applyGate(gateNode, collected),
+      );
+      const after = collected.reduce((n, r) => n + r.findings.length, 0);
+      log.info({ nodeId: gateNode.id, before, after }, "gate applied");
+    }
 
     // ── triage ─────────────────────────────────────────────────────────────
     const triageNode = byKind("triage")[0];
