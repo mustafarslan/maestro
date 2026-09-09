@@ -350,6 +350,17 @@ These are recorded because each was invisible to the test suite that existed at 
     `cardinality: "any"`, but the engine reads `byKind(kind)[0]` — a second one was drawable,
     passed validation, and never ran. Both are now `at-most-one` and the validator says so.
 
+49. **`failurePolicy` was read in exactly one place.** The agent loop consulted it; every other
+    node ignored it, so on a router or a triage node it was a setting the Studio offered and
+    nothing read. A router that threw killed a review that could have run every agent instead,
+    and a throw in triage lost a review whose findings were already in hand. Both now honour it:
+    `skip-with-note` falls back to running every agent, or to an empty review, and `fail-review`
+    still fails.
+50. **My own fix for 49 computed its fallback eagerly**, so the fallback for "triage threw" was
+    itself a call to triage, evaluated outside the try block. It took the review down by exactly
+    the path the fix existed to prevent. Caught by a test that expected the fallback and got a
+    failed review; the fallback is a thunk now.
+
 Findings 11-20, 23-25 and 29-32 were reported by, or found by running, **Maestro against real
 code — its own commits and its own pull request**.
 

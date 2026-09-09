@@ -89,6 +89,49 @@ function applyGate(node: GraphNode, results: AgentFindings[]): AgentFindings[] {
   }));
 }
 
+/**
+ * Runs a node, honouring its failure policy.
+ *
+ * `failurePolicy` was read in exactly one place — the agent loop — so on every other node
+ * it was a setting the Studio offered and nothing consulted. `fail-review` still throws;
+ * `skip-with-note` falls back to the value supplied here, which for a router is "run
+ * every agent" and for triage is "an empty review". Both are worse reviews than intended
+ * and both are better than no review at all.
+ */
+async function withFailurePolicy<T>(
+  node: GraphNode,
+  // A thunk, not a value: computing the fallback eagerly evaluates it OUTSIDE this try,
+  // so a fallback that can itself throw — triage on a malformed playbook does — takes
+  // the review down by the very path this exists to prevent. Caught by a test that
+  // expected the fallback and got a failed review.
+  fallback: () => T,
+  log: { warn: (obj: object, msg: string) => void },
+  run: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (node.failurePolicy === "fail-review") throw err;
+    log.warn(
+      { nodeId: node.id, kind: node.kind, err: err instanceof Error ? err.message : String(err) },
+      "node failed; continuing under skip-with-note",
+    );
+    return fallback();
+  }
+}
+
+/**
+ * What a failed triage degrades to: an empty review that still posts.
+ *
+ * Built as a literal rather than by calling triage() with no findings, because the
+ * fallback for "triage threw" must not itself be a call to triage.
+ */
+const EMPTY_TRIAGE: TriageResult = {
+  posted: [],
+  suppressed: [],
+  summary: "Triage did not complete; findings could not be consolidated.",
+};
+
 export interface NodeOutcome {
   nodeId: string;
   kind: string;
@@ -197,12 +240,22 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       costCapCents: req.playbook.router.budgetTiers.at(-1)?.costCapCents ?? 200,
     };
     if (routerNode) {
-      decision = await timedNode(nodes, routerNode, deps.spans, req.reviewId, async () =>
-        route(req.playbook, {
-          changedFiles: req.changedFiles,
-          changedLines: req.changedLines,
-          author: req.context.pr?.author,
-        }),
+      // `failurePolicy` was honoured only for agent nodes: on a router it was dead
+      // config, and a router that threw killed a review that could have run every agent
+      // instead. Under skip-with-note the default decision above stands — a coarser
+      // review, not a lost one.
+      decision = await withFailurePolicy(
+        routerNode,
+        () => decision,
+        log,
+        () =>
+          timedNode(nodes, routerNode, deps.spans, req.reviewId, async () =>
+            route(req.playbook, {
+              changedFiles: req.changedFiles,
+              changedLines: req.changedLines,
+              author: req.context.pr?.author,
+            }),
+          ),
       );
       if (decision.skipReview) {
         log.info({ reason: decision.skipReview }, "review skipped by router");
@@ -404,8 +457,14 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     // ── triage ─────────────────────────────────────────────────────────────
     const triageNode = byKind("triage")[0];
     const triaged = triageNode
-      ? await timedNode(nodes, triageNode, deps.spans, req.reviewId, async () =>
-          triage(req.playbook, collected),
+      ? await withFailurePolicy(
+          triageNode,
+          () => EMPTY_TRIAGE,
+          log,
+          () =>
+            timedNode(nodes, triageNode, deps.spans, req.reviewId, async () =>
+              triage(req.playbook, collected),
+            ),
         )
       : triage(req.playbook, collected);
 

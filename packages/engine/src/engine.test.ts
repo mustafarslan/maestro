@@ -351,3 +351,81 @@ describe("gate nodes", () => {
     expect(outcome.nodes.some((n) => n.kind === "gate")).toBe(true);
   });
 });
+
+describe("failure policy on non-agent nodes", () => {
+  /**
+   * A router rule missing its `include` list — the shape a hand-edited or
+   * partially-migrated playbook takes, and one the router genuinely throws on.
+   *
+   * Verified to actually throw before being used here. An invalid glob was tried first
+   * and picomatch accepts it, which would have made this whole suite pass with the
+   * feature removed — the same trap the gate tests fell into.
+   */
+  function brokenRouter(policy: "fail-review" | "skip-with-note"): PlaybookDocument {
+    const doc = twoAgentPlaybook();
+    return {
+      ...doc,
+      router: {
+        ...doc.router,
+        rules: [{ agentId: "security", exclude: [] } as unknown as (typeof doc.router.rules)[0]],
+      },
+      graph: {
+        ...doc.graph,
+        nodes: doc.graph.nodes.map((n) =>
+          n.kind === "router" ? { ...n, failurePolicy: policy } : n,
+        ),
+      },
+    };
+  }
+
+  it("runs every agent when the router fails under skip-with-note", async () => {
+    // failurePolicy was consulted only inside the agent loop, so on a router it was a
+    // setting the Studio offered and nothing read: a router that threw killed a review
+    // that could have run every agent instead. The fallback is a coarser review, not a
+    // lost one, so the agents must actually have run.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: brokenRouter("skip-with-note") }),
+    );
+
+    expect(outcome.state).toBe("done");
+    const ran = outcome.nodes.filter((n) => n.kind === "agent" && n.state === "done");
+    expect(ran.length).toBeGreaterThan(0);
+  });
+
+  it("still fails the review when the router's policy says fail-review", async () => {
+    // The escape hatch has to keep working: someone who marks the router critical means
+    // it. runReview converts a throw into a failed outcome rather than rejecting, so the
+    // observable difference is the state, not an exception.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: brokenRouter("fail-review") }),
+    );
+    expect(outcome.state).toBe("failed");
+    expect(outcome.nodes.some((n) => n.kind === "agent" && n.state === "done")).toBe(false);
+  });
+
+  it("still produces a review when triage fails under skip-with-note", async () => {
+    // A throw in triage lost a review whose findings were already in hand.
+    const doc = twoAgentPlaybook();
+    const broken = {
+      ...doc,
+      // Destructuring a missing triage block throws — the shape a hand-edited or
+      // forward-migrated playbook would take.
+      triage: undefined,
+      graph: {
+        ...doc.graph,
+        nodes: doc.graph.nodes.map((n) =>
+          n.kind === "triage" ? { ...n, failurePolicy: "skip-with-note" as const } : n,
+        ),
+      },
+    } as unknown as PlaybookDocument;
+
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: broken }),
+    );
+    expect(outcome.state).toBe("done");
+    expect(outcome.nodes.some((n) => n.kind === "agent" && n.state === "done")).toBe(true);
+  });
+});
