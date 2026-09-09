@@ -186,6 +186,9 @@ importers:
       '@maestro/engine':
         specifier: workspace:*
         version: link:../engine
+      '@maestro/integrations':
+        specifier: workspace:*
+        version: link:../integrations
       '@maestro/llm':
         specifier: workspace:*
         version: link:../llm

@@ -17,6 +17,7 @@
   "dependencies": {
     "@maestro/core": "workspace:*",
     "@maestro/engine": "workspace:*",
+    "@maestro/integrations": "workspace:*",
     "@maestro/llm": "workspace:*",
     "@maestro/playbook": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0",

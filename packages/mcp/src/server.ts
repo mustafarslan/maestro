@@ -1,4 +1,6 @@
-import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { JobQueue, maestroHome, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { compareVersions, type EvalScore, fixturesDir, loadScores } from "@maestro/engine";
+import { parsePullRequestRef } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -266,6 +268,121 @@ export function buildServer(deps: McpDeps): McpServer {
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    "get_findings",
+    {
+      title: "Get findings",
+      description:
+        "Findings for a review, including the ones triage suppressed. Suppressed findings are " +
+        "the interesting ones when tuning thresholds: they are what Maestro decided not to say.",
+      inputSchema: {
+        reviewId: z.string(),
+        includeSuppressed: z.boolean().optional(),
+        minSeverity: z.enum(["critical", "high", "medium", "low", "info"]).optional(),
+      },
+    },
+    async ({ reviewId, includeSuppressed, minSeverity }) => {
+      const rank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+      const rows = db
+        .prepare(
+          `SELECT id, agent_id, file, line_start, line_end, category, severity, confidence,
+                  title, body, agreement_count, status, suppressed_reason
+           FROM findings WHERE review_id = ?
+           ORDER BY confidence DESC`,
+        )
+        .all(reviewId) as Record<string, unknown>[];
+
+      const filtered = rows.filter((r) => {
+        if (!includeSuppressed && r.status === "suppressed") return false;
+        if (minSeverity && (rank[String(r.severity)] ?? 9) > (rank[minSeverity] ?? 9)) return false;
+        return true;
+      });
+      return text({ reviewId, count: filtered.length, findings: filtered });
+    },
+  );
+
+  server.registerTool(
+    "trigger_review",
+    {
+      title: "Trigger review",
+      description:
+        "Queue a review of a pull request. Returns immediately with a job id: reviews take " +
+        "minutes, so this enqueues work for a running `maestro serve` rather than blocking. " +
+        "Requires the daemon to be running; nothing drains the queue without it.",
+      inputSchema: {
+        url: z.string().describe("Pull request URL, e.g. https://github.com/owner/repo/pull/412"),
+      },
+    },
+    async ({ url }) => {
+      const pr = parsePullRequestRef(url);
+      if (!pr) {
+        return text({
+          ok: false,
+          error: `could not parse a pull request from '${url}'`,
+        });
+      }
+
+      // The same dedupe key the webhook path uses, so triggering by hand while a webhook
+      // is in flight collapses to one review rather than racing it.
+      const jobId = new JobQueue(db, "mcp").enqueue({
+        kind: "review-pr",
+        payload: pr,
+        dedupeKey: `${pr.owner}/${pr.repo}#${pr.number}@latest`,
+      });
+
+      const daemonRunning =
+        (
+          db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE state='running'").get() as
+            | { n: number }
+            | undefined
+        )?.n !== undefined;
+
+      return text({
+        ok: true,
+        queued: Boolean(jobId),
+        jobId,
+        pr,
+        note: jobId
+          ? "queued; `maestro serve` must be running to pick it up"
+          : "already queued for this pull request",
+        daemonRunning,
+      });
+    },
+  );
+
+  server.registerTool(
+    "run_eval",
+    {
+      title: "Run eval",
+      description:
+        "Score stored eval fixtures and report precision, recall and miss rate per playbook " +
+        "version. Reads scores already recorded by `maestro evaluate`; it does not itself run " +
+        "reviews, because those take minutes and cost money.",
+      inputSchema: { fixture: z.string().optional() },
+    },
+    async ({ fixture }) => {
+      const dir = fixturesDir(maestroHome());
+      let scores: EvalScore[];
+      try {
+        scores = loadScores(dir);
+      } catch {
+        scores = [];
+      }
+      const selected = fixture ? scores.filter((s) => s.fixture === fixture) : scores;
+
+      if (!selected.length) {
+        return text({
+          scores: [],
+          comparisons: [],
+          note: fixture
+            ? `no recorded scores for fixture '${fixture}' - run 'maestro evaluate run ${fixture}'`
+            : "no recorded scores - add a fixture with 'maestro evaluate add' and run 'maestro evaluate run'",
+        });
+      }
+      return text({ scores: selected, comparisons: compareVersions(selected) });
     },
   );
 

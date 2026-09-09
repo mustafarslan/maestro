@@ -6,6 +6,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../engine" },
+    { "path": "../integrations" },
     { "path": "../llm" },
     { "path": "../playbook" }
   ]
