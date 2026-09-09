@@ -3,6 +3,8 @@
 # in a directory with no node_modules and no stale tsbuildinfo. Catches the class of bug
 # where the working tree builds only because of state that is not in the repository.
 set -euo pipefail
+# `set -e` exits on the first failing step; this makes that visible rather than silent.
+trap 'status=$?; [ "$status" -ne 0 ] && echo && echo "GATE FAILED (exit $status)"; exit $status' EXIT
 export PATH="$HOME/.bun/bin:$PATH"   # bun is the compile target and is not on the default PATH
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 DST="${1:?usage: scripts/gate.sh <empty-dir>}"
@@ -45,3 +47,13 @@ node scripts/mcp-protocol-check.mjs ./dist/maestro | grep -E "verified|FAIL" || 
 node scripts/mcp-protocol-check.mjs ./dist/maestro >/dev/null 2>&1
 
 echo "=== smoke ==="    && ./dist/maestro --version && ./dist/maestro doctor 2>&1 | tail -12
+
+# The gate's own verdict, and the only line that means the gate passed.
+#
+# Until this existed the last thing printed was `doctor`'s "all checks passed, 2
+# warning(s)" — another program's success message about a different question. I grepped for
+# it, saw it, and pushed a commit whose gate had failed two steps earlier. A script whose
+# success is inferred from somebody else's output invites exactly that, so it says so
+# itself, and says the opposite on any failure.
+echo
+echo "GATE PASSED"

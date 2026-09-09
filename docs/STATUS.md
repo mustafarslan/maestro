@@ -1837,6 +1837,20 @@ to answer.
     earlier in this session, committed by hand rather than by a script, an hour after fixing it.
     Verified the other way now: a deliberately failing MCP check exits the gate 1.
 
+157. **The gate's last line was another program's success message.** Which is why the above was
+    so easy to do. `scripts/gate.sh` ended with `maestro doctor`'s "all checks passed, 2
+    warning(s)" — a true statement about a different question, printed after every run whether
+    the gate had passed or not. Anybody skimming for success, including me, found it.
+
+    The gate states its own verdict now: `GATE PASSED` as the final line, reachable only when
+    every step succeeded, and `GATE FAILED (exit N)` from a trap otherwise. Checked both ways —
+    inverting the severity ordering fails the suite, and the run then prints `GATE FAILED
+    (exit 1)` with no success line anywhere in its output for a careless grep to find.
+
+    The lesson generalises past this script: a check whose success has to be *inferred* from
+    surrounding output will eventually be inferred wrongly. Say the verdict, in the tool's own
+    words, or the reader supplies one.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

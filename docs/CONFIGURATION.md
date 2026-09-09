@@ -233,6 +233,10 @@ What is verified and what is not is recorded in [STATUS.md](./STATUS.md).
 scripts/gate.sh /tmp/maestro-gate
 ```
 
+It ends with `GATE PASSED` or `GATE FAILED (exit N)`, and that line is the verdict — the
+output before it includes other programs' summaries, one of which used to be the last thing
+printed and was read as the gate's own.
+
 Unpacks the tracked files plus any uncommitted changes into an empty directory and runs
 install, lint, typecheck, the test suite, the store-driver contract **on both runtimes**,
 the binary build, the MCP protocol check **against that binary**, and `doctor` — from a tree with no `node_modules` and no stale
