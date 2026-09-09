@@ -74,13 +74,22 @@ function detectNode(snap: RepoSnapshot): Toolchain {
           ? ["npm", "npm ci --ignore-scripts"]
           : ["npm", "npm install --no-audit --no-fund --ignore-scripts"];
 
-  // Corepack ships with the Node images but the packaged manager is not installed
-  // until it is activated. Without this every `pnpm run …`/`yarn …` command an agent
-  // was told it could run exits 127, which looks like a broken repository.
+  // Corepack ships with the Node images but the packaged manager is not installed until
+  // it is activated, and the version matters as much as the activation.
+  //
+  // `corepack prepare <pm> --activate` fetches the LATEST release. A repo that pins
+  // `packageManager` — most do — then hits a shim that wants the pinned version, which is
+  // not in the cache, and tries to download it. The analyze phase has no network, so every
+  // allowlisted command died in 0.1s with a fetch error that reached the agent as a plain
+  // exit 1. Agents were reporting on repositories they could not actually build.
+  //
+  // `corepack install` with no arguments reads `packageManager` from package.json and
+  // caches exactly that version, during prepare, while there is still a network. Verified
+  // offline afterwards: lint and typecheck both exit 0 where they previously exited 1.
   const activate =
     packageManager === "npm"
       ? []
-      : [`corepack enable && corepack prepare ${packageManager} --activate`];
+      : [`corepack enable && (corepack install || corepack prepare ${packageManager} --activate)`];
 
   const commands: Toolchain["commands"] = {};
   const raw = snap.read("package.json");

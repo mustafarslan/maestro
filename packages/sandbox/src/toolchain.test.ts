@@ -118,3 +118,34 @@ describe("toolchain detection", () => {
     expect(detectedCommands(tc).sort()).toEqual(["npm run lint", "npm run test"]);
   });
 });
+
+describe("package manager activation", () => {
+  it("caches the version the repo pins, not the latest release", () => {
+    // `corepack prepare <pm> --activate` fetches the LATEST pnpm. A repo pinning
+    // `packageManager: pnpm@10.26.2` then meets a shim that wants 10.26.2, is not in the
+    // cache, and tries to download it — during the analyze phase, which has no network.
+    // Every allowlisted command died in 0.1s and the agent saw a bare exit 1, so it was
+    // reviewing a repository it could not build. Measured on a real review before the
+    // fix: six commands, six instant failures.
+    const setup = detectToolchain(
+      snap(["package.json", "pnpm-lock.yaml"], {
+        "package.json": JSON.stringify({
+          packageManager: "pnpm@10.26.2",
+          scripts: { test: "vitest", lint: "biome check ." },
+        }),
+      }),
+    ).setup.join(" && ");
+    expect(setup).toContain("corepack install");
+    // The version-pinned form must come first; the unpinned one is only a fallback for
+    // repos with no `packageManager` field.
+    expect(setup.indexOf("corepack install")).toBeLessThan(
+      setup.indexOf("corepack prepare pnpm --activate"),
+    );
+  });
+
+  it("does not invoke corepack for an npm repo, which needs no activation", () => {
+    expect(
+      detectToolchain(snap(["package.json", "package-lock.json"])).setup.join(" && "),
+    ).not.toContain("corepack");
+  });
+});
