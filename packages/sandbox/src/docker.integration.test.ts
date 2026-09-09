@@ -239,6 +239,20 @@ describe("analyze phase security posture", () => {
     expect(res.stdout).not.toMatch(/API_KEY|TOKEN=|SECRET|ANTHROPIC|GITHUB_/i);
   });
 
+  itDocker("cannot regain privileges through a setuid binary", async () => {
+    // `no-new-privileges` is what makes dropping capabilities stick. Without it a setuid
+    // root binary still raises the effective set on exec — and one can arrive legitimately:
+    // `prepare` runs the repository's own dependency install, and whatever that writes is
+    // baked into the snapshot this container starts from.
+    //
+    // Read from the kernel rather than from `docker inspect`, because what matters is the
+    // state of the process, not the flag we believe we passed. Mutation found this: the
+    // three postures beside it were asserted and this one was not, so the flag could have
+    // been dropped with the whole suite green.
+    const res = await box!.exec("grep NoNewPrivs /proc/self/status");
+    expect(res.stdout).toMatch(/NoNewPrivs:\s+1/);
+  });
+
   itDocker("has dropped capabilities", async () => {
     const res = await box!.exec("cat /proc/self/status | grep CapEff");
     // All capabilities dropped => the effective set is all zeroes.

@@ -34,9 +34,12 @@ mutate() {
   python3 -c '
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text()
-if sys.argv[2] not in s:
+# Anchors may span lines; the caller writes them with \n escapes.
+frm = sys.argv[2].replace("\\n", "\n")
+to = sys.argv[3].replace("\\n", "\n")
+if frm not in s:
     sys.exit(3)
-p.write_text(s.replace(sys.argv[2], sys.argv[3], 1))
+p.write_text(s.replace(frm, to, 1))
 ' "$1" "$2" "$3"
 }
 
@@ -120,6 +123,17 @@ run "an aborted command does not start" packages/sandbox/src/docker.ts \
   'if (opts.signal?.aborted) {' 'if (false) {'
 run "read_file line clamp" packages/agents/src/tools.ts \
   'const end = Math.min(requestedEnd, start + MAX_READ_LINES);' 'const end = requestedEnd;'
+
+echo
+echo "the analyze container's posture (runs the docker integration tests)"
+run "analyze has no network" packages/sandbox/src/docker.ts \
+  '      "--network",\n      "none",\n      "--read-only",' '      "--read-only",'
+run "analyze rootfs is read-only" packages/sandbox/src/docker.ts \
+  '      "--read-only",\n      "--cap-drop",' '      "--cap-drop",'
+run "analyze drops all capabilities" packages/sandbox/src/docker.ts \
+  '      "--cap-drop",\n      "ALL",' '      "--cap-drop",\n      "NET_RAW",'
+run "analyze forbids new privileges" packages/sandbox/src/docker.ts \
+  '      "--security-opt",\n      "no-new-privileges",' '      "--label",\n      "posture=weakened",'
 
 echo
 if [ "$survivors" -gt 0 ]; then

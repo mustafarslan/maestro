@@ -1122,9 +1122,10 @@ The fence work ended with seven of my own tests passing for the wrong reason. Th
 measurable property, not a feeling, so `scripts/mutation-check.sh` measures it: break a guard on
 purpose, run the suite, and see whether anything notices. Fifteen controls, one mutation each.
 
-Twenty-five controls are covered now, across the security guards, the fork downgrade, the
-correctness guards, the admin surface, trigger routing, and the sandbox and reaper. Every one of
-them fails the suite when broken. Three did not when the sweep started.
+Twenty-nine controls are covered now, across the security guards, the fork downgrade, the
+correctness guards, the admin surface, trigger routing, the sandbox and reaper, and the analyze
+container's own posture. Every one of them fails the suite when broken. Four did not when the
+sweep started.
 
 133. **The fork trust downgrade had no test at all.** The plan calls it a blocking security rule
     and the function's own comment states the stakes — "a reviewer reading code is useful; a
@@ -1161,6 +1162,20 @@ them fails the suite when broken. Three did not when the sweep started.
     the source, and the harness reported "anchor missing" rather than passing. A mutation that
     cannot be applied must not look like a guard that holds, which is the same failure the whole
     exercise is about, one level further out.
+
+136. **`no-new-privileges` was the one posture flag nothing asserted.** The analyze container
+    is the containment boundary for a stranger's code, and three of its four postures were
+    already pinned by the integration suite: no network (probed by raw IP, not just by config),
+    a read-only rootfs, and all capabilities dropped. The fourth could be deleted with the whole
+    suite green.
+
+    It is the flag that makes dropping capabilities stick — without it a setuid root binary
+    still raises the effective set on exec, and one can arrive entirely legitimately, since
+    `prepare` runs the repository's own dependency install and whatever that writes is baked
+    into the snapshot the analyze container starts from. Asserted now by reading
+    `NoNewPrivs` from `/proc/self/status`, which is the state of the process rather than the
+    flag we believe we passed — the same reason the network test dials an IP instead of
+    inspecting the network mode.
 
 ### The prompt fence, attacked rather than read
 
