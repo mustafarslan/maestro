@@ -2,6 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { logger } from "@maestro/core";
 import {
   APICallError,
   generateText,
@@ -76,10 +77,33 @@ export class Provider {
           : { thinking: { type: "adaptive" } },
       };
     }
-    // Other providers express reasoning effort differently; left alone rather than
-    // guessed at, because a wrong provider option is a 400 on every call.
+
+    // Google takes the same unit Maestro already has — `thinkingConfig.thinkingBudget` is
+    // a token count — so there is nothing to guess at. This was previously left undefined
+    // alongside OpenAI, which meant a Google-bound agent silently ignored the field: the
+    // Studio offered it, the schema carried it, and nothing happened.
+    if (this.kind === "google") {
+      return { google: { thinkingConfig: { thinkingBudget: req.thinkingBudget } } };
+    }
+
+    // OpenAI is deliberately still not mapped, and now for a stated reason rather than
+    // caution: it takes `reasoningEffort`, an enum of "low" | "medium" | "high" | …, not a
+    // token count. Turning a budget into one of those means inventing thresholds, and an
+    // invented threshold that quietly changes what an agent costs is worse than a setting
+    // that visibly does nothing. Said out loud rather than dropped in silence.
+    if (!this.warnedThinkingIgnored) {
+      this.warnedThinkingIgnored = true;
+      logger.warn(
+        { providerId: this.id, kind: this.kind, model: req.model },
+        "thinkingBudget is set but this provider takes a reasoning EFFORT level, not a token " +
+          "budget; the setting is ignored for this binding",
+      );
+    }
     return undefined;
   }
+
+  /** One warning per provider instance, not one per model call. */
+  private warnedThinkingIgnored = false;
 
   async chat(req: ChatRequest): Promise<ChatResponse> {
     const started = Date.now();

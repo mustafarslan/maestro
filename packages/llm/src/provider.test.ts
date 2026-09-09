@@ -193,6 +193,42 @@ describe("extended thinking", () => {
     expect(JSON.stringify(cap.get())).not.toContain("budget_tokens");
   });
 
+  it("sends Google a thinking budget, which is the same unit", async () => {
+    // Previously left undefined alongside OpenAI, so a Google-bound agent silently ignored
+    // the field: the Studio offered it, the schema carried it, nothing happened. Google's
+    // `thinkingConfig.thinkingBudget` is a token count — Maestro's field exactly — so
+    // there was nothing to guess at. Asserted on the wire, not on the options object.
+    let body: Record<string, unknown> | undefined;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            { content: { parts: [{ text: "ok" }], role: "model" }, finishReason: "STOP" },
+          ],
+          usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const provider = new Provider({
+      id: "google",
+      kind: "google",
+      apiKey: "k",
+      fetch: fetchImpl,
+    });
+    await provider.chat({
+      model: "gemini-2.5-pro",
+      messages: [{ role: "user", content: "hi" }],
+      thinkingBudget: 2048,
+    });
+
+    expect((body?.generationConfig as { thinkingConfig?: unknown })?.thinkingConfig).toMatchObject({
+      thinkingBudget: 2048,
+    });
+  });
+
   it("still sends an explicit budget to a model that requires one", async () => {
     const cap = capturing();
     const provider = new Provider({

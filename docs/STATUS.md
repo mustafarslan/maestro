@@ -1115,6 +1115,9 @@ live run" list, and neither needed one.
 - **GitHub's webhook payloads.** Every field the parser reads, checked against real API objects.
   Found 123 — and, before it, that GitHub delivers no `reaction` event at all (122).
 - **Docker's `-q` output.** One line per tag, not per image. Found 124.
+- **The AI SDKs' own option schemas.** `@ai-sdk/google` takes a token budget,
+  `@ai-sdk/openai` takes an effort enum, `@ai-sdk/anthropic@4.0.49` declares `adaptive`.
+  Found 125, and confirmed the Anthropic mapping was already correct.
 - **Linear's GraphQL schema.** Linear validates before it authenticates, so the query shape is
   checkable with no key. `scripts/live-linear-check.mjs` does it, control first.
 
@@ -1138,6 +1141,26 @@ before a release, and either would catch the other side changing under us.
 
     Third external contract checked against reality in as many commits, and the first where the
     tool's actual behaviour differed from the obvious reading of its output.
+
+125. **`thinkingBudget` silently did nothing on Google.** Only the Anthropic branch mapped it;
+    Google and OpenAI both fell through to `undefined` under a comment saying other providers
+    "express reasoning effort differently" and were "left alone rather than guessed at". Checking
+    the installed SDKs' own option schemas turned that guess into two different answers.
+    `@ai-sdk/google` declares `thinkingConfig.thinkingBudget?: number` — the same unit Maestro
+    already has, so there was nothing to guess — while `@ai-sdk/openai` declares
+    `reasoningEffort?: "low" | "medium" | "high" | …`, an enum. Google is wired and asserted on
+    the wire; OpenAI is still unmapped, but now for a stated reason rather than caution, and it
+    says so once per provider instead of ignoring the field in silence. Inventing a token-count
+    to effort-level threshold would quietly change what an agent costs, which is worse than a
+    setting that visibly does nothing.
+
+    The Anthropic branch came out of the same check verified rather than changed:
+    `acceptsThinkingBudget` puts 3.5 through 4.5 on the explicit-budget side and everything from
+    4.6 on adaptive, which matches the published contract — `budget_tokens` is deprecated on 4.6
+    and rejected with a 400 on 4.7, 4.8, Opus 5, Sonnet 5 and Fable 5. The pinned
+    `@ai-sdk/anthropic@4.0.49` declares `type: "adaptive"` as the first variant of its thinking
+    union, so the shape the code sends is one the installed SDK accepts. That is the fourth
+    external contract checked, and the first that was already right.
 
 ### Found by mechanical sweep, still open
 
