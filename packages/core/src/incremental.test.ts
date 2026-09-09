@@ -174,3 +174,40 @@ describe("planIncremental", () => {
     expect(plan).toMatchObject({ incremental: false, baseRef: "base", carried: [] });
   });
 });
+
+describe("carry-forward across a real posting cycle", () => {
+  it("carries a finding that posting marked 'posted'", () => {
+    // Regression: posting stamps every reported finding 'posted', but the carry-forward
+    // query matched only 'open' - so on every real review nothing was ever carried, and
+    // a finding reported in round 1 silently vanished from round 2.
+    const first = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 1,
+      headSha: "aaa",
+      playbookVersionId: pbVersionId,
+    });
+    reviews.setState(first.id, "done");
+    addFinding(db, first.id, { title: "still broken", status: "posted" });
+
+    const plan = planIncremental(db, { repoId, prNumber: 1, headSha: "bbb", baseSha: "base" });
+    expect(plan.carried.map((c) => c.title)).toEqual(["still broken"]);
+  });
+
+  it("still refuses to carry dismissed or accepted findings", () => {
+    const first = reviews.create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 1,
+      headSha: "aaa",
+      playbookVersionId: pbVersionId,
+    });
+    reviews.setState(first.id, "done");
+    addFinding(db, first.id, { status: "dismissed" });
+    addFinding(db, first.id, { status: "accepted", category: "other" });
+
+    expect(
+      planIncremental(db, { repoId, prNumber: 1, headSha: "bbb", baseSha: "base" }).carried,
+    ).toHaveLength(0);
+  });
+});

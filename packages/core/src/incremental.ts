@@ -48,7 +48,10 @@ export function previousReview(
 }
 
 /**
- * Findings from the previous round that were posted and neither dismissed nor accepted.
+ * Findings from the previous round that were shown and neither dismissed nor accepted.
+ *
+ * Both 'open' and 'posted' count: posting stamps a finding 'posted', so selecting only
+ * 'open' silently matched nothing on every real review.
  *
  * Deliberately excludes suppressed ones: something below the reporting threshold last
  * time should not be resurrected simply because the author pushed again.
@@ -58,7 +61,7 @@ export function unresolvedFindings(db: SqlDatabase, reviewId: string): CarriedFi
     .prepare(
       `SELECT file, line_start AS lineStart, category, severity, title, agent_id AS agentIds
        FROM findings
-       WHERE review_id=? AND status='open'
+       WHERE review_id=? AND status IN ('open','posted')
        ORDER BY severity, confidence DESC`,
     )
     .all<CarriedFinding>(reviewId);

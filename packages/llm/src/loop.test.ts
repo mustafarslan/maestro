@@ -309,3 +309,67 @@ describe("prose answers", () => {
     expect(t.requests).toHaveLength(2);
   });
 });
+
+describe("context window guard", () => {
+  it("ends cleanly when the provider rejects an oversized prompt", async () => {
+    // Regression: a real run lost an entire agent to "prompt is too long". Returning
+    // what the agent has beats throwing the whole review away.
+    const t = failingTransport(
+      400,
+      "The prompt is too long: 293267, model maximum context length: 131072",
+    );
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 5, costCapCents: 100 },
+    });
+
+    expect(result.stopKind).toBe("context-limit");
+  });
+
+  it("does not retry an oversized prompt, which would only burn budget", async () => {
+    const t = failingTransport(400, "prompt is too long");
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 5, costCapCents: 100 },
+      maxRetriesPerStep: 5,
+      backoffBaseMs: 1,
+    });
+
+    expect(t.requests).toHaveLength(1);
+  });
+
+  it("drops the oldest tool results rather than letting history grow unbounded", async () => {
+    // Each step returns a large tool result; without trimming the conversation would
+    // grow past any context window.
+    const big = "x".repeat(50_000);
+    const t = anthropicTransport([{ toolCalls: [{ id: "1", name: "echo", input: {} }] }]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: big }),
+      budget: { maxSteps: 8, costCapCents: 1000, maxPromptChars: 120_000 },
+    });
+
+    const total = result.messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
+    expect(total).toBeLessThanOrEqual(200_000);
+    expect(result.stopKind).toBe("max-steps");
+  });
+
+  it("keeps the task and the most recent exchange when trimming", async () => {
+    const big = "y".repeat(60_000);
+    const t = anthropicTransport([{ toolCalls: [{ id: "1", name: "echo", input: {} }] }]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: big }),
+      budget: { maxSteps: 6, costCapCents: 1000, maxPromptChars: 100_000 },
+    });
+
+    // The original task must survive: without it the model loses what it was asked.
+    expect(result.messages[0]).toMatchObject({ role: "user", content: "go" });
+  });
+});

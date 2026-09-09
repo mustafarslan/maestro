@@ -19,6 +19,14 @@ export interface Budget {
   maxTokens?: number;
   /** Wall-clock ceiling; a stuck agent must not hold an environment open forever. */
   deadlineMs?: number;
+  /**
+   * Approximate character ceiling for the conversation sent to the model.
+   *
+   * Tool results accumulate without bound - a few large files or a big diff will
+   * eventually exceed any context window, and the provider rejects the whole request.
+   * Losing an agent's entire run to that is far worse than dropping its oldest reads.
+   */
+  maxPromptChars?: number;
 }
 
 export type StopKind =
@@ -28,6 +36,7 @@ export type StopKind =
   | "cost-cap"
   | "token-cap"
   | "deadline"
+  | "context-limit"
   | "aborted";
 
 export interface LoopStep {
@@ -117,7 +126,22 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       return stop("token-cap");
     }
 
-    const response = await callWithRetry(opts, messages, log, index);
+    // Keep the conversation inside the model's window. Roughly four characters per
+    // token is close enough for a guard whose job is to avoid a hard rejection.
+    const dropped = trimHistory(messages, budget.maxPromptChars ?? DEFAULT_MAX_PROMPT_CHARS);
+    if (dropped) log.warn({ dropped }, "trimmed oldest tool results to fit the context window");
+
+    let response: ChatResponse;
+    try {
+      response = await callWithRetry(opts, messages, log, index);
+    } catch (err) {
+      if (isContextLimitError(err)) {
+        // Returning what the agent has beats losing the entire run.
+        log.warn({ err: err instanceof Error ? err.message : err }, "context window exceeded");
+        return stop("context-limit");
+      }
+      throw err;
+    }
     const stepCost = costCents(provider.kind, model, response.usage);
     usage = addUsage(usage, response.usage);
     totalCost += stepCost;
@@ -224,6 +248,8 @@ async function callWithRetry(
       });
     } catch (err) {
       lastError = err;
+      // An oversized prompt will be oversized again; retrying only burns budget.
+      if (isContextLimitError(err)) throw err;
       const retryable = err instanceof ProviderError && err.opts.retryable;
       if (!retryable || attempt === attempts) break;
       const backoffMs = Math.min(2 ** attempt * (opts.backoffBaseMs ?? 500), 20_000);
@@ -246,4 +272,54 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       { once: true },
     );
   });
+}
+
+const DEFAULT_MAX_PROMPT_CHARS = 400_000;
+
+/**
+ * Drops the oldest tool results until the conversation fits.
+ *
+ * The task and the most recent exchanges are what the model actually needs; a file it
+ * read fifteen steps ago is the cheapest thing to lose. Returns how many were dropped.
+ */
+function trimHistory(messages: Message[], maxChars: number): number {
+  const size = () => messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
+  if (size() <= maxChars) return 0;
+
+  let dropped = 0;
+  // Assistant tool-calls and their tool results must be dropped as a PAIR. Removing a
+  // tool message alone orphans the call it answered, and providers reject the request
+  // outright with "tool result is missing" - which would break exactly the long runs
+  // this trimming exists to rescue.
+  //
+  // Index 0 (the task) and the last four messages (the live exchange) are never touched.
+  for (let i = 1; i < messages.length - 4 && size() > maxChars; ) {
+    const current = messages[i];
+    const next = messages[i + 1];
+    if (current?.role === "assistant" && current.toolCalls?.length && next?.role === "tool") {
+      messages.splice(i, 2);
+      dropped += 2;
+      continue;
+    }
+    i++;
+  }
+
+  // Still too large: the remaining results are individually huge, so truncate them.
+  if (size() > maxChars) {
+    for (const m of messages) {
+      if (m.role !== "tool") continue;
+      for (const r of m.results) {
+        if (r.output.length > 4_000) {
+          r.output = `${r.output.slice(0, 4_000)}\n... [truncated to fit the context window]`;
+        }
+      }
+    }
+  }
+  return dropped;
+}
+
+/** Providers word this differently; all of them mean the same unrecoverable thing. */
+function isContextLimitError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /context length|context window|too long|maximum context|prompt is too long/i.test(message);
 }

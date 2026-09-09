@@ -99,7 +99,9 @@ export async function ingestLineChanges(
 
   const findings = db
     .prepare(
-      "SELECT id, file FROM findings WHERE review_id=? AND file IS NOT NULL AND status='open'",
+      // 'posted' as well as 'open': posting stamps every reported finding 'posted',
+      // so matching only 'open' made this a silent no-op on every real review.
+      "SELECT id, file FROM findings WHERE review_id=? AND file IS NOT NULL AND status IN ('open','posted')",
     )
     .all<{ id: string; file: string }>(reviewId);
 

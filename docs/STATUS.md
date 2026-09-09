@@ -49,6 +49,8 @@ insecure neighbour, so it was not pattern-matching on "API route".
   live GitHub.
 - **The webhook path has not received a real delivery.** Signature verification and event
   interpretation are unit-tested; no GitHub App has been created.
+- **The Compose deployment is unverified.** The proxy-host fix is reasoned and documented but has
+  not been run: it needs a Linux host with the socket mounted.
 - **Release CI has not run.** `.github/workflows/release.yml` cross-compiles four targets; only the
   host target has actually been built.
 - **Load behaviour is untested at scale.** The scheduler's fairness and limits are unit-tested, but
@@ -94,3 +96,24 @@ These are recorded because each was invisible to the test suite that existed at 
 9. **The egress proxy bound `0.0.0.0`**, leaving an open proxy to allowlisted hosts on the local
    network for the duration of every prepare phase.
 10. **`doctor` told users to run `maestro reap`**, which did not exist.
+11. **`maestro reap --review` with the id forgotten performed the global destructive sweep**,
+    tearing down in-flight reviews. The most destructive action must not be what a typo produces.
+12. **Every allowlisted command exited 127 on non-npm repos**: the Node images ship corepack but
+    not the packaged manager, so `pnpm run test` was allowlisted and unrunnable.
+13. **`install.sh` exited silently on an unrunnable binary**, because `set -e` aborted the script
+    at a failing `&&` chain.
+14. **The Compose deployment could never reach its own egress proxy** — Maestro is a container
+    there, so no `docker*` interface exists and the proxy bound loopback while sandboxes dialled
+    `host.docker.internal`. Every dependency install would have failed.
+15. **Incremental carry-forward never carried anything**: posting stamps findings `posted`, but the
+    query matched only `open`, so a finding reported in one round silently vanished from the next.
+    The same mismatch made line-change feedback a no-op.
+16. **A context-window rejection destroyed an entire agent run.** History now trims oldest
+    tool-call pairs, and an oversized prompt ends the run cleanly instead of throwing. Trimming
+    drops assistant/tool messages as a *pair* — removing a tool result alone orphans the call it
+    answered and providers reject the request, which would have broken the very runs it rescues.
+
+Findings 11-16 were reported by **Maestro reviewing its own commits**. It also produced one
+false positive (a Bun cross-compile target it flagged at 60% confidence, explicitly noting it
+could not run Bun to check — both spellings are in fact valid), which is roughly the calibration
+you want.
