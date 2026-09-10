@@ -3641,6 +3641,14 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
   base branch at review time rather than cached in a column. Both are decisions; the columns are
   what is left of an earlier plan.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
+- **`dist/maestro` can silently lag the source, and nothing says so.** There are two ways to
+  run the CLI — the bun-compiled binary, and `node apps/cli/dist/index.js` off the per-package
+  `tsc -b` output — and only the second follows a rebuild of the packages. A twenty-fixture
+  eval was started against a binary four hours stale: it recorded no trajectory rows and wrote
+  score files with no `split`, both features it simply did not contain, and reported nothing
+  wrong because from its point of view nothing was. Caught by noticing the empty table rather
+  than by any check. The binary should carry the commit it was built from and `doctor` should
+  say when that is not `HEAD`; until it does, rebuild before measuring anything.
 - ~~**`maestro eval run` can only score the active default playbook.**~~ **Fixed.**
   `--playbook <version-id>` scores a version without activating it. It mattered more than it
   reads: the three runs behind finding 234 were three `playbook activate` calls, so measuring
