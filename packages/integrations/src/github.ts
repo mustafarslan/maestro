@@ -462,18 +462,34 @@ export class GitHubClient {
       });
 
       // `createReview` answers with the review, not with its comments, and their ids are
-      // what a later reaction has to be matched against. One extra request per review with
+      // what a later reaction has to be matched against. One extra listing per review with
       // any anchors at all, which is the price of a finding-level quality signal instead of
       // a review-level one.
-      const posted = await this.octokit.paginate(this.octokit.rest.pulls.listCommentsForReview, {
+      //
+      // The pull request's comments filtered by review, rather than the review's own
+      // comments, and the difference is not cosmetic: `listCommentsForReview` answers with
+      // the legacy `position`-based representation, in which `line` and `original_line` are
+      // *always* null, whatever Accept header is sent. This was that endpoint, read as
+      // `c.line ?? 0`, so every comment came back anchored at line 0, matched no anchor in
+      // `postAnchoredComments`, and was dropped — leaving the whole finding-level
+      // attribution built on it doing nothing at all against real GitHub, while every stub
+      // written from what the code expected passed. `scripts/live-github-check.mjs` pins
+      // both halves: that the review-scoped endpoint omits the line, and that this one
+      // carries it.
+      //
+      // `line` is still null here for a comment GitHub considers outdated — the line it
+      // points at is no longer in the diff — and `original_line` is the one it was written
+      // against, which is the anchor that was asked for.
+      const posted = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
         owner: pr.owner,
         repo: pr.repo,
         pull_number: pr.number,
-        review_id: review.id,
         per_page: 100,
       });
 
-      return posted.map((c) => ({ id: c.id, path: c.path, line: c.line ?? 0 }));
+      return posted
+        .filter((c) => c.pull_request_review_id === review.id)
+        .map((c) => ({ id: c.id, path: c.path, line: c.line ?? c.original_line ?? 0 }));
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), anchors: inline.length },

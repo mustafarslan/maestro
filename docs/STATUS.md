@@ -3453,7 +3453,10 @@ the server never sends fails it, and removing `live` from the server's response 
     `git diff --shortstat` now, which is what `maestro review` has always done.
 
     **Baseline, measured rather than asserted.** All eight fixtures, architecture agent alone
-    on `glm-5.3:cloud` through Ollama Cloud, real Docker, playbook v4:
+    on `deepseek-v4-pro:cloud` through Ollama Cloud, real Docker, playbook v4. (This
+    paragraph said `glm-5.3:cloud` until the model was read back out of the `llm_calls`
+    rows of the runs themselves; the architecture agent has been bound to
+    `deepseek-v4-pro:cloud` since the per-agent model choice above.)
 
     | | runs | precision | recall |
     | --- | --- | --- | --- |
@@ -3536,13 +3539,12 @@ the server never sends fails it, and removing `live` from the server's response 
     review comment sharing its id, and pairing comments by index swaps two findings on
     adjacent lines. Each fails its own test and nothing else.
 
-    **Not verified against GitHub.** The whole path — post a review, react on one inline
-    comment, sweep, and see exactly one finding dismissed — needs a real pull request and a
-    real reaction, and posting one was not in scope for the session that wrote this. What is
-    asserted is the mapping, the kind isolation and the dismissal path, all against stubs.
-    `listCommentsForReview` and `reactions.listForPullRequestReviewComment` are the two calls
-    that have never been made; both are ordinary reads, and both are exactly the kind of
-    assumption this file exists to stop anyone claiming.
+    ~~**Not verified against GitHub.**~~ **Checked against the live API, and it was not
+    working.** See finding 235. The two reads named here as never having been made were made,
+    against a public pull request with no credential beyond a read token, and the first of
+    them returns a shape the code could not use. What is still unverified is only the write
+    half: posting a review, reacting on one of its inline comments and sweeping, end to end,
+    needs a repository somebody is willing to have Maestro write to.
 
 234. **A procedural graph over the agent's tool use halves the work; whether it changes the
     reviews is below this golden set's noise floor.** Built from arXiv:2609.09153 (Lu, Chen,
@@ -3679,6 +3681,43 @@ could not run Bun to check — both spellings are in fact valid), which is rough
 you want. Findings 19 and 20 are the sharpest evidence so far: it read a fix that had just been
 committed, traced the new config field through three packages, and found that nothing could set it.
 
+
+235. **The finding-level feedback signal did nothing against real GitHub, and every test of
+    it passed.** Finding 233 replaced one blanket comment id with per-finding attribution:
+    post the anchored comments, list them back, match each returned comment to the anchor it
+    was posted for, write that id onto the finding. Listing them back used
+    `pulls.listCommentsForReview` — the obvious endpoint, named after exactly the thing being
+    asked for — and read `line` off each result.
+
+    That endpoint answers with the legacy `position`-based representation. `line` and
+    `original_line` are **always null** on it, under every Accept header including the
+    long-since-GA'd `comfort-fade` preview. So every comment came back anchored at line 0,
+    matched no anchor, and had its id discarded; every finding kept the summary comment's id,
+    which is precisely the review-level label finding 233 exists to remove. The feature was
+    built, tested, documented and inert.
+
+    Checked, not deduced: on `nodejs/node#65945`, comment 3971215310 reads `line: 46,
+    original_line: 46` from `GET /pulls/65945/comments` and `line: null, original_line: null`
+    from `GET /pulls/65945/reviews/5157689383/comments`. Same comment, same token, same
+    minute.
+
+    Nothing in the repository could have caught this. The stubs return what the code expects,
+    because they were written from what the code expects — the failure mode this file already
+    records for fixtures, arriving through a mock instead. `scripts/live-github-check.mjs`
+    covered every read path a *review* takes and had no reason to look at these two, which
+    were added later by a change that could not run it.
+
+    It now lists the pull request's own review comments and filters on
+    `pull_request_review_id`, with `original_line` where `line` is null — which on *that*
+    endpoint means what the docs say it means, a comment GitHub considers outdated. The live
+    check asserts both halves, including that the review-scoped endpoint carries no line, so
+    that a later simplification back to one request fails rather than ships. It also reads a
+    real reaction (`+1`) off a real inline comment through `listCommentReactions`, and runs a
+    bogus review id first so that "no error" cannot mean "the request was never made".
+
+    What this does not verify remains the write half: a review Maestro posted, a thumbs-down
+    left on one of its inline comments, and exactly one finding dismissed. That needs a
+    repository somebody is willing to have Maestro write to.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion

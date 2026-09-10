@@ -133,3 +133,79 @@ describe("finding Maestro's own previous comment", () => {
     await expect(c.findPreviousComment(pr, MARKER)).resolves.toBeNull();
   });
 });
+
+/**
+ * The comment ids a review just left, and the line each one is anchored at.
+ *
+ * Against real GitHub this returned nothing usable. `listCommentsForReview` answers with
+ * the legacy `position`-based representation, in which `line` and `original_line` are
+ * always null — checked on `nodejs/node#65945`, where comment 3971215310 reads
+ * `line: 46` from the pull request's own comment list and `line: null` from its review's,
+ * under every Accept header. Read as `c.line ?? 0`, every comment was anchored at line 0,
+ * matched no anchor in `postAnchoredComments`, and was dropped, so the finding-level
+ * attribution the whole feedback signal rests on quietly did nothing.
+ *
+ * No stub produced that shape, because the stubs were written from what the code
+ * expected. So: the pull request's comments filtered by review id, and `original_line`
+ * where `line` is null, which is the outdated case that endpoint really does have.
+ */
+describe("the ids of the comments a review just left", () => {
+  const withPaginate = (rows: unknown[]): GitHubClient => {
+    const client = new GitHubClient({ kind: "token", token: "t" });
+    Object.assign(client as unknown as { octokit: unknown }, {
+      octokit: {
+        rest: {
+          pulls: {
+            createReview: async () => ({ data: { id: 99 } }),
+            listReviewComments: () => undefined,
+          },
+        },
+        paginate: async () => rows,
+      },
+    });
+    return client;
+  };
+
+  const anchors = [{ path: "src/a.ts", line: 4, body: "b", dedupeGroup: "g" }];
+  const prRef = { owner: "acme", repo: "web", number: 1, headSha: "abc" } as never;
+
+  it("falls back to the line an outdated comment was written against", async () => {
+    const client = withPaginate([
+      { id: 7, path: "src/a.ts", line: null, original_line: 4, pull_request_review_id: 99 },
+    ]);
+    await expect(client.postInlineComments(prRef, anchors)).resolves.toEqual([
+      { id: 7, path: "src/a.ts", line: 4 },
+    ]);
+  });
+
+  it("prefers the current line when GitHub gives one", async () => {
+    const client = withPaginate([
+      { id: 7, path: "src/a.ts", line: 9, original_line: 4, pull_request_review_id: 99 },
+    ]);
+    await expect(client.postInlineComments(prRef, anchors)).resolves.toEqual([
+      { id: 7, path: "src/a.ts", line: 9 },
+    ]);
+  });
+
+  it("still yields 0 when neither field is there, rather than undefined", async () => {
+    // 0 matches no anchor, which is the correct outcome for a comment that cannot be
+    // placed — `undefined` would key as "src/a.ts:undefined" and read as a real anchor.
+    const client = withPaginate([
+      { id: 7, path: "src/a.ts", line: null, pull_request_review_id: 99 },
+    ]);
+    await expect(client.postInlineComments(prRef, anchors)).resolves.toEqual([
+      { id: 7, path: "src/a.ts", line: 0 },
+    ]);
+  });
+  it("keeps only the comments this review left", async () => {
+    // The listing is the pull request's, not the review's, so an earlier round's comments
+    // come back with it. Attributing one of those would write a stale id onto a finding.
+    const client = withPaginate([
+      { id: 6, path: "src/a.ts", line: 4, pull_request_review_id: 12 },
+      { id: 7, path: "src/a.ts", line: 4, pull_request_review_id: 99 },
+    ]);
+    await expect(client.postInlineComments(prRef, anchors)).resolves.toEqual([
+      { id: 7, path: "src/a.ts", line: 4 },
+    ]);
+  });
+});
