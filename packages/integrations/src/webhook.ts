@@ -35,7 +35,9 @@ const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
  * and runs. Without it every request after the first on a given pull request collides on
  * the same dedupe key and is dropped for ever.
  */
-export type ReviewSource = { source: "lifecycle" } | { source: "comment"; commentId: number };
+export type ReviewSource =
+  | { source: "lifecycle" }
+  | { source: "comment"; commentId: number; scopeWords: string[] };
 
 export type ReviewTrigger =
   | ({
@@ -136,7 +138,8 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
     // Both spellings. `@maestro review` is what people expect, because that is how
     // `@claude review` works on GitHub; `/maestro review` reads as a bot command. There
     // is no reason to make someone learn which one this tool chose.
-    if (/^\s*[/@]maestro\s+review\b/im.test(text)) {
+    const command = /^\s*[/@]maestro\s+review\b([^\n]*)/im.exec(text);
+    if (command) {
       // `issue_comment` fires for issues AND pull requests — GitHub numbers them from one
       // sequence and delivers both through this event. The only thing that tells them
       // apart is `issue.pull_request`, which is present exactly when the issue is a pull
@@ -178,6 +181,19 @@ export function interpretEvent(event: string, payload: unknown): ReviewTrigger {
         reason: "requested by a maestro review comment",
         source: "comment",
         commentId,
+        // Whatever followed "review" on that line, unresolved.
+        //
+        // It cannot be resolved here: whether "security" names an agent is a question
+        // about the repository's active playbook, which this parser has no access to and
+        // should not acquire — its job is the shape of a delivery, not the meaning of a
+        // word. The daemon intersects these with the real agent list.
+        //
+        // This is also what keeps `@maestro review it please` working, which it has to:
+        // words that match no agent leave the scope empty and the whole crew runs.
+        scopeWords: (command[1] ?? "")
+          .split(/[\s,]+/)
+          .map((w) => w.trim().toLowerCase())
+          .filter(Boolean),
       };
     }
     return { kind: "ignore", reason: "comment is not a maestro command" };

@@ -40,11 +40,16 @@ as an automatic trigger.
   about the commenter, checked before the job is enqueued. Everyone else can still comment; they
   just cannot spend. Automatic triggers are unaffected, since those come from the pull request's
   lifecycle rather than from someone asking.
-- **Acknowledging the request.** `@claude` reacts to the comment so the author knows it was
-  heard. Maestro currently answers a comment trigger with nothing until the review posts,
-  which for a several-minute review looks like it was ignored.
-- **Scoped requests.** `@maestro review security` — run one agent rather than the crew.
-  The `--agent` flag already does this from the CLI; the parsing is the missing half.
+- ~~**Acknowledging the request.**~~ **Done — `docs/STATUS.md` 223.** A 👀 reaction on the
+  comment, for a request that was really enqueued or folded into one already queued. Not a
+  comment: one consolidated comment per pull request is the anti-noise design.
+- ~~**Scoped requests.**~~ **Done — `docs/STATUS.md` 224.** `@maestro review security` runs one
+  agent; `@maestro review security, architecture` runs two. The words are captured by the
+  webhook parser and resolved against the repository's own playbook by the daemon, because
+  whether "security" names an agent is a question about the playbook and not about the shape of
+  a delivery. Words matching nothing leave the scope empty and the whole crew runs, which is
+  what keeps `@maestro review it please` working — and means a misspelt agent name gets a fuller
+  review rather than a silent refusal.
 
 ## Enforcing the prepare-phase egress allowlist
 

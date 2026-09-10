@@ -257,6 +257,60 @@ describe("manual-only reviews", () => {
     expect(queuedReviews()).toBe(1);
   });
 
+  const scoped = (id: number, body: string) => ({
+    action: "created",
+    repository: { name: "maestro", owner: { login: "acme" } },
+    issue: { number: 7, pull_request: { url: "https://api.github.com/…/pulls/7" } },
+    comment: { id, body, author_association: "OWNER" },
+  });
+
+  const payloadOf = (): { agents?: string[] } =>
+    JSON.parse(
+      db
+        .prepare("SELECT payload_json FROM jobs WHERE kind='review-pr' ORDER BY rowid DESC LIMIT 1")
+        .get<{ payload_json: string }>()?.payload_json ?? "{}",
+    );
+
+  it("scopes a review to the agent somebody named", async () => {
+    const port = await start(true);
+    expect(await deliver(port, "issue_comment", scoped(5001, "@maestro review security"))).toBe(
+      202,
+    );
+    await waitFor(() => queuedReviews() > 0);
+    expect(payloadOf().agents).toEqual(["security"]);
+  });
+
+  it("takes several named agents", async () => {
+    const port = await start(true);
+    expect(
+      await deliver(port, "issue_comment", scoped(5002, "@maestro review security, architecture")),
+    ).toBe(202);
+    await waitFor(() => queuedReviews() > 0);
+    expect(payloadOf().agents?.sort()).toEqual(["architecture", "security"]);
+  });
+
+  it("still runs the whole crew for words that name no agent", async () => {
+    // `@maestro review it please` has always worked and has to keep working; the parser
+    // cannot tell an English sentence from an agent name, and the playbook can.
+    const port = await start(true);
+    expect(await deliver(port, "issue_comment", scoped(5003, "@maestro review it please"))).toBe(
+      202,
+    );
+    await waitFor(() => queuedReviews() > 0);
+    expect(payloadOf().agents).toBeUndefined();
+  });
+
+  it("reviews with everything when the named agent is misspelt, rather than refusing", async () => {
+    // The deliberate trade-off. A parser that cannot distinguish a typo from prose will
+    // sometimes give more than was asked for; giving less — silently skipping the review
+    // somebody wanted — is the failure worth avoiding. The metrics block lists which
+    // agents ran, so a full review is never mistaken for a scoped one.
+    const port = await start(true);
+    expect(await deliver(port, "issue_comment", scoped(5004, "@maestro review securty"))).toBe(202);
+    await waitFor(() => queuedReviews() > 0);
+    expect(payloadOf().agents).toBeUndefined();
+  });
+
   it("reviews on the pull request's own lifecycle by default", async () => {
     // The default has to stay automatic: an installation that changed nothing must keep
     // behaving as it did.

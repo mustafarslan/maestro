@@ -3120,6 +3120,29 @@ the server never sends fails it, and removing `live` from the server's response 
     acknowledging every trigger fails the one that says a pull request opening has nobody
     waiting on an answer.
 
+224. **`@maestro review security` now means it.** The CLI could scope a review to one agent
+    since `--agent` existed; from a comment there was no way to ask, so every request ran the
+    whole crew whatever it said.
+
+    The parse and the meaning are deliberately split. The webhook parser captures whatever
+    followed "review" on that line and resolves nothing: whether "security" names an agent is a
+    question about the repository's active playbook, which that parser has no access to and
+    should not acquire. The daemon intersects those words with the real agent list, where the
+    playbook is already in hand for the automatic-trigger and budget checks.
+
+    That split is also what keeps `@maestro review it please` working — it has always worked and
+    a parser cannot tell prose from an agent name. The consequence, taken deliberately: a
+    misspelt agent name matches nothing, so the scope is empty and the full crew runs. More than
+    was asked for, never less, and the metrics block lists which agents ran so a full review
+    cannot be mistaken for a scoped one. Silently skipping the review somebody wanted is the
+    failure worth avoiding; spending more than they wanted is not.
+
+    Applied to a copy of the playbook, as `--agent` does. The stored document is versioned and
+    one person asking for a security-only pass must not edit it for everybody.
+
+    Mutation-checked both ways: scoping on unvalidated words breaks `it please`, and dropping
+    the resolution breaks the two tests that ask for a named agent.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

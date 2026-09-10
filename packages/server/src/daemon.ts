@@ -93,7 +93,11 @@ const LEASE_MS = 15 * 60_000;
  * already-reviewed-this-SHA check. It was a bare `PullRequestRef` cast from JSON at both
  * ends, which is how the flag could not be expressed at all.
  */
-export type ReviewJobPayload = PullRequestRef & { force?: boolean };
+export type ReviewJobPayload = PullRequestRef & {
+  force?: boolean;
+  /** Resolved agent ids when somebody asked for a subset; absent means the whole crew. */
+  agents?: string[];
+};
 
 /**
  * Whether a trigger makes an in-flight review of the same pull request pointless.
@@ -350,6 +354,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       void acknowledge(t.pr, t.commentId);
       return;
     }
+    // "security" is only a scope if this repository's playbook has an agent by that name,
+    // which is why it is resolved here rather than in the webhook parser. Words that
+    // match nothing leave the scope empty and the whole crew runs — that is what keeps
+    // `@maestro review it please` working, and it means a misspelt agent name gets a
+    // fuller review rather than a silent refusal. More than was asked for, never less.
+    let agents: string[] | undefined;
+    if (t.source === "comment" && t.scopeWords.length) {
+      const repoId = reviews.ensureRepo(t.pr.owner, t.pr.repo);
+      const known = new Map(
+        (playbooks.resolveForRepo(repoId)?.doc.agents ?? []).map((a) => [a.id.toLowerCase(), a.id]),
+      );
+      const matched = t.scopeWords.map((w) => known.get(w)).filter((a): a is string => Boolean(a));
+      if (matched.length) agents = [...new Set(matched)];
+    }
+
     const id = queue.enqueue({
       kind: "review-pr",
       // A person asking re-reviews even when the head has not moved. Without this the
@@ -358,10 +377,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // silence. There is one comment per pull request and it is updated in place, so a
       // re-review refreshes it rather than adding noise, and only people with write
       // access can ask.
-      payload: { ...t.pr, force: t.source === "comment" } satisfies ReviewJobPayload,
+      payload: { ...t.pr, force: t.source === "comment", agents } satisfies ReviewJobPayload,
       dedupeKey: key,
     });
-    logger.info({ key, reason: t.reason, enqueued: Boolean(id) }, "review trigger");
+    logger.info({ key, reason: t.reason, enqueued: Boolean(id), agents }, "review trigger");
 
     // Only for a person, and only once the work is real: reacting to a request that was
     // deduplicated away or refused would be telling somebody their review is coming when
@@ -389,7 +408,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const linear = LinearClient.fromEnv();
   if (linear) logger.info("linear issue lookup enabled");
 
-  const runOne = async ({ force, ...pr }: ReviewJobPayload): Promise<void> => {
+  const runOne = async ({ force, agents, ...pr }: ReviewJobPayload): Promise<void> => {
     const client = GitHubClient.fromEnv();
     if (!client) throw new Error("no GitHub credential configured");
     // Per-repo playbook assignment: a mobile repo and a backend repo want different
@@ -399,6 +418,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const repoId = reviews.ensureRepo(pr.owner, pr.repo);
     const record = playbooks.resolveForRepo(repoId);
     if (!record) throw new Error("no active playbook");
+
+    // Scoped to the agents somebody named. The override is applied to a copy, exactly as
+    // `maestro review --agent` does: the stored playbook is a versioned document and one
+    // person asking for a security-only pass must not edit it for everybody. The review
+    // still records the playbook version it ran under, and its metrics block lists which
+    // agents ran, so a scoped review is not mistakable for a full one.
+    const doc = agents?.length
+      ? {
+          ...record.doc,
+          agents: record.doc.agents.map((a) => ({ ...a, enabled: agents.includes(a.id) })),
+        }
+      : record.doc;
 
     const controller = new AbortController();
     try {
@@ -414,7 +445,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           // per-provider limits are decoration.
           acquireSlot: (slot, signal) => scheduler.acquire(slot, signal),
         },
-        playbook: record.doc,
+        playbook: doc,
         playbookVersionId: record.id,
         linear,
         pr,
