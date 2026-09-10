@@ -79,6 +79,16 @@ beforeEach(async () => {
     "open",
     now,
   );
+  // A feedback row, so the rollup's per-finding signals have a shape to check. Without
+  // one the contract test would pass on an endpoint that never returns the field.
+  {
+    const findingId = db
+      .prepare("SELECT id FROM findings WHERE review_id=?")
+      .get<{ id: string }>(reviewId)?.id as string;
+    db.prepare(
+      "INSERT INTO feedback (id, finding_id, signal, actor, created_at) VALUES (?,?,?,?,?)",
+    ).run(newId("fb"), findingId, "line_changed", null, now);
+  }
   db.prepare(
     `INSERT INTO tasks (id, review_id, node_id, kind, agent_id, state, attempt, created_at)
      VALUES (?,?,?,?,?,?,?,?)`,
@@ -129,6 +139,11 @@ describe("the admin API sends what the UI declares", () => {
     expectShape("TaskRow", body.tasks?.[0]);
     expectShape("FindingRow", body.findings?.[0]);
     expectShape("SpanRow", body.spans?.[0]);
+  });
+
+  it("FeedbackRow, which the per-review rollup reads", async () => {
+    const body = (await get(`/api/reviews/${reviewId}`)) as Record<string, unknown[]>;
+    expectShape("FeedbackRow", body.feedback?.[0]);
   });
 
   it("EnvironmentRow", async () => {

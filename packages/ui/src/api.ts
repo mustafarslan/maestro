@@ -83,6 +83,8 @@ export interface TaskRow {
 
 export interface FindingRow {
   id: string;
+  /** Set only when one agent produced it; a merged finding resolves its agents by name. */
+  task_id: string | null;
   agent_id: string;
   file: string | null;
   line_start: number | null;
@@ -94,6 +96,15 @@ export interface FindingRow {
   status: string;
   agreement_count: number;
   suppressed_reason: string | null;
+  posted_comment_id: string | null;
+}
+
+/** One observation about one finding. A finding may carry several at once. */
+export interface FeedbackRow {
+  finding_id: string;
+  signal: "thumbs_up" | "thumbs_down" | "resolved" | "line_changed";
+  actor: string | null;
+  created_at: string;
 }
 
 export interface SpanRow {
@@ -114,6 +125,7 @@ export interface ReviewDetail {
   tasks: TaskRow[];
   findings: FindingRow[];
   spans: SpanRow[];
+  feedback: FeedbackRow[];
   llmCalls: {
     provider_id: string;
     model: string;

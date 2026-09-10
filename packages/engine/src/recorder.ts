@@ -146,18 +146,40 @@ export class ReviewRecorder {
     }
   }
 
-  recordFindings(reviewId: string, posted: TriagedFinding[], suppressed: TriagedFinding[]): void {
+  /**
+   * @param taskByAgent Which task produced each agent's findings, so a finding can be
+   *   traced back to the transcript that produced it.
+   */
+  recordFindings(
+    reviewId: string,
+    posted: TriagedFinding[],
+    suppressed: TriagedFinding[],
+    taskByAgent: ReadonlyMap<string, string> = new Map(),
+  ): void {
     const stmt = this.db.prepare(
-      `INSERT INTO findings (id, review_id, agent_id, file, line_start, line_end, category, severity,
-                             confidence, title, body, evidence_json, dedupe_group, agreement_count,
-                             suppressed_reason, status, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO findings (id, review_id, task_id, agent_id, file, line_start, line_end, category,
+                             severity, confidence, title, body, evidence_json, dedupe_group,
+                             agreement_count, suppressed_reason, status, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     const now = new Date().toISOString();
     const write = (f: TriagedFinding, status: string) =>
       stmt.run(
         newId("fd"),
         reviewId,
+        // Only when exactly one agent produced it.
+        //
+        // The column was in the schema from the start and never written, so it was a
+        // documented link that resolved to nothing. Filling it in with `agentIds[0]` for
+        // merged findings would have been worse than leaving it empty: after dedupe that
+        // is whichever agent happened to be processed first, not the one whose text
+        // survived — triage keeps the fuller body without reordering the agent list — so
+        // the link would point at a transcript that need not contain the words above it.
+        //
+        // A merged finding therefore keeps NULL here, and the UI resolves every one of
+        // its agents through the review's own task list instead. N transcripts for a
+        // finding N agents agreed on is the truth; one arbitrary transcript is not.
+        f.agentIds.length === 1 ? (taskByAgent.get(f.agentIds[0] as string) ?? null) : null,
         f.agentIds.join(","),
         f.file ?? null,
         f.lineStart ?? null,
@@ -187,9 +209,19 @@ export class ReviewRecorder {
     this.db.transaction(() => {
       // A re-review replaces its findings rather than stacking a second set on top.
       this.db.prepare("DELETE FROM findings WHERE review_id=?").run(reviewId);
-      for (const node of outcome.nodes) this.recordNode(reviewId, node);
-      if (outcome.triage)
-        this.recordFindings(reviewId, outcome.triage.posted, outcome.triage.suppressed);
+      const taskByAgent = new Map<string, string>();
+      for (const node of outcome.nodes) {
+        const taskId = this.recordNode(reviewId, node);
+        if (node.agentId) taskByAgent.set(node.agentId, taskId);
+      }
+      if (outcome.triage) {
+        this.recordFindings(
+          reviewId,
+          outcome.triage.posted,
+          outcome.triage.suppressed,
+          taskByAgent,
+        );
+      }
     });
   }
 }

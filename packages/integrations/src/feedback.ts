@@ -39,13 +39,7 @@ function recordFeedback(
 
   db.prepare(
     "INSERT INTO feedback (id, finding_id, signal, actor, created_at) VALUES (?,?,?,?,?)",
-  ).run(
-    newId("fd").replace("fd_", "fb_"),
-    findingId,
-    signal,
-    actor ?? null,
-    new Date().toISOString(),
-  );
+  ).run(newId("fb"), findingId, signal, actor ?? null, new Date().toISOString());
 }
 
 /**

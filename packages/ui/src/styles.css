@@ -220,6 +220,30 @@ tr.clickable:hover td {
   border-color: var(--border);
 }
 
+/* Finding dispositions.
+   None of the five had a rule, so every one of them rendered as the bare pill and a
+   dismissed finding was indistinguishable from an accepted one — the same failure the
+   review states had, in the place where telling them apart is the entire point of the
+   column. `accepted` is deliberately not `ok` green: a person agreeing with a finding
+   means the code had a problem, which is not a success to celebrate. */
+.badge.accepted {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+.badge.dismissed {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+}
+.badge.posted,
+.badge.open {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.badge.suppressed {
+  color: var(--muted);
+  border-color: var(--border);
+}
+
 .waterfall {
   display: flex;
   flex-direction: column;
@@ -450,4 +474,26 @@ button:disabled {
 }
 .notice code {
   font-family: ui-monospace, monospace;
+}
+
+/* The row a rollup finding points at, so following the link lands somewhere visible. */
+.wf-highlight {
+  background: var(--panel-alt, rgba(127, 127, 127, 0.14));
+  outline: 1px solid var(--accent, #4c8eda);
+  border-radius: 4px;
+}
+
+/* A button that reads as a link: the transcript links in the rollup are actions, not
+   navigation, so they must be buttons for the keyboard and screen readers. */
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0 6px 0 0;
+  color: var(--accent, #4c8eda);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.linkish:hover {
+  opacity: 0.8;
 }

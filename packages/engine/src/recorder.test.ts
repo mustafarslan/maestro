@@ -114,6 +114,59 @@ describe("ReviewRecorder", () => {
     ).toBe(1);
   });
 
+  it("links a single-agent finding to the task that produced it", () => {
+    // The column existed from the first migration and was never written, so every
+    // finding claimed a task and resolved to nothing. It is what makes "show me the
+    // transcript that produced this" answerable at all.
+    recorder.recordOutcome(reviewId, {
+      reviewId,
+      state: "done",
+      nodes: [node()],
+      costCents: 1,
+      durationMs: 1,
+      allowedCommands: [],
+      egressLog: [],
+      triage: { posted: [finding()], suppressed: [], summary: "" },
+    });
+
+    const row = db
+      .prepare("SELECT task_id FROM findings WHERE review_id=?")
+      .get<{ task_id: string | null }>(reviewId);
+    const task = db
+      .prepare("SELECT id FROM tasks WHERE review_id=? AND agent_id='security'")
+      .get<{ id: string }>(reviewId);
+    expect(row?.task_id).toBe(task?.id);
+  });
+
+  it("leaves a merged finding's task NULL rather than picking one of them", () => {
+    // `agentIds[0]` after a merge is whichever agent was processed first, not the one
+    // whose text survived — triage keeps the fuller body without reordering the list. A
+    // link to a transcript that need not contain the words above it is worse than no
+    // link, because it looks authoritative. The UI resolves every contributing agent
+    // through the review's task list instead.
+    recorder.recordOutcome(reviewId, {
+      reviewId,
+      state: "done",
+      nodes: [node(), node({ nodeId: "n-architecture", agentId: "architecture" })],
+      costCents: 1,
+      durationMs: 1,
+      allowedCommands: [],
+      egressLog: [],
+      triage: {
+        posted: [finding({ agentIds: ["security", "architecture"], agreementCount: 2 })],
+        suppressed: [],
+        summary: "",
+      },
+    });
+
+    const row = db
+      .prepare("SELECT task_id, agent_id FROM findings WHERE review_id=?")
+      .get<{ task_id: string | null; agent_id: string }>(reviewId);
+    expect(row?.task_id).toBeNull();
+    // But both agents are still recorded, which is how the UI finds the transcripts.
+    expect(row?.agent_id).toBe("security,architecture");
+  });
+
   it("persists suppressed findings with their reason, for later measurement", () => {
     recorder.recordFindings(
       reviewId,

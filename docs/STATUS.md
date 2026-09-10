@@ -3035,6 +3035,71 @@ the server never sends fails it, and removing `live` from the server's response 
     `issue.pull_request` discrimination and comment-keyed idempotency all behaved as written.
     An unsigned POST through the same tunnel got 401.
 
+219. **`findings.task_id` was a column that lied, and now says less on purpose.** In the schema
+    from the first migration, never written, so every finding carried a documented link to the
+    transcript that produced it and every one of those links resolved to nothing.
+
+    Filling it in was the obvious repair and half of it would have been wrong. After triage
+    merges findings that several agents raised independently, `agentIds[0]` is whichever agent
+    was processed first — not the one whose text survived, because the merge keeps the fuller
+    body without reordering the list. A link pointing at a transcript that need not contain the
+    words above it is worse than no link, because it looks authoritative.
+
+    So it is written only when exactly one agent produced the finding, and left NULL for merged
+    ones; the UI resolves every contributing agent through the review's own task list instead.
+    N transcripts for a finding N agents agreed on is the truth. Mutation-checked in both
+    directions — writing the first agent's task for merged findings fails one test, and not
+    writing it at all fails the other.
+
+220. **A review reporting no findings had three different meanings and one appearance.** The
+    agents found nothing; the agents found things and everything fell below the confidence
+    threshold; or the agent never ran. All three rendered as absence, and the middle one — the
+    one that says a threshold is set too high — was the least visible of them.
+
+    The per-review rollup separates them. Per agent: produced (what it submitted, from the
+    task's own output), after triage, posted, suppressed — and for an agent that did not run,
+    its state and reason in place of the numbers, so `ui-ux — skipped: no changed file matches
+    its path rules` cannot be read as "found nothing".
+
+    Two counting decisions that would otherwise mislead. Per-agent rows deliberately do not sum
+    to the review total: a merged finding is counted once for each agent that raised it, which
+    is what makes the agreement signal mean anything, and the review-level "distinct after
+    triage" is stated separately rather than the columns being massaged into agreement. And
+    "posted" asks `posted_comment_id`, not `status` — a posted finding becomes `accepted` or
+    `dismissed` the moment somebody reacts to it, so a status-based count would show findings
+    quietly leaving the posted column as people engaged with them.
+
+    Checked against the live review rather than a fixture: the rollup's numbers and the comment
+    Maestro posted to pull request #4 agree — product 4, architecture 4, security 2 produced,
+    ui-ux skipped, six distinct after triage.
+
+221. **"Line changed since", not "fixed".** Maestro cannot observe a fix. It observes that the
+    line a finding pointed at was changed by a later commit, which happens when somebody acts
+    on the finding and also when they rewrite the function for unrelated reasons, revert it, or
+    delete the file.
+
+    The column is named for what it measures and the definition sits next to it in the UI
+    rather than only in a comment nobody reading the number will open. It also says that the
+    signal deliberately does not settle a finding or count toward the acceptance rate, and that
+    feedback does not survive a re-review — `recordOutcome` replaces a review's findings and the
+    feedback rows cascade with them, so an earlier round's reaction shows as no signal, which
+    would otherwise read as indifference.
+
+    Signals are shown beside the status rather than folded into it. A finding can carry a
+    thumbs-up, a changed line and a status of `dismissed` at once; collapsing three observations
+    into one word picks a winner arbitrarily.
+
+222. **None of the five finding statuses had a badge colour.** The rollup renders disposition as
+    a badge, and `accepted`, `dismissed`, `suppressed`, `posted` and `open` all resolved to the
+    bare pill — indistinguishable, in the one column whose purpose is telling them apart. The
+    same failure the review states had and the same way of finding it: rendering something that
+    had never been rendered.
+
+    `ui-badges.test.ts` now asserts a rule for every `FINDING_STATUS` as it already did for
+    every `REVIEW_STATE`, plus that accepted and dismissed do not resolve to the same colour —
+    two rules existing is not the property that matters. `accepted` is deliberately not the
+    success green: a person agreeing with a finding means the code had a problem.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

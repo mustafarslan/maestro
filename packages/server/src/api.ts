@@ -89,6 +89,21 @@ const routes: Route[] = [
           .all<{ severity: string }>(id)
           .sort(bySeverity),
         spans: ctx.db.prepare("SELECT * FROM spans WHERE review_id=? ORDER BY started_at").all(id),
+        // Per finding and unaggregated, deliberately.
+        //
+        // `lineChangedByAgent` answers a different question — how often an agent's lines
+        // were later touched, across every review — and the rollup needs the signals on
+        // one finding. Returned raw rather than reduced to a "disposition" here, because
+        // a finding can carry several at once: a thumbs-up, a line changed in a later
+        // commit, and a status of `dismissed` are three separate observations and
+        // collapsing them into one word would pick a winner arbitrarily.
+        feedback: ctx.db
+          .prepare(
+            `SELECT fb.finding_id, fb.signal, fb.actor, fb.created_at
+             FROM feedback fb JOIN findings f ON f.id = fb.finding_id
+             WHERE f.review_id=? ORDER BY fb.created_at`,
+          )
+          .all(id),
         llmCalls: ctx.db
           .prepare(
             `SELECT provider_id, model, COUNT(*) AS steps, SUM(tokens_in) AS tokens_in,
