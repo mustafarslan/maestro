@@ -265,8 +265,14 @@ completes, that peak concurrency stays inside the configured limit, and that no 
 or fairness tally is left behind.
 
 ```
-node scripts/load-check.mjs 10 3     # ten reviews, three repositories
+node scripts/load-check.mjs 10 3          # ten reviews, three repositories
+node scripts/crash-recovery-check.mjs     # what a restart does with a killed daemon's leftovers
 ```
+
+The second builds the state a killed daemon leaves — a review stuck mid-flight and a real
+container labelled as belonging to it — starts a daemon into it, and checks the review is
+recovered and the container collected. SIGKILL cannot be handled, so a crash always leaves
+containers running; what matters is what the next start does about them.
 
 The provider is stubbed on purpose. The scenario is about containers, admission and
 teardown; running real agents would cost an hour and a pile of tokens to tell you nothing

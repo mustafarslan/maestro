@@ -37,9 +37,16 @@ What that leaves, in order of how much it would tell us:
    phase asks for. All 30 completed, peak admission was exactly the binding limit and never
    over it, and nothing was left behind: no containers, no fairness tallies. The provider is
    stubbed, because the scenario is about containers, admission and teardown and real agent
-   runs would cost an hour to say nothing about any of them. What remains untested by it is
-   an unclean kill of `serve` mid-review, whose mechanics are covered by tests and whose
-   startup sweep is verified.
+   runs would cost an hour to say nothing about any of them.
+
+   The phase's other half — kill mid-run and restart — is `scripts/crash-recovery-check.mjs`.
+   SIGKILL cannot be handled, so a crash always leaves containers running; what matters is
+   what the next start does. It builds that state for real (a review stuck mid-flight, a
+   real container labelled as its) and checks the review is recovered, the container
+   collected and the operator told. The pieces had unit tests; they had never been run
+   together against Docker, and the startup sweep exists precisely because the periodic one
+   would not have touched these for two hours. Mutation-checked: with the startup sweep
+   removed the container survives and the check fails.
 
 None is a missing implementation; each is a claim only the real thing can settle.
 
