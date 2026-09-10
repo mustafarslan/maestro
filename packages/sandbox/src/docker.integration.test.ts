@@ -378,6 +378,117 @@ describe("dependency cache", () => {
     },
     240_000,
   );
+
+  itDocker(
+    "replaces the cached checkout instead of merging into it",
+    async () => {
+      // `docker cp` merges a directory in and never deletes, so the cache-hit path used
+      // to analyse `previous UNION current`. Two silent wrongs came out of that: a file
+      // the pull request deleted was still there to be reviewed, and a file it ADDED
+      // survived into any second checkout taken off the same cache — which is how a
+      // base-versus-head comparison can report a command "fixed" when the base it
+      // measured already contained the fix.
+      //
+      // The dependency directories must survive, and not only the top-level one: in a
+      // pnpm or yarn workspace they are `packages/*/node_modules` too, and on this path
+      // setup does not re-run to restore anything that gets deleted by mistake.
+      const reviewId = `${REVIEW_ID}-refresh`;
+      const cacheSpec = EnvSpecSchema.parse({
+        image: "node:22-bookworm",
+        cpus: 2,
+        memory: "1GiB",
+        timeouts: { prepareSec: 300, analyzeSec: 300, commandSec: 60 },
+        // Writes the untracked dependency directories the cache exists to preserve.
+        setup: [
+          "mkdir -p node_modules packages/a/node_modules && " +
+            "touch node_modules/dep-marker packages/a/node_modules/nested-dep-marker",
+        ],
+        allowedCommands: [],
+        // In-process rather than containerised: this test is about the checkout, and the
+        // enforced proxy would drag the release binary into an unrelated assertion.
+        egressEnforcement: "advisory",
+        egressAllowlist: ["registry.npmjs.org"],
+      });
+
+      // Identical lockfile bytes on both sides, which is what makes the second prepare a
+      // cache hit. Everything else about the two trees differs.
+      const lockfile = JSON.stringify({ name: "cache-fixture", lockfileVersion: 3 });
+      const commit = (dir: string) => {
+        const git = (args: string[]) =>
+          execFileSync("git", ["-C", dir, ...args], { stdio: "ignore" });
+        git(["init", "--quiet"]);
+        git(["config", "user.email", "test@maestro.local"]);
+        git(["config", "user.name", "Maestro Test"]);
+        git(["add", "."]);
+        git(["commit", "--quiet", "-m", "fixture"]);
+      };
+
+      const first = mkdtempSync(join(tmpdir(), "maestro-cache-a-"));
+      writeFileSync(join(first, "package.json"), JSON.stringify({ name: "cache-fixture" }));
+      writeFileSync(join(first, "package-lock.json"), lockfile);
+      writeFileSync(join(first, "removed-by-the-pr.txt"), "from the first checkout\n");
+      commit(first);
+
+      const second = mkdtempSync(join(tmpdir(), "maestro-cache-b-"));
+      writeFileSync(join(second, "package.json"), JSON.stringify({ name: "cache-fixture" }));
+      writeFileSync(join(second, "package-lock.json"), lockfile);
+      writeFileSync(join(second, "added-by-the-pr.txt"), "from the second checkout\n");
+      commit(second);
+
+      // Recorded rather than recomputed: the deps tag is a hash of inputs the test would
+      // have to reconstruct exactly, and a wrong guess here silently leaves a
+      // node_modules-sized image on the machine after every run.
+      const depsTags = async () =>
+        new Set(
+          (
+            await dockerCommand(
+              ["images", "--format", "{{.Repository}}:{{.Tag}}", "maestro/deps"],
+              {
+                timeoutMs: 30_000,
+              },
+            )
+          ).stdout
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean),
+        );
+      const before = await depsTags();
+
+      let box2: Sandbox | undefined;
+      try {
+        const cold = await driver.prepare({ reviewId, sourcePath: first, spec: cacheSpec });
+        expect(cold.cacheHit ?? false).toBe(false);
+
+        const warm = await driver.prepare({ reviewId, sourcePath: second, spec: cacheSpec });
+        // Without a hit this test would pass vacuously: the cold path builds a correct
+        // tree, so it proves nothing about the code under test.
+        expect(warm.cacheHit).toBe(true);
+
+        box2 = await driver.analyze(warm, { agentId: "architecture", spec: cacheSpec });
+        const ls = async (path: string) =>
+          (await box2!.exec(`test -e ${path} && echo yes || echo no`)).stdout.trim();
+
+        // The first checkout's tracked file is gone; the second's is present.
+        expect(await ls("removed-by-the-pr.txt")).toBe("no");
+        expect(await ls("added-by-the-pr.txt")).toBe("yes");
+        // And the dependency layer the cache exists for survived, at both depths.
+        expect(await ls("node_modules/dep-marker")).toBe("yes");
+        expect(await ls("packages/a/node_modules/nested-dep-marker")).toBe("yes");
+      } finally {
+        await box2?.destroy();
+        await driver.reap({ reviewId });
+        // The deps tag outlives the review by design — that is the point of the cache —
+        // so only this test can clean it up. Scoped to tags this test created, never a
+        // blanket sweep of maestro/deps, which would evict a real repo's warm cache.
+        for (const tag of await depsTags()) {
+          if (!before.has(tag)) await dockerCommand(["rmi", "-f", tag], { timeoutMs: 60_000 });
+        }
+        rmSync(first, { recursive: true, force: true });
+        rmSync(second, { recursive: true, force: true });
+      }
+    },
+    600_000,
+  );
 });
 
 describe("egress allowlist proxy", () => {

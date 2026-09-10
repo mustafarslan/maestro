@@ -3165,6 +3165,36 @@ the server never sends fails it, and removing `live` from the server's response 
 
     Mutation-checked against real Docker: starting the proxy anyway fails the test.
 
+226. **A dependency-cache hit analysed the previous pull request's files as well as this
+    one's.** `refreshCheckout` copied the new checkout into the cached image with `docker cp`,
+    which merges a directory in and never deletes. The analysed tree was therefore
+    *previous ∪ current*: a file the pull request deleted was still sitting there to be
+    reviewed, and every review of a repository after the first takes this path.
+
+    The doc comment claimed more than the code did — "the source always comes from this pull
+    request" — which is how it survived. It was found while planning base-versus-head command
+    execution, where the same merge is not merely untidy but produces a confident false result:
+    a second checkout taken off the same cache inherits every file the pull request *added*, so
+    a command can be measured as fixed on a base that already contained the fix.
+
+    The previous checkout is now deleted before the new one is copied in, by
+    `git ls-files -z` — which names exactly the tracked files of the tree already in the image,
+    at any depth, and nothing else. Every untracked dependency directory survives, which is the
+    entire value of the cache.
+
+    Deliberately not "delete everything except `node_modules`". In a pnpm or yarn workspace the
+    dependency directories are `packages/*/node_modules` as well as the root one, and setup does
+    not re-run on this path to restore anything wrongly removed. Maestro's own repository is such
+    a workspace, so the naive fix would have broken the tool on itself. Both spellings are
+    mutation-checked against real Docker: disabling the cleanup fails the deleted-file assertion,
+    and the top-level-exclusion version fails the nested-`node_modules` assertion.
+
+    No pipeline in the cleanup. `git ls-files | xargs` under plain `sh` reports xargs's status,
+    so a missing git or an absent index would have exited 0 and passed the stale tree through as
+    though it had been cleaned — the same status-of-the-wrong-command trap that has now bitten
+    this project four times. It reads into a file and checks each step under `set -e`. A cleanup
+    that cannot run fails closed, falling back to a full install rather than to a wrong tree.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

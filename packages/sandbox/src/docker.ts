@@ -709,10 +709,18 @@ function parseLabelPair(stdout: string): { reviewId?: string; createdAt?: number
 }
 
 /**
- * Layers the current checkout onto a cached dependency image.
+ * Replaces the checkout inside a cached dependency image with this review's.
  *
  * Only the dependency layer is reused; the source always comes from this pull request,
  * or a review would silently analyse the previous one's code.
+ *
+ * "Replaces", not "layers onto" — and the difference is the whole point. `docker cp`
+ * merges a directory in and never deletes, so copying the new tree over the cached one
+ * leaves `previous UNION current`. That shipped two silent wrongs: a file the pull
+ * request deleted was still present in the analysed tree, and — far worse once commands
+ * run at two refs — a file the pull request ADDED survived into a base-side checkout, so
+ * a differential run could report a command "fixed" when the base it measured already
+ * contained the fix.
  */
 async function refreshCheckout(
   cachedTag: string,
@@ -738,11 +746,44 @@ async function refreshCheckout(
         WORKDIR,
         cachedTag,
         "sleep",
-        "60",
+        "3600",
       ],
       { timeoutMs: 60_000 },
     );
     if (create.exitCode !== 0) return null;
+
+    const start = await docker(["start", containerId], { timeoutMs: 60_000 });
+    if (start.exitCode !== 0) return null;
+
+    // Delete the previous checkout before copying the new one in.
+    //
+    // `git ls-files` names exactly the tracked files of the tree already in the image, at
+    // any depth, and nothing else — so every untracked dependency directory survives,
+    // which is the entire value of the cache. Deliberately not an exclusion list like
+    // "everything except node_modules": in a pnpm or yarn workspace the dependency
+    // directories are `packages/*/node_modules` as well as the root one, and a top-level
+    // exclusion would strip every subpackage's dependencies on the one path where setup
+    // does not re-run to restore them. Maestro's own repository is such a workspace.
+    //
+    // No pipeline. `git ls-files | xargs` under plain `sh` reports xargs's status, so a
+    // missing git or an absent index would exit 0 and the stale tree would sail through
+    // as if it had been cleaned. This project has been bitten by exactly that three times.
+    const clean = await docker(
+      [
+        "exec",
+        containerId,
+        "sh",
+        "-c",
+        "set -e; git ls-files -z > /tmp/maestro-tracked; xargs -0 -r rm -f < /tmp/maestro-tracked",
+      ],
+      { timeoutMs: 120_000 },
+    );
+    // Falling back to a full install is the only safe failure. A pinned image without
+    // git, or a cached layer whose workdir is not a repository, cannot be cleaned — and
+    // layering onto it anyway is precisely the silently-wrong tree this guards against.
+    if (clean.exitCode !== 0) {
+      return null;
+    }
 
     const copy = await docker(["cp", `${req.sourcePath}/.`, `${containerId}:${WORKDIR}`], {
       timeoutMs: spec.timeouts.prepareSec * 1000,
