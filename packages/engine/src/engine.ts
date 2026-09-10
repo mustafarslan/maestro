@@ -661,10 +661,10 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           log,
           () =>
             timedNode(nodes, triageNode, deps.spans, req.reviewId, async () =>
-              triage(req.playbook, collected),
+              triage(req.playbook, collected, comparisons),
             ),
         )
-      : triage(req.playbook, collected);
+      : triage(req.playbook, collected, comparisons);
 
     // ── post (the caller renders or publishes; the node records the step) ──
     const postNode = byKind("post")[0];

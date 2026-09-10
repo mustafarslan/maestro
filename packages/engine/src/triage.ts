@@ -1,5 +1,6 @@
 import { type Finding, type Severity, severityRank } from "@maestro/agents";
 import type { PlaybookDocument } from "@maestro/playbook";
+import type { CommandComparison } from "@maestro/sandbox";
 
 export interface AgentFindings {
   agentId: string;
@@ -53,7 +54,11 @@ const SEVERITY_RANK = (s: Severity): number => severityRank(s);
  * (dedupe, agreement, thresholds, caps) stay here because they should be predictable
  * and testable rather than re-litigated by a model on every run.
  */
-export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageResult {
+export function triage(
+  doc: PlaybookDocument,
+  inputs: AgentFindings[],
+  comparisons?: CommandComparison[],
+): TriageResult {
   const { minConfidence, maxInlineComments, agreementBoost } = doc.triage;
 
   const groups: TriagedFinding[] = [];
@@ -141,7 +146,7 @@ export function triage(doc: PlaybookDocument, inputs: AgentFindings[]): TriageRe
     posted.push(finding);
   }
 
-  return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed) };
+  return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed, comparisons) };
 }
 
 /**
@@ -177,12 +182,67 @@ function sameDefect(a: Finding, b: Finding): boolean {
   return Math.abs(a.lineStart - b.lineStart) <= MERGE_DISTANCE;
 }
 
+/**
+ * What the base-versus-head run established, in one sentence, deterministically.
+ *
+ * This says what was MEASURED. It deliberately does not try to decide which of the pull
+ * request's claims a command bears on: that is a judgement about intent, triage runs no
+ * model, and a regex hunting the description for "faster" would be exactly the kind of
+ * guess that manufactures evidence. The agents read the description and the measurements
+ * together and report a claim as unverified; this line makes sure the measurement itself
+ * reaches the top of the comment either way.
+ *
+ * It lives in the summary rather than in a finding on purpose. A finding carries a
+ * severity and passes through the confidence threshold and the inline-comment cap, so
+ * "nothing here supports the claim" could be dropped for being low severity — which is
+ * the one message that must not be silently discarded.
+ */
+function comparisonNote(comparisons?: CommandComparison[]): string {
+  if (!comparisons?.length) return "";
+
+  const ran = comparisons.filter((c) => c.base && c.head);
+  if (!ran.length) {
+    const why = comparisons[0]?.skipped;
+    return (
+      "No command was compared against the merge base" +
+      (why === "untrusted"
+        ? " (fork pull requests execute no commands)"
+        : why === "no-merge-base"
+          ? " (the fork point could not be found)"
+          : "") +
+      ", so any claim in the description about being faster, smaller or fixing a failure " +
+      "is unchecked here."
+    );
+  }
+
+  const fixed = ran.filter((c) => c.verdict === "fixed").map((c) => c.command);
+  const broken = ran.filter((c) => c.verdict === "broken").map((c) => c.command);
+  const same = ran.filter((c) => c.verdict === "same-exit").map((c) => c.command);
+
+  const parts: string[] = [];
+  if (fixed.length)
+    parts.push(`${fixed.join(", ")} fails at the merge base and passes at the head`);
+  if (broken.length)
+    parts.push(`${broken.join(", ")} passes at the merge base and fails at the head`);
+  if (same.length) {
+    parts.push(
+      `${same.join(", ")} exits the same at both` +
+        // The case a reader most needs spelled out: commands were run, and none of them
+        // showed a change. Left implicit, a table of equal exit codes reads as support.
+        (fixed.length || broken.length ? "" : ", so no measured behaviour changed"),
+    );
+  }
+  return `Base vs head: ${parts.join("; ")}.`;
+}
+
 function buildSummary(
   inputs: AgentFindings[],
   posted: TriagedFinding[],
   suppressed: TriagedFinding[],
+  comparisons?: CommandComparison[],
 ): string {
   const agentSummary = inputs.find((i) => i.summary)?.summary;
+  const compared = comparisonNote(comparisons);
   if (!posted.length) {
     // A clean review is a real outcome and should read like one, not like a failure.
     return [
@@ -191,6 +251,7 @@ function buildSummary(
         (suppressed.length
           ? `; ${suppressed.length} low-confidence observation(s) were suppressed.`
           : "."),
+      compared,
     ]
       .filter(Boolean)
       .join(" ");
@@ -205,7 +266,7 @@ function buildSummary(
     .map((s) => `${counts[s]} ${s}`)
     .join(", ");
 
-  return [agentSummary, `${posted.length} finding(s) worth attention: ${breakdown}.`]
+  return [agentSummary, `${posted.length} finding(s) worth attention: ${breakdown}.`, compared]
     .filter(Boolean)
     .join(" ");
 }

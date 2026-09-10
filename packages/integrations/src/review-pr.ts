@@ -297,7 +297,7 @@ const execFileAsync = promisify(execFile);
  * Returns undefined rather than throwing: no baseline is a comparison that says it was
  * skipped, which is a far better outcome than a review that fails.
  */
-async function materialiseBaseline(
+export async function materialiseBaseline(
   workdir: string,
   mergeBaseSha: string | null,
   log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void },

@@ -356,6 +356,12 @@ That last row matters: an npm script the pull request *adds* exits non-zero at t
 it a base-side failure would manufacture exactly the "fixed" verdict the feature exists to
 earn honestly.
 
+**Commands that write.** Analyze containers mount the checkout read-only unless
+`envSpec.writableWorkdir: true`. A build or a test that emits coverage will therefore fail
+identically on both sides, and the table will read `exit 1 | exit 1 | no change in exit code`
+with a permissions error in the output tails. That is a fair comparison but a useless one —
+set `writableWorkdir: true` if your comparison commands write into the checkout.
+
 **Cost and safety.** This is a second prepared environment and two more analyze containers
 per review, and they are not counted against the scheduler's concurrency limits. Fork pull
 requests are excluded twice over — `compareCommands` is emptied along with `setup` and
@@ -364,11 +370,15 @@ deny-pattern check as `allowedCommands`, so a shell metacharacter or a network t
 rejected when the playbook is saved. A repository's `.maestro.yaml` may remove a command
 from this list but never add one.
 
-Local reviews work the same way, which is the cheapest way to try it:
+Local reviews work the same way, and are the easiest way to try it:
 
 ```
 maestro review . --base HEAD~1
 ```
+
+The baseline is a copy of the working tree with `git checkout <base>` applied, so on a large
+repository with dependencies already installed the copy is not free — it copies
+`node_modules` along with everything else.
 
 ## Sandbox networking
 

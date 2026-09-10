@@ -3236,6 +3236,26 @@ the server never sends fails it, and removing `live` from the server's response 
     through a name that does not announce that it runs code. `.maestro.yaml` may remove a
     command but never add one.
 
+    **Where "unverified" gets said, and a plan assumption that was wrong.** The plan for this
+    work said the verdict would come from triage, "which already writes the narrative and sees
+    both the fenced description and the trusted measurements". It does not: `triage()` is
+    synchronous and calls no model, builds its summary from severity counts, and never sees
+    the pull request description at all. A `triage.persona` exists in the schema and nothing
+    sends it to a provider.
+
+    So mapping a claim to a command stays with the agents, which are the only components that
+    read the description and the measurements together. What triage now adds is deterministic
+    and factual: one sentence stating what the comparison established — including the case a
+    reader most needs spelled out, that commands ran and *nothing changed*, since a table of
+    equal exit codes left without a sentence reads as though it supported the claim. When
+    nothing was compared it says the description's comparative claims are unchecked.
+
+    That sentence lives in the summary rather than in a finding deliberately. A finding carries
+    a severity and passes the confidence threshold and the inline-comment cap, so "nothing here
+    supports the claim" could be dropped for being low severity — the one message that must not
+    be silently discarded. No regex hunts the description for the word "faster": guessing which
+    claim a command bears on is exactly how a measurement turns into a fabrication.
+
     A skipped comparison says it was skipped and why. An empty table reads as "we checked and
     found nothing", which is a materially stronger claim than "we could not check". A command
     the pull request *adds* is reported as not runnable at the base rather than as a base-side
@@ -3247,9 +3267,25 @@ the server never sends fails it, and removing `live` from the server's response 
     three ways: pointing the base run at the head snapshot, removing the untrusted guard, and
     both prompt-labelling mutations above.
 
-    Honest limitation: the comparison runs two extra analyze containers per review outside the
-    scheduler's concurrency limits, so a repository that opts in adds load the limits do not
-    see. Stated here rather than discovered later.
+    The seam that builds the "before" tree is tested on its own, without Docker: that
+    `checkoutPullRequest` returns the fork point rather than the base branch tip, that the
+    baseline lacks a file the pull request adds, and that `git clean -fd` keeps the head's
+    untracked files out of it. Mutation-checked all three. Without those, "verified end to
+    end" would have covered only that the comparison distinguishes two trees — not that it
+    was given the right two.
+
+    Honest limitations, stated rather than discovered later: the comparison runs two extra
+    analyze containers per review outside the scheduler's concurrency limits, so a repository
+    that opts in adds load the limits cannot see. Analyze mounts the checkout read-only unless
+    `writableWorkdir` is set, so a build command fails identically on both sides — a fair
+    comparison and a useless one, now documented. And the baseline is a working-tree copy, so
+    on a large repository it copies `node_modules` too.
+
+    One deviation from the plan worth recording: the plan put the evidence on `PromptContext`
+    as a `{{compare.*}}` template variable. It is passed as a separate argument instead,
+    matching how `setupFailed`, `allowedCommands` and `writableWorkdir` already reach
+    `buildUserPrompt` — environment facts have never travelled as template variables here, and
+    a persona referencing this one was speculative value against real added surface.
 
 228. **Adding one playbook field broke `maestro doctor` on every existing install.**
     `hydrate` read a stored version with `JSON.parse(row.document) as PlaybookDocument` — a

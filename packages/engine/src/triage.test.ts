@@ -353,3 +353,60 @@ describe("environment honesty", () => {
     expect(md).not.toContain("dependency installation did not complete");
   });
 });
+
+describe("the summary says what was measured, above the threshold", () => {
+  const run = (exitCode: number) => ({
+    exitCode,
+    stdoutTail: "",
+    stderrTail: "",
+    durationsMs: [100],
+    timedOut: false,
+    concurrentAgents: 0,
+  });
+  const doc = defaultPlaybook();
+
+  it("states an exit-code change in the summary, not only in the table", () => {
+    // The summary is above the fold and is not subject to the confidence threshold or the
+    // inline-comment cap. A measurement routed through a finding could be dropped for
+    // being low severity, and "the test now passes" is not a thing to drop.
+    const result = triage(
+      doc,
+      [],
+      [{ command: "npm test", base: run(1), head: run(0), verdict: "fixed" }],
+    );
+    expect(result.summary).toContain("npm test fails at the merge base and passes at the head");
+  });
+
+  it("says plainly when commands ran and nothing changed", () => {
+    // The case a reader most needs spelled out. A table of equal exit codes, left without
+    // a sentence, reads as though it supported the pull request's claim.
+    const result = triage(
+      doc,
+      [],
+      [{ command: "npm test", base: run(0), head: run(0), verdict: "same-exit" }],
+    );
+    expect(result.summary).toContain("no measured behaviour changed");
+  });
+
+  it("says a comparative claim is unchecked when nothing was compared", () => {
+    const result = triage(
+      doc,
+      [],
+      [
+        {
+          command: "npm test",
+          base: null,
+          head: null,
+          verdict: "not-comparable",
+          skipped: "untrusted",
+        },
+      ],
+    );
+    expect(result.summary).toContain("fork pull requests execute no commands");
+    expect(result.summary).toContain("is unchecked here");
+  });
+
+  it("stays silent when no comparison was configured", () => {
+    expect(triage(doc, []).summary).not.toContain("Base vs head");
+  });
+});
