@@ -33,3 +33,8 @@ export function revokeUser(userId: string): number {
   }
   return removed;
 }
+
+/** How many sessions are currently held. */
+export function sessionCount(): number {
+  return sessions.size;
+}
