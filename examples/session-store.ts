@@ -26,7 +26,7 @@ export function getSession(id: string): Session | undefined {
 export function revokeUser(userId: string): number {
   let removed = 0;
   for (const [id, s] of sessions) {
-    if (s.userId = userId) {
+    if (s.userId === userId) {
       sessions.delete(id);
       removed++;
     }
