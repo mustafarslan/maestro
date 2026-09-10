@@ -92,6 +92,40 @@ export function unresolvableAgents(
   return bad;
 }
 
+/**
+ * Turns an interrupt into a clean abort, so the finalizer actually runs.
+ *
+ * Teardown is a guaranteed finalizer rather than a graph node precisely so that no
+ * failure path can leak a container — and it was defeated by the most ordinary thing a
+ * person does to a command that is taking a while. `maestro review` had no signal
+ * handler, so Ctrl-C killed the process outright and its containers, and the snapshot
+ * image behind them, stayed running. Measured: three containers left behind by one
+ * interrupted review, still up six minutes later.
+ *
+ * `serve` had this from the beginning. `review` is the command in the quickstart.
+ *
+ * A second interrupt exits immediately: somebody pressing Ctrl-C twice means it, and a
+ * teardown that is itself wedged must not trap them.
+ */
+function abortOnInterrupt(): AbortController {
+  const controller = new AbortController();
+  let interrupted = false;
+
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (interrupted) {
+      console.error("\ninterrupted again — exiting without waiting for cleanup");
+      process.exit(130);
+    }
+    interrupted = true;
+    console.error(`\n${signal} — stopping the review and cleaning up its containers…`);
+    controller.abort();
+  };
+
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  return controller;
+}
+
 export async function review(argv: string[]): Promise<number> {
   rejectUnknownFlags(argv, [
     "--base",
@@ -120,6 +154,8 @@ export async function review(argv: string[]): Promise<number> {
   const providerOverride = args(argv, "--provider")[0];
   const modelOverride = args(argv, "--model")[0];
   const asJson = has(argv, "--json");
+
+  const interrupt = abortOnInterrupt();
 
   const db = await openStore();
   try {
@@ -186,6 +222,7 @@ export async function review(argv: string[]): Promise<number> {
         // Undefined unless LINEAR_API_KEY is set; the review runs either way.
         linear: LinearClient.fromEnv(),
         pr: prRef,
+        signal: interrupt.signal,
         dryRun: has(argv, "--dry-run"),
         force: has(argv, "--force"),
       });
@@ -275,6 +312,9 @@ export async function review(argv: string[]): Promise<number> {
           diff: { changedFiles, changedLines },
           commands: [],
         },
+        // Ctrl-C aborts the run so the finalizer tears its containers down, rather than
+        // killing the process and leaving them up.
+        signal: interrupt.signal,
       },
     );
 

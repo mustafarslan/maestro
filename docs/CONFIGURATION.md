@@ -234,6 +234,29 @@ maestro reap      # remove stray containers and snapshot images — usually enou
 maestro prune     # delete the step-by-step trace of old reviews
 ```
 
+## Interrupting a review
+
+Ctrl-C on `maestro review` stops the review and tears its containers down before exiting;
+it prints a partial report saying which agents did not complete. A second Ctrl-C exits
+immediately without waiting, in case the cleanup is itself stuck — which will leave
+containers behind, and `maestro reap` collects them.
+
+## Load
+
+`scripts/load-check.mjs` runs the Phase 7 scenario against real Docker: N reviews across M
+repositories through the real interpreter and scheduler, asserting that every review
+completes, that peak concurrency stays inside the configured limit, and that no container
+or fairness tally is left behind.
+
+```
+node scripts/load-check.mjs 10 3     # ten reviews, three repositories
+```
+
+The provider is stubbed on purpose. The scenario is about containers, admission and
+teardown; running real agents would cost an hour and a pile of tokens to tell you nothing
+about any of the three. It is not part of the gate — it starts dozens of containers and
+takes minutes.
+
 ## After a crash
 
 Killing the daemon mid-review and restarting is safe, but not instant, and the delay is

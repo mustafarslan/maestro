@@ -2650,6 +2650,37 @@ the server never sends fails it, and removing `live` from the server's response 
     first died when the gate reaped its containers, which is how 194 was found. This one
     survived the gate — the same scenario, with the fix in place.
 
+198. **Interrupting `maestro review` left its containers running.** Teardown is a
+    guaranteed finalizer rather than a graph node precisely so that no failure path can
+    leak a container — and the most ordinary thing a person does to a slow command
+    defeated it. Only `serve` installed signal handlers. `review`, the command in the
+    quickstart, had none, so a signal killed the process before any `finally` ran.
+
+    Found by accident: containers from a review I had killed minutes earlier were still up,
+    labelled with its review id. Three of them, plus the snapshot image behind them.
+
+    `review` now aborts on SIGINT or SIGTERM and lets the finalizer run — the abort path
+    the engine already supported and this command never used. A second interrupt exits
+    immediately, because somebody pressing Ctrl-C twice means it and a wedged teardown must
+    not trap them.
+
+    Two things about verifying it, both of which nearly produced a wrong answer.
+
+    The first mutation removed the two `process.on` lines, which leaves `onSignal` unused,
+    which fails `tsc -b`, which short-circuits `build:binary` — so the binary under test was
+    the *fixed* one and the mutation reported "0 leaked", i.e. that the fix did nothing.
+    Asserting the source changed is not asserting the binary changed. The second attempt
+    moved the handler to a signal nothing sends, which compiles, and checked the binary's
+    checksum actually moved before believing anything.
+
+    Then the mutated binary ignored SIGINT entirely and stayed alive — not because of the
+    mutation, but because a background job in a non-interactive shell inherits SIGINT
+    ignored, so only a program that installs a handler ever sees it. That makes SIGINT a
+    poor model of an interactive Ctrl-C in this harness. SIGTERM is not inherited that way
+    and is what `pkill` had sent when the leak was first observed, so the comparison was
+    redone with it: without the handler, three containers left; with it, zero, and the
+    review prints a correctly-stated partial report on the way out.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
