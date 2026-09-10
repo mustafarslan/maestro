@@ -3389,6 +3389,73 @@ the server never sends fails it, and removing `live` from the server's response 
     `{nodeId, agentId}`, where before there was none. Three mutation checks: removing the span
     close, the prune sweep, and the re-review delete each fail their own test and nothing else.
 
+232. **The golden set had no fixtures, and no way to hold any of them back.** Phase 9's
+    harness has been complete since it landed — `Fixture`, `scoreOutcome`, `compareVersions`,
+    `fixtureDeltas` — and `~/.maestro/fixtures` did not exist on the machine that wrote it.
+    Zero fixtures, zero scores. Every claim about a persona or model change in this file is
+    an observation about one or two runs, because there was nothing else available.
+
+    It also had no notion of a train/validation split: no folds, no seeds, no tags. Every
+    fixture was scored on every run and pooled into one number. That is adequate while a
+    person is reading the number and inadequate the moment anything *fits* to it, and a split
+    invented after the fact is a split chosen to make a result look good.
+
+    `Fixture.split` is `"train" | "val"`, **defaulting to held out**. The conservative
+    direction: a fixture that silently joins the training set is a fixture whose score stops
+    meaning anything, and nothing would say so. `compareVersions` groups by (version, split)
+    and never pools them; `maestro eval report` prints held-out first; `EvalScore` carries the
+    split it was run under, since a fixture's split can be edited afterwards and a score is a
+    record of a run that already happened. Scores written before the field existed default to
+    held out rather than grouping under `undefined`, which would have split one version's
+    history in two.
+
+    Eight fixtures, built by `scripts/make-eval-fixture.sh` from commits in this repository
+    that fixed real defects. The base is the fix's tree and the head is the same tree with the
+    fix reverted, so the diff under review is the introduction of a defect this project
+    actually shipped, in the code that shipped it. Inventing a bug and then writing an answer
+    key for it measures how well the bug was invented.
+
+    The script strips the fix's own explanatory comments from the base. This file's habit of
+    writing down *why* alongside every fix meant the first attempt produced diffs whose
+    deleted lines described the defect in prose — an answer key the agent could read rather
+    than derive, which is the same failure as leaving the fix's tests in.
+
+    `changedLines` was `changedFiles.length * 20`. That decides the router's budget tier, so
+    eval and production ran the same playbook under different caps and the fixture that a
+    change was measured on was not the review a user would get. Counted from
+    `git diff --shortstat` now, which is what `maestro review` has always done.
+
+    **Baseline, measured rather than asserted.** All eight fixtures, architecture agent alone
+    on `glm-5.3:cloud` through Ollama Cloud, real Docker, playbook v4:
+
+    | | runs | precision | recall |
+    | --- | --- | --- | --- |
+    | held out (val) | 5 | 67% | 90% |
+    | training (train) | 3 | 67% | 67% |
+
+    Six of nine expected findings caught outright. `severity-sql-order` caught the alphabetic
+    `ORDER BY` and missed the carried-findings cap disappearing; `reaper-double-count` caught
+    nothing and stopped on `deadline` after 955 seconds, which is the 900-second `analyzeSec`
+    ceiling doing its job. So there is real headroom in both directions — recall is not
+    saturated, and precision ranges from 33% to 100% across the eight.
+
+    **Two things this turned up that were not the point.** `/api/eval` and MCP `run_eval` each
+    had a test asserting they return empty lists, reading the developer's real
+    `~/.maestro/eval-scores`. Both passed for as long as they have existed and failed the
+    first time anybody actually used the golden set. They build an empty `MAESTRO_HOME` now: a
+    test whose subject is "a fresh install" has to construct one rather than hope it is
+    running on one. And `maestro eval run` can only score the *active* default playbook, so
+    measuring one agent means publishing and activating a version that disables the others —
+    recorded below rather than fixed.
+
+    **What the corpus says about which agent to measure.** Of the ~230 findings above, the
+    overwhelming majority are architecture-class: correctness, resource lifecycle, dead
+    configuration, duplicated constants, backwards compatibility. Roughly a dozen are
+    security-class, a dozen product-class ("the plan named it and nothing implemented it"),
+    and about five are UI. Any measurement of one agent against this corpus is a measurement
+    of the architecture agent; the current eight fixtures are six architecture and two
+    security, which is the ratio the source material has.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
@@ -3411,6 +3478,12 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
   base branch at review time rather than cached in a column. Both are decisions; the columns are
   what is left of an earlier plan.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
+- **`maestro eval run` can only score the active default playbook.** `getActive("default")`
+  is the only source, so comparing two pipelines means publishing and activating each in
+  turn — including the case the split exists for, measuring one agent by disabling the
+  others. A `--playbook <version>` flag is the obvious fix and is not built; until it is,
+  the version under measurement is a global setting, which is a poor thing for a
+  measurement to be.
 - ~~**Reaction feedback is ungated, and its delivery is unproven.**~~ **Answered, and fixed
   properly.** GitHub's webhook catalogue has no `reaction` event — checked against the published
   documentation rather than guessed at — so the daemon's handler for one could never fire. The

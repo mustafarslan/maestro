@@ -279,6 +279,8 @@ export interface EvalResponse {
   }[];
   comparisons: {
     playbookVersionId: string;
+    /** Held-out and training rows are separate: pooling them is what the split prevents. */
+    split: "train" | "val";
     runs: number;
     precision?: number;
     recall?: number;
@@ -288,6 +290,7 @@ export interface EvalResponse {
   /** Per fixture: what the newest version started and stopped catching. */
   deltas: {
     fixture: string;
+    split: "train" | "val";
     from: string;
     to: string;
     gained: string[];

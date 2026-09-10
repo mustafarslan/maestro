@@ -159,6 +159,7 @@ function Golden({ evals }: { evals: EvalResponse | null }) {
         <thead>
           <tr>
             <th>Playbook version</th>
+            <th>Split</th>
             <th>Runs</th>
             <th>Precision</th>
             <th>Recall</th>
@@ -168,8 +169,11 @@ function Golden({ evals }: { evals: EvalResponse | null }) {
         </thead>
         <tbody>
           {evals.comparisons.map((c) => (
-            <tr key={c.playbookVersionId}>
+            <tr key={`${c.playbookVersionId}-${c.split}`}>
               <td style={{ fontFamily: "ui-monospace, monospace" }}>{c.playbookVersionId}</td>
+              <td className={c.split === "val" ? undefined : "muted"}>
+                {c.split === "val" ? "held out" : "training"}
+              </td>
               <td className="muted">{c.runs}</td>
               <td>{pct(c.precision)}</td>
               <td>{pct(c.recall)}</td>
@@ -180,10 +184,12 @@ function Golden({ evals }: { evals: EvalResponse | null }) {
         </tbody>
       </table>
       <div className="panel-body muted" style={{ fontSize: 12 }}>
-        Precision is undefined when a version reported nothing, and recall when a fixture expects
-        nothing — neither is zero, and showing them as zero would make a cautious version look
-        broken. These numbers never appear in a pull request comment: they are not computable when a
-        review is written.
+        Held-out and training fixtures are reported as separate rows and never pooled — the number a
+        change is chosen by and the number it is judged by have to be different numbers. Precision
+        is undefined when a version reported nothing, and recall when a fixture expects nothing —
+        neither is zero, and showing them as zero would make a cautious version look broken. These
+        numbers never appear in a pull request comment: they are not computable when a review is
+        written.
       </div>
     </div>
   );

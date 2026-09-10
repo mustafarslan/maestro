@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { maestroHome, openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import {
   compareVersions,
+  type EvalSplit,
   type Fixture,
   fixturesDir,
   loadFixtures,
@@ -14,6 +15,7 @@ import {
   saveScore,
   scoreOutcome,
   scoresDir,
+  splitOf,
 } from "@maestro/engine";
 import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
@@ -49,18 +51,33 @@ ${color.bold("maestro eval")} <subcommand>
 
   list                       show the fixtures in ~/.maestro/fixtures
   add <name> <target>        register a fixture (a local path or a pull request URL)
+    --split train|val        which half of the golden set it belongs to (default val)
   run [--fixture <name>]     review each fixture and score it against its answer key
-  report                     precision and recall per playbook version
+    --split train|val        run only that half
+  report                     precision and recall per playbook version and split
 
 A fixture is a repository state with a known answer key. Scoring against it turns
 "this persona feels better" into a number, and groups results by playbook version so
 two pipelines can actually be compared.
+
+Every fixture is held out unless it says otherwise. The two halves are reported
+separately and never pooled: the number a change is chosen by and the number it is
+judged by have to be different numbers, or the second one measures nothing.
 `);
   return code;
 }
 
+/** `--split train|val`, refused rather than silently ignored when it is neither. */
+function splitFlag(argv: string[]): EvalSplit | undefined | null {
+  const raw = arg(argv, "--split");
+  if (raw === undefined) return undefined;
+  if (raw === "train" || raw === "val") return raw;
+  console.error(`--split must be 'train' or 'val', not '${raw}'`);
+  return null;
+}
+
 export async function evaluate(argv: string[]): Promise<number> {
-  rejectUnknownFlags(argv, ["--base", "--fixture"]);
+  rejectUnknownFlags(argv, ["--base", "--fixture", "--split"]);
   const sub = argv[0];
   if (wantsHelp(argv)) return usage(0);
   if (!sub) return usage();
@@ -76,7 +93,9 @@ export async function evaluate(argv: string[]): Promise<number> {
     console.log(color.bold("\nfixtures\n"));
     for (const f of fixtures) {
       console.log(`  ${color.cyan(f.name)}  ${color.dim(f.target)}`);
-      console.log(`    ${f.expected.length} expected, ${f.forbidden?.length ?? 0} forbidden`);
+      console.log(
+        `    ${splitOf(f)} · ${f.expected.length} expected, ${f.forbidden?.length ?? 0} forbidden`,
+      );
     }
     console.log();
     return 0;
@@ -86,11 +105,16 @@ export async function evaluate(argv: string[]): Promise<number> {
     const name = argv[1];
     const target = argv[2];
     if (!name || !target) return usage();
+    const split = splitFlag(argv);
+    if (split === null) return 1;
     mkdirSync(dir, { recursive: true });
     const fixture: Fixture = {
       name,
       target: parsePullRequestRef(target) ? target : resolve(target),
       baseRef: arg(argv, "--base"),
+      // Written out even when it is the default, so the file states which half it is in
+      // rather than leaving the reader to know what the default happens to be today.
+      split: split ?? "val",
       expected: [],
       forbidden: [],
     };
@@ -111,12 +135,25 @@ export async function evaluate(argv: string[]): Promise<number> {
       console.log("no scores yet - run 'maestro eval run'");
       return 1;
     }
+    const comparisons = compareVersions(scores);
     console.log(color.bold("\neval report by playbook version\n"));
-    for (const v of compareVersions(scores)) {
+    // Held out first: it is the number that decides anything, and printing the fitted
+    // one above it invites reading the wrong row.
+    for (const half of ["val", "train"] as const) {
+      const rows = comparisons.filter((c) => c.split === half);
+      if (!rows.length) continue;
+      console.log(color.bold(`  ${half === "val" ? "held out (val)" : "training (train)"}`));
+      for (const v of rows) {
+        console.log(
+          `    ${color.cyan(v.playbookVersionId)}  runs=${v.runs}  ` +
+            `precision=${pct(v.precision)}  recall=${pct(v.recall)}  ` +
+            `false-positives=${v.falsePositives}  cost=${v.costCents.toFixed(2)}c`,
+        );
+      }
+    }
+    if (!comparisons.some((c) => c.split === "train")) {
       console.log(
-        `  ${color.cyan(v.playbookVersionId)}  runs=${v.runs}  ` +
-          `precision=${pct(v.precision)}  recall=${pct(v.recall)}  ` +
-          `false-positives=${v.falsePositives}  cost=${v.costCents.toFixed(2)}c`,
+        color.dim("\n  No training fixtures yet — every fixture is held out by default."),
       );
     }
     console.log();
@@ -126,17 +163,27 @@ export async function evaluate(argv: string[]): Promise<number> {
   if (sub !== "run") return usage();
 
   const only = arg(argv, "--fixture");
-  const fixtures = loadFixtures(dir, only);
+  const wantSplit = splitFlag(argv);
+  if (wantSplit === null) return 1;
+  const fixtures = loadFixtures(dir, only).filter((f) => !wantSplit || splitOf(f) === wantSplit);
   if (!fixtures.length) {
     // Distinguish an empty directory from a filter that matched nothing. "No fixtures
     // found in <dir>" sent somebody looking in a directory that had exactly what they
     // asked about, under a different name.
     const all = loadFixtures(dir);
+    // Three different reasons produce an empty list, and telling somebody "no fixtures
+    // found in <dir>" while that directory holds exactly what they asked about — under a
+    // different name, or in the other half — is the defect this message already exists
+    // to avoid. The split filter had to be added to it rather than around it.
     console.error(
-      only && all.length
-        ? `no fixture named '${only}'. There ${all.length === 1 ? "is" : "are"} ${all.length}: ` +
+      !all.length
+        ? `no fixtures found in ${dir}`
+        : only
+          ? `no fixture named '${only}'. There ${all.length === 1 ? "is" : "are"} ${all.length}: ` +
             all.map((f) => f.name).join(", ")
-        : `no fixtures found in ${dir}`,
+          : `no fixtures in the '${wantSplit}' split. ` +
+            `${all.filter((f) => splitOf(f) === "val").length} held out, ` +
+            `${all.filter((f) => splitOf(f) === "train").length} training.`,
     );
     return 1;
   }
@@ -206,6 +253,23 @@ export async function evaluate(argv: string[]): Promise<number> {
         ]).catch(() => ({ stdout: "" }));
         const changedFiles = nameOnly.stdout.split("\n").filter(Boolean);
 
+        // Counted, not guessed. This was `changedFiles.length * 20`, which decides the
+        // router's budget tier — so a fixture of six small files was scored at a cap
+        // production would never have given it, and eval and production quietly ran the
+        // same playbook under different budgets. `maestro review` has counted properly
+        // all along; this is the same two lines.
+        const stat = await exec("git", [
+          "-C",
+          fixture.target,
+          "diff",
+          "--shortstat",
+          `${baseRef}...HEAD`,
+        ]).catch(() => ({ stdout: "" }));
+        const changedLines = [...stat.stdout.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce(
+          (n, m) => n + Number(m[1]),
+          0,
+        );
+
         const { id: reviewId } = reviews.create({
           repoOwner: "eval",
           repoName: fixture.name,
@@ -224,7 +288,7 @@ export async function evaluate(argv: string[]): Promise<number> {
             sourcePath: fixture.target,
             baseRef,
             changedFiles,
-            changedLines: changedFiles.length * 20,
+            changedLines,
             context: { pr: { title: `eval:${fixture.name}` }, diff: { changedFiles } },
           },
         );

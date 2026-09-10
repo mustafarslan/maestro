@@ -14,6 +14,29 @@ import type { ReviewOutcome } from "./engine.js";
  * pipelines is meaningless.
  */
 
+/**
+ * Which half of the golden set a fixture belongs to.
+ *
+ * The distinction only matters once something *fits* to these numbers — a refiner
+ * proposing persona or graph edits, say — but it has to exist before that, because a
+ * split invented after the fact is a split chosen to make a result look good.
+ */
+export type EvalSplit = "train" | "val";
+
+/**
+ * A fixture that does not say is held out.
+ *
+ * The conservative direction: a fixture silently joining the training set is a fixture
+ * whose score stops meaning anything, and nothing would say so. Held out, the worst case
+ * is that a training set is smaller than its author intended, which is visible in the
+ * report the moment they look.
+ */
+export const DEFAULT_SPLIT: EvalSplit = "val";
+
+export function splitOf(x: { split?: EvalSplit }): EvalSplit {
+  return x.split ?? DEFAULT_SPLIT;
+}
+
 export interface ExpectedFinding {
   /** Substring or /regex/ matched against the finding title and body. */
   match: string;
@@ -31,6 +54,8 @@ export interface Fixture {
   /** Local path or a pull request URL. */
   target: string;
   baseRef?: string;
+  /** Held out unless it says otherwise. See `DEFAULT_SPLIT`. */
+  split?: EvalSplit;
   expected: ExpectedFinding[];
   /** Patterns that must NOT be reported: the false-positive half of the answer key. */
   forbidden?: string[];
@@ -63,6 +88,12 @@ function locatedCorrectly(expected: ExpectedFinding, finding: Finding): boolean 
 export interface EvalScore {
   fixture: string;
   playbookVersionId?: string;
+  /**
+   * Copied from the fixture at scoring time rather than looked up later, because a
+   * fixture's split can be edited and a score is a record of a run that already
+   * happened. Absent on scores written before splits existed; readers default it.
+   */
+  split?: EvalSplit;
   /** Expected findings the run actually reported. */
   hits: { expected: string; matchedTitle: string }[];
   /** Expected findings it missed — these are the recall failures. */
@@ -138,6 +169,7 @@ export function scoreOutcome(
   return {
     fixture: fixture.name,
     playbookVersionId,
+    split: splitOf(fixture),
     hits,
     misses,
     falsePositives,
@@ -217,6 +249,14 @@ export function loadScores(dir: string): EvalScore[] {
 /** Aggregates scores per playbook version so two pipelines can be compared directly. */
 export interface VersionComparison {
   playbookVersionId: string;
+  /**
+   * Rows are per (version, split), never pooled across the two.
+   *
+   * Pooling is the failure this field exists to prevent: the number a change is *chosen*
+   * by and the number it is *judged* by have to be different numbers, or the second one
+   * measures nothing. A reader who wants one row per version can still filter.
+   */
+  split: EvalSplit;
   runs: number;
   /** Undefined when nothing was reported: precision over no predictions is not zero. */
   precision?: number;
@@ -235,14 +275,17 @@ function mean(values: (number | undefined)[]): number | undefined {
 export function compareVersions(scores: EvalScore[]): VersionComparison[] {
   const byVersion = new Map<string, EvalScore[]>();
   for (const s of scores) {
-    const key = s.playbookVersionId ?? "unknown";
+    // A tab separates the two halves because neither an id nor a split can contain one,
+    // and a delimiter that either could contain silently merges two groups.
+    const key = `${s.playbookVersionId ?? "unknown"}\t${splitOf(s)}`;
     byVersion.set(key, [...(byVersion.get(key) ?? []), s]);
   }
 
   return (
     [...byVersion.entries()]
-      .map(([playbookVersionId, runs]) => ({
-        playbookVersionId,
+      .map(([key, runs]) => ({
+        playbookVersionId: key.split("\t")[0] as string,
+        split: key.split("\t")[1] as EvalSplit,
         runs: runs.length,
         // Averaged over the runs that HAVE a ratio. Folding an undefined in as zero drags
         // a version's score down for fixtures that never asked the question.
@@ -267,6 +310,8 @@ export function compareVersions(scores: EvalScore[]): VersionComparison[] {
  */
 export interface FixtureDelta {
   fixture: string;
+  /** The fixture's split, so a reader can tell a held-out gain from a fitted one. */
+  split: EvalSplit;
   from: string;
   to: string;
   /** Expected findings the newer version caught and the older one missed. */
@@ -312,6 +357,7 @@ export function fixtureDeltas(scores: EvalScore[]): FixtureDelta[] {
 
     deltas.push({
       fixture,
+      split: splitOf(to),
       from: from.playbookVersionId,
       to: to.playbookVersionId,
       gained: [...after].filter((h) => !before.has(h)),

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewOutcome } from "./engine.js";
-import { compareVersions, type Fixture, scoreOutcome } from "./eval.js";
+import {
+  compareVersions,
+  type EvalScore,
+  type Fixture,
+  fixtureDeltas,
+  scoreOutcome,
+  splitOf,
+} from "./eval.js";
 import type { TriagedFinding } from "./triage.js";
 
 const finding = (over: Partial<TriagedFinding> = {}): TriagedFinding => ({
@@ -197,5 +204,58 @@ describe("ratios that cannot be measured", () => {
 
     const [comparison] = compareVersions([withRatio, withoutRatio]);
     expect(comparison?.recall).toBe(1);
+  });
+});
+
+describe("the train/val split", () => {
+  it("holds a fixture out unless it says otherwise", () => {
+    // The conservative direction. A fixture that quietly joins the training set is a
+    // fixture whose score stops meaning anything, and nothing would say so.
+    expect(splitOf({})).toBe("val");
+    expect(splitOf({ split: "train" })).toBe("train");
+    expect(scoreOutcome(fixture, outcome([finding()]), "pv_1").split).toBe("val");
+    expect(scoreOutcome({ ...fixture, split: "train" }, outcome([]), "pv_1").split).toBe("train");
+  });
+
+  it("reports the two halves as separate rows rather than pooling them", () => {
+    // This is the whole point of the field, and the only thing that makes it load-bearing:
+    // the number a change is chosen by and the number it is judged by must not be the
+    // same number. Pooling would report one row here, averaging 100% into 0%.
+    const scores = [
+      scoreOutcome({ ...fixture, name: "fitted", split: "train" }, outcome([finding()]), "pv_1"),
+      scoreOutcome({ ...fixture, name: "heldout", split: "val" }, outcome([]), "pv_1"),
+    ];
+
+    const rows = compareVersions(scores);
+    expect(rows).toHaveLength(2);
+
+    const val = rows.find((r) => r.split === "val");
+    const train = rows.find((r) => r.split === "train");
+    expect(train?.recall).toBe(1);
+    expect(val?.recall).toBe(0);
+    // Both halves belong to the same version; only the split separates them.
+    expect(new Set(rows.map((r) => r.playbookVersionId))).toEqual(new Set(["pv_1"]));
+  });
+
+  it("defaults a score written before splits existed rather than dropping it", () => {
+    // Scores are loose JSON on disk and older ones have no `split`. Grouping them under
+    // `undefined` would quietly split one version's history in two.
+    const legacy = scoreOutcome(fixture, outcome([finding()]), "pv_1");
+    delete (legacy as Partial<EvalScore>).split;
+
+    const rows = compareVersions([legacy]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.split).toBe("val");
+  });
+
+  it("labels a delta with the split it came from", () => {
+    // A gain on the training half and a gain on the held-out half are different claims,
+    // and a delta that does not say which is being read as the stronger one.
+    const older = scoreOutcome({ ...fixture, split: "val" }, outcome([]), "pv_1");
+    const newer = scoreOutcome({ ...fixture, split: "val" }, outcome([finding()]), "pv_2");
+
+    const [delta] = fixtureDeltas([older, newer]);
+    expect(delta?.split).toBe("val");
+    expect(delta?.gained).toEqual(["client-supplied userId"]);
   });
 });

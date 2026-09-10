@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -321,11 +324,24 @@ describe("the endpoints the Studio and Quality views need", () => {
     // could reach it, so "the UI shows a version-versus-version comparison" was true of
     // neither surface. An install with no fixtures answers with empty lists rather than
     // an error, because that is the ordinary state of a fresh one.
-    const res = await fetch(`${base}/api/eval`, { headers: auth });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { scores: unknown[]; comparisons: unknown[] };
-    expect(body.scores).toEqual([]);
-    expect(body.comparisons).toEqual([]);
+    //
+    // MAESTRO_HOME is pointed at an empty directory to *make* that the state. The
+    // endpoint reads scores from the real home, so this assertion held only on a machine
+    // where nobody had ever run `maestro eval` — it passed for two hundred commits and
+    // failed the first time the golden set was actually used. A test whose subject is
+    // "a fresh install" must build one rather than hope it is running on one.
+    const home = process.env.MAESTRO_HOME;
+    process.env.MAESTRO_HOME = mkdtempSync(join(tmpdir(), "maestro-eval-empty-"));
+    try {
+      const res = await fetch(`${base}/api/eval`, { headers: auth });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { scores: unknown[]; comparisons: unknown[] };
+      expect(body.scores).toEqual([]);
+      expect(body.comparisons).toEqual([]);
+    } finally {
+      if (home === undefined) delete process.env.MAESTRO_HOME;
+      else process.env.MAESTRO_HOME = home;
+    }
   });
 
   it("refuses a connection test with no model rather than guessing one", async () => {

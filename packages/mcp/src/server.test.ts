@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
@@ -163,8 +164,19 @@ describe("run_eval", () => {
   it("says what to do instead of returning an empty report", async () => {
     // An empty array reads like "your playbook scores zero"; it actually means no
     // fixtures have been run.
-    const client = await connect();
-    const res = await call(client, "run_eval", {});
+    // MAESTRO_HOME is pointed at an empty directory so "no fixtures have been run" is
+    // built rather than assumed. `run_eval` reads scores from the real home, so this
+    // passed only on a machine where the golden set had never been used.
+    const home = process.env.MAESTRO_HOME;
+    process.env.MAESTRO_HOME = mkdtempSync(join(tmpdir(), "maestro-eval-empty-"));
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      const client = await connect();
+      res = await call(client, "run_eval", {});
+    } finally {
+      if (home === undefined) delete process.env.MAESTRO_HOME;
+      else process.env.MAESTRO_HOME = home;
+    }
     expect(res.scores).toEqual([]);
     // Against the CLI's own command list rather than against a spelling written here.
     // This assertion used to read /maestro evaluate/ — the command is `maestro eval`,

@@ -206,6 +206,40 @@ would hand whoever opened it a direct write into that prompt. Those values arriv
 nonce-delimited untrusted-content block the user prompt uses, so a description reading "ignore
 previous instructions" is presented as data to review.
 
+## The golden set
+
+`maestro eval` scores a run against a repository state whose answer key is known, which is
+what turns "this persona feels better" into a number. Fixtures live in
+`~/.maestro/fixtures/*.json`, scores in `~/.maestro/eval-scores/`, and every score records
+the playbook version that produced it, so two pipelines can be compared rather than
+remembered.
+
+Every fixture belongs to one of two halves:
+
+```
+maestro eval add my-case ./repo --split train    # a case a change may be tuned against
+maestro eval add my-case ./repo                  # held out; this is the default
+maestro eval run --split val                     # score only the held-out half
+maestro eval report                              # both halves, reported separately
+```
+
+**A fixture with no stated split is held out.** The conservative direction: a fixture that
+silently joins the training set is a fixture whose score stops meaning anything, and nothing
+would say so. The report never pools the two — the number a change is chosen by and the
+number it is judged by have to be different numbers, or the second one measures nothing.
+
+Fixtures are built by `scripts/make-eval-fixture.sh <name> <fix-commit> <path>...`, which
+takes a commit that fixed a real defect and produces a two-commit repository whose base is
+that commit's tree and whose head is the same tree with the fix reverted. The diff under
+review is then the introduction of a defect this project actually shipped, in the code that
+shipped it. Tests, docs and the fix's own explanatory comments are left out: a diff that
+deletes the test — or the paragraph — naming the defect measures reading the answer key
+rather than deriving it.
+
+The false-positive half of an answer key (`forbidden`) is written from what real runs
+report, not guessed at in advance. A forbidden pattern invented up front scores an agent
+against a prediction about its wording.
+
 ## Spend caps
 
 A router tier caps one review and a model binding caps one agent. Neither can see that a
