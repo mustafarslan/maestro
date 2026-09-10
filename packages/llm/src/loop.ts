@@ -134,6 +134,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   let totalCost = 0;
   let finalText = "";
   let askedToSubmit = false;
+  /** The synthetic turn carrying the previous step's guidance, so the next one can replace it. */
+  let lastGuidance: Message | undefined;
 
   const stop = (stopKind: StopKind, terminalInput?: unknown): LoopResult => ({
     steps,
@@ -255,7 +257,35 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       );
     }
 
-    if (parts.length) messages.push({ role: "user", content: parts.join("\n\n") });
+    // Guidance supersedes rather than accumulates.
+    //
+    // `trimHistory` drops assistant/tool *pairs* and cannot touch a synthetic user turn,
+    // so these stayed for the rest of the run: by step twenty the prompt carried twenty
+    // stacked neighbourhoods, which between them are most of the graph, each describing a
+    // step the agent finished long ago. That is not a size problem, it is the wrong
+    // experiment — it reassembles the whole-graph configuration whose own ablation is the
+    // reason to localize at all (54.48 on ALFWorld against 72.58 for no graph). Guidance
+    // is meant to be what to do *now*.
+    //
+    // Removed by identity rather than by index, because `trimHistory` splices the array
+    // between iterations and a remembered position would point at something else. The
+    // wrap-up nudge goes with it and is re-emitted below for as long as its condition
+    // holds, so nothing is lost that is still true.
+    //
+    // A step that produces no guidance leaves the previous one standing rather than
+    // clearing it: "nothing new to say" is not "forget what I said". And the opening
+    // guidance, which has no turn of its own — it goes into the task prompt, because at
+    // step zero there is nothing to append to — is never superseded, so a long run still
+    // carries what to do first. That asymmetry is the paper's own shape, not an oversight.
+    if (parts.length) {
+      if (guidance && lastGuidance) {
+        const at = messages.indexOf(lastGuidance);
+        if (at !== -1) messages.splice(at, 1);
+      }
+      const turn: Message = { role: "user", content: parts.join("\n\n") };
+      messages.push(turn);
+      if (guidance) lastGuidance = turn;
+    }
 
     // Copied, not shared. `trimHistory`'s last resort truncates oversized tool outputs
     // in place on the objects inside `messages` — and those were the very same objects,

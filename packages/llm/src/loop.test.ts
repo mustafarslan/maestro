@@ -546,6 +546,42 @@ describe("per-step guidance", () => {
     });
   });
 
+  it("replaces the previous step's guidance instead of stacking it", async () => {
+    // `trimHistory` drops assistant/tool pairs and can never touch a synthetic user turn,
+    // so these used to stay for the rest of the run: twenty steps meant twenty stacked
+    // neighbourhoods, which between them are most of the graph — the whole-graph
+    // configuration whose ablation is the entire reason to localize. Guidance is what to
+    // do now, so exactly one of them is in the conversation at a time.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "echo", input: { value: "b" } }] },
+      { toolCalls: [{ id: "3", name: "echo", input: { value: "c" } }] },
+      { toolCalls: [{ id: "4", name: "submit", input: { answer: "ok" } }] },
+    ]);
+
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 10, costCapCents: 100 },
+      guidance: (step) => `GUIDE-${step.index}`,
+    });
+
+    const carrying = result.messages.filter(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.includes("GUIDE-"),
+    );
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0]?.role === "user" && carrying[0].content).toContain("GUIDE-2");
+
+    // And the last request really sent only the newest one: the point is what the model
+    // reads, not what the array happens to hold.
+    const last = t.requests.at(-1);
+    const wire = JSON.stringify(last?.body.messages ?? []);
+    expect(wire).toContain("GUIDE-2");
+    expect(wire).not.toContain("GUIDE-0");
+    expect(wire).not.toContain("GUIDE-1");
+  });
+
   it("merges into the wrap-up turn instead of appending a second user message", async () => {
     // Asserted on the loop's OWN message list, not on the request body: the Anthropic
     // provider coalesces a tool-result message with the text that follows it, so the wire
