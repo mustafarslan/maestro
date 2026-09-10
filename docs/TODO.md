@@ -97,7 +97,11 @@ Everything else is mechanical: create the network beside the environment, start 
 
 ## Other
 
-- **A live hosted-provider call has never been made.** Every model call in this project used
-  Ollama. `maestro llm test --all` closes it in about a minute once a key is available.
-- **The load scenario is simulated.** Forty agent tasks run through the real scheduler; no
-  run has started forty real containers.
+- ~~**A live hosted-provider call has never been made.**~~ Done: the conformance suite passes
+  against `glm-5.3:cloud`, `deepseek-v4-pro:cloud` and `kimi-k3:cloud` — completion, tool call,
+  multi-turn loop with a terminal tool, usage accounting and error mapping. The `anthropic` and
+  `google` adapters are verified as far as a refusal by `scripts/live-provider-check.mjs`; only
+  their happy path still wants a key.
+- ~~**The load scenario is simulated.**~~ Done: `scripts/load-check.mjs` runs 30 reviews across
+  3 repositories against real Docker, and `scripts/crash-recovery-check.mjs` covers the kill and
+  restart half.

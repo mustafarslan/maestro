@@ -9,7 +9,7 @@ import {
   setInstallationId,
   storedGitHubApp,
 } from "@maestro/integrations";
-import { arg, has, rejectUnknownFlags } from "../args.js";
+import { arg, has, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -85,7 +85,7 @@ ${color.bold("maestro github-app")} <subcommand>
 `);
     // Asked for, or got wrong: the same text, two different exit statuses. This command
     // had no `--help` at all, so asking for help was an unknown subcommand.
-    return sub === "help" || sub === "--help" || sub === "-h" ? 0 : 1;
+    return wantsHelp(argv) ? 0 : 1;
   }
 
   if (storedGitHubApp() && !has(argv, "--force")) {

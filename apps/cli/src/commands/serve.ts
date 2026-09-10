@@ -1,7 +1,7 @@
 import { openStore } from "@maestro/core";
 import { storedGitHubApp } from "@maestro/integrations";
 import { startDaemon } from "@maestro/server";
-import { arg, numberArg, rejectUnknownFlags } from "../args.js";
+import { arg, numberArg, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -33,7 +33,7 @@ export async function serve(argv: string[]): Promise<number> {
     "--webhook-secret",
     "--workers",
   ]);
-  if (argv.includes("--help")) {
+  if (wantsHelp(argv)) {
     console.log(`
 ${color.bold("maestro serve")} [options]
 

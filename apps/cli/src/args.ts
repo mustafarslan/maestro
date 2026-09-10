@@ -106,3 +106,21 @@ function editDistance(a: string, b: string): number {
   }
   return (rows[a.length] as number[])[b.length] as number;
 }
+
+/**
+ * Whether the arguments are a request for help.
+ *
+ * One spelling of the question, because there were several and they disagreed.
+ * `rejectUnknownFlags` lists `-h` among the options it accepts — so `-h` passes the
+ * guard — while `reap` and `serve` tested only for `--help`. `maestro reap -h` therefore
+ * ran the destructive sweep, and the error message had promised the flag was understood.
+ * Reported by Maestro reviewing its own commit, and confirmed: it swept, and closed six
+ * environment rows on the way.
+ *
+ * A false guarantee is worse than a missing one, and this is the second time in a day
+ * that `rejectUnknownFlags` has produced one by accepting a spelling the command behind
+ * it ignores.
+ */
+export function wantsHelp(argv: string[]): boolean {
+  return argv.some((a) => a === "--help" || a === "-h" || a === "help");
+}

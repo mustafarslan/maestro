@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { openStore, ReviewStore } from "@maestro/core";
 import { NODE_SPECS, PlaybookStore, parseYaml, safeParsePlaybook, toYaml } from "@maestro/playbook";
-import { arg, rejectUnknownFlags } from "../args.js";
+import { arg, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -34,7 +34,7 @@ ${color.bold("maestro playbook")} <subcommand>
 export async function playbook(argv: string[]): Promise<number> {
   rejectUnknownFlags(argv, ["--version", "--activate", "--default"]);
   const sub = argv[0];
-  if (sub === "help" || sub === "--help" || sub === "-h") return usage(0);
+  if (wantsHelp(argv)) return usage(0);
   if (!sub) return usage();
 
   const db = await openStore();

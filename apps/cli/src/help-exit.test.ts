@@ -41,3 +41,39 @@ describe("--help exits 0, a mistake exits 1", () => {
     });
   }
 });
+
+describe("-h means help everywhere, including where it did not", () => {
+  /**
+   * `rejectUnknownFlags` lists `-h` among the options it accepts, so `-h` passed the
+   * guard — while `reap` and `serve` tested only for `--help`. `maestro reap -h`
+   * therefore ran the destructive sweep, and the error message had promised the flag was
+   * understood. Confirmed by running it: it swept, and closed six environment rows.
+   *
+   * Reported by Maestro reviewing its own commit.
+   */
+  let log: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    log = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => log.mockRestore());
+
+  it("reap -h prints help instead of sweeping", async () => {
+    // `reap` reaches Docker if it does not return early, so this asserting 0 is also
+    // asserting it never got there.
+    expect(await reap(["-h"])).toBe(0);
+    expect(log.mock.calls.flat().join("\n")).toContain("maestro reap");
+  });
+
+  for (const [name, fn] of Object.entries({ playbook, llm, evaluate, githubApp })) {
+    it(`${name} -h`, async () => {
+      expect(await fn(["-h"])).toBe(0);
+    });
+  }
+
+  it("finds -h after a subcommand, not only as the first argument", async () => {
+    // `maestro llm test -h` asks for help about `test`. The dispatchers only looked at
+    // argv[0], so this ran the subcommand.
+    expect(await llm(["test", "-h"])).toBe(0);
+    expect(await playbook(["export", "--help"])).toBe(0);
+  });
+});
