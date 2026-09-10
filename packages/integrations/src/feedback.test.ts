@@ -1,9 +1,10 @@
-import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { newId, openStore, ReviewStore, type SqlDatabase, unresolvedFindings } from "@maestro/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   agentQuality,
   ingestLineChanges,
   ingestReaction,
+  lineChangedByAgent,
   pollCommentReactions,
   signalFromReaction,
 } from "./feedback.js";
@@ -246,7 +247,12 @@ describe("the line-change signal compares the right two things", () => {
     expect(statusOf(id)).toBe("posted");
   });
 
-  it("settles a finding whose file was edited after the review", async () => {
+  it("records the signal for a finding whose file was edited, without settling it", async () => {
+    // The signal is file-level: touching the file cannot mean this particular defect was
+    // addressed. It used to settle the finding as `accepted`, which is outside
+    // STANDING_STATUSES — so one push dropped every finding in that file out of the
+    // standing set and carry-forward returned nothing on the next round. Measured on a
+    // live pull request: four findings, one push, four duplicate inline comments.
     const id = findingOn("src/fixed.ts");
     const settled = await ingestLineChanges(
       db,
@@ -255,6 +261,33 @@ describe("the line-change signal compares the right two things", () => {
       reviewId,
     );
     expect(settled).toBe(1);
+    expect(statusOf(id)).toBe("posted");
+
+    // The evidence is kept; it is reported rather than treated as a verdict.
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM feedback WHERE finding_id=? AND signal='line_changed'")
+        .get<{ n: number }>(id)?.n,
+    ).toBe(1);
+    expect(lineChangedByAgent(db).reduce((n, r) => n + r.n, 0)).toBe(1);
+  });
+
+  it("keeps such a finding available to carry forward", async () => {
+    // The whole point: the next review must still see it. `unresolvedFindings` selects
+    // STANDING_STATUSES, and `accepted` is not one of them.
+    const id = findingOn("src/fixed.ts");
+    await ingestLineChanges(db, client(["src/fixed.ts"], ["src/fixed.ts"]), pr, reviewId);
+    expect(unresolvedFindings(db, reviewId).map((f) => f.file)).toContain("src/fixed.ts");
+    expect(statusOf(id)).not.toBe("accepted");
+  });
+
+  it("still settles on an explicit human verdict", async () => {
+    // A person saying so is a verdict; a file changing is not. Without this, the change
+    // above would read as "settling was removed" rather than "one weak signal stopped
+    // counting as a verdict".
+    const id = findingOn("src/judged.ts");
+    db.prepare("UPDATE findings SET posted_comment_id='9' WHERE id=?").run(id);
+    ingestReaction(db, 9, "+1", "someone");
     expect(statusOf(id)).toBe("accepted");
   });
 

@@ -311,3 +311,14 @@ describe("anchored comments on the diff", () => {
     expect(seen).toHaveLength(2);
   });
 });
+
+describe("the board follows the review", () => {
+  it("passes the engine's stage reports through to the review row", () => {
+    // The engine reports `analyzing` and `triaging`; the review row is what the board
+    // reads. Both halves are needed and the engine half is asserted in its own suite —
+    // this is the wire between them, checked the same way `cancelled` is above, because
+    // reaching it for real needs a checkout, a container and a model.
+    const source = readFileSync(join(import.meta.dirname, "review-pr.ts"), "utf8");
+    expect(source).toMatch(/onStage:\s*\(stage\)\s*=>\s*reviews\.setState\(reviewId, stage\)/);
+  });
+});

@@ -46,6 +46,21 @@ export interface ReviewRequest {
   context: PromptContext;
   envSpec?: EnvSpec;
   /**
+   * Called as the run moves between stages.
+   *
+   * `REVIEW_STATES` has declared `analyzing` and `triaging` since the first migration,
+   * `IN_FLIGHT_STATES` contains both, and one comment in `reviews.ts` describes an
+   * interrupted review sitting in `analyzing` — which could never have happened, because
+   * nothing wrote either. A review went `preparing` straight to `posting`, so the live
+   * board showed `preparing` for the whole analyze phase: 156 of 158 seconds on the first
+   * real run. Phase 5's exit criterion is that you can watch a review happen in the
+   * browser, and the stage you watched was wrong for almost all of it.
+   *
+   * The engine reports; the caller decides what to do with it, because the engine does
+   * not own the review row.
+   */
+  onStage?: (stage: "analyzing" | "triaging") => void;
+  /**
    * Set when the fork point could not be found, so `git_diff` compares two points
    * rather than the change. The findings still stand on their own, but the diff the
    * agents read includes commits this pull request did not make.
@@ -307,6 +322,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     }
 
     // ── agent nodes, in parallel, each in its own container ────────────────
+    req.onStage?.("analyzing");
     const agentNodes = byKind("agent").filter(
       (n) => n.agentId && decision.activeAgentIds.includes(n.agentId),
     );
@@ -518,6 +534,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     }
 
     // ── triage ─────────────────────────────────────────────────────────────
+    req.onStage?.("triaging");
     const triageNode = byKind("triage")[0];
     const triaged = triageNode
       ? await withFailurePolicy(

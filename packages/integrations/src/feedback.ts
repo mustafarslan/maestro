@@ -53,6 +53,24 @@ function recordFeedback(
  *
  * A single thumbs-down is enough to dismiss: the cost of keeping a rejected finding in
  * the precision numbers is higher than the cost of trusting one reviewer.
+ *
+ * `line_changed` deliberately does NOT settle a finding, though it used to.
+ *
+ * It is a FILE-level signal — `ingestLineChanges` says so in its own comment, because
+ * line-level would need the patch of every intermediate commit — so "this file was
+ * touched since the review" cannot mean "this particular defect was addressed". Letting
+ * it settle had a consequence nothing traced: `accepted` is outside `STANDING_STATUSES`,
+ * so one push touching a file dropped every finding in that file out of the standing set,
+ * and `unresolvedFindings` returned nothing on the next round. Carry-forward — a feature
+ * the plan names explicitly — was therefore dead on the commonest path there is, a pull
+ * request whose author pushes another commit to the same file.
+ *
+ * Measured on a live pull request: four findings, one push touching that file, all four
+ * marked accepted, `carried` empty, and the next review posted four duplicate inline
+ * comments beside the originals.
+ *
+ * The signal is not lost — the `feedback` row is still written, and `lineChangedByAgent`
+ * reports it. It just is not a verdict.
  */
 function settleStatus(db: SqlDatabase, findingId: string): "accepted" | "dismissed" | "open" {
   const rows = db
@@ -62,7 +80,7 @@ function settleStatus(db: SqlDatabase, findingId: string): "accepted" | "dismiss
 
   const status = rows.includes("thumbs_down")
     ? "dismissed"
-    : rows.some((s) => s === "thumbs_up" || s === "resolved" || s === "line_changed")
+    : rows.some((s) => s === "thumbs_up" || s === "resolved")
       ? "accepted"
       : "open";
 
@@ -315,4 +333,38 @@ export function agentQuality(db: SqlDatabase): AgentQuality[] {
     const settled = e.accepted + e.dismissed;
     return { ...e, acceptanceRate: settled ? e.accepted / settled : undefined };
   });
+}
+
+/**
+ * How many of each agent's findings sit on a file the author touched afterwards.
+ *
+ * The weaker half of the quality signal, kept separate from accepted/dismissed because it
+ * is weaker: it is file-level, and a developer editing a file for an unrelated reason
+ * produces the same evidence as one acting on the finding. Reported rather than folded
+ * into the acceptance rate, which is what it used to be — silently, and at the cost of
+ * carry-forward. See `settleStatus`.
+ */
+export function lineChangedByAgent(db: SqlDatabase): { agentId: string; n: number }[] {
+  const rows = db
+    .prepare(
+      `SELECT f.agent_id AS agentId, COUNT(*) AS n
+         FROM feedback fb JOIN findings f ON f.id = fb.finding_id
+        WHERE fb.signal = 'line_changed'
+        GROUP BY f.agent_id`,
+    )
+    .all<{ agentId: string | null; n: number }>();
+
+  // Split the same way `findingCountsByAgent` does: `agent_id` holds a comma-joined list
+  // whenever triage merged what several agents reported.
+  const totals = new Map<string, number>();
+  for (const row of rows) {
+    const agents = (row.agentId ?? "unknown")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+    for (const agentId of agents.length ? agents : ["unknown"]) {
+      totals.set(agentId, (totals.get(agentId) ?? 0) + row.n);
+    }
+  }
+  return [...totals].map(([agentId, n]) => ({ agentId, n })).sort((a, b) => b.n - a.n);
 }

@@ -463,3 +463,37 @@ describe("a run cut short by the context window", () => {
     expect(agents.every((n) => n.stopKind === "context-limit")).toBe(true);
   });
 });
+
+describe("the stages a review reports", () => {
+  /**
+   * `analyzing` and `triaging` were declared in the first migration, listed in
+   * `REVIEW_STATES` and `IN_FLIGHT_STATES`, and referenced by a comment describing an
+   * interrupted review "sitting in `analyzing`" — which could never have happened, because
+   * nothing wrote either. A review went `preparing` straight to `posting`, so the live
+   * board showed `preparing` for the whole analyze phase: 156 of 158 seconds on the first
+   * real run against GitHub. Phase 5's exit criterion is that you can watch a review
+   * happen in the browser, and the stage you watched was wrong for nearly all of it.
+   *
+   * Found by watching a real review rather than by reading the code.
+   */
+  it("reports analyzing before the agents and triaging before triage", async () => {
+    const stages: string[] = [];
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      { ...request(), onStage: (s) => stages.push(s) },
+    );
+    expect(outcome.state).toBe("done");
+    expect(stages).toEqual(["analyzing", "triaging"]);
+  });
+
+  it("reports analyzing even when every agent fails", async () => {
+    // The stage is where the review IS, not whether it went well. A board that only
+    // advances on success leaves a failing review looking stuck in preparation.
+    const stages: string[] = [];
+    await runReview(
+      { driver: fakeDriver(), registry: new ProviderRegistry() },
+      { ...request(), onStage: (s) => stages.push(s) },
+    );
+    expect(stages[0]).toBe("analyzing");
+  });
+});

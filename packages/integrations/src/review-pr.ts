@@ -173,6 +173,11 @@ export async function reviewPullRequest(
         // point is missing, and both halves of that fallback exit 0 — so without this
         // the review would read the wrong diff and say nothing.
         diffDegraded: !checkout.mergeBase,
+        // The stages the board shows. Without this a review went `preparing` straight to
+        // `posting`, so `analyzing` and `triaging` — both declared, both in
+        // `IN_FLIGHT_STATES` — were written by nothing, and the live board reported
+        // `preparing` for the whole analyze phase.
+        onStage: (stage) => reviews.setState(reviewId, stage),
         changedFiles: pr.changedFiles,
         changedLines: pr.changedLines,
         context: {

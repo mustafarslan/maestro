@@ -91,7 +91,21 @@ export async function llm(argv: string[]): Promise<number> {
             const models = await provider.listModels();
             catalog.save(p.id, p.kind, models);
             any = true;
-            console.log(checkLine("ok", p.id, `${models.length} model(s)`));
+            // An empty catalog is not a success. Ollama serves its cloud models without
+            // listing them — `/v1/models` returns nothing while `glm-5.3:cloud` answers
+            // perfectly — so a green tick beside "0 model(s)" told somebody their
+            // provider was fine and left them with an empty dropdown in the Studio,
+            // which is the one thing the catalog exists to fill.
+            console.log(
+              models.length === 0
+                ? checkLine(
+                    "warn",
+                    p.id,
+                    "0 model(s) - this endpoint lists none. Models it serves can still be " +
+                      "bound by name in the playbook; 'maestro llm test --model <id>' checks one.",
+                  )
+                : checkLine("ok", p.id, `${models.length} model(s)`),
+            );
             for (const m of models.slice(0, 12)) {
               const caps = [
                 m.capabilities.tools ? "tools" : "",

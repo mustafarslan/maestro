@@ -26,22 +26,48 @@ The gap between those two columns is the honest summary of this project's state.
 
 What that leaves, in order of how much it would tell us:
 
-1. **A delivery sent by GitHub.** Both halves of the API are now verified live by
-   `scripts/live-github-check.mjs`: the read paths, and — with `--write` — posting a comment,
-   finding it again by its marker and editing it in place, each read back afterwards and all of
-   it removed again. Verifying the read half found a defect (116). What is left is the part
-   nothing local can stand in for: a webhook GitHub itself sends rather than one signed here, the
-   App manifest redirect, and cancel-on-push under real timing. Those need an App installed on a
-   repository and a push to it.
-2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local stand-in.
-3. **Forty real containers.** The load scenario is real concurrency over a simulated sandbox.
-4. **One inline review on a real pull request** (170). The anchor parser and the filter are
-   tested and mutation-checked, and the API shape is checked by Octokit's types, but
-   `postInlineComments` has not been sent. Unlike the comment the live check posts and then
-   deletes, review threads cannot be removed the same way — so this one leaves a mark, and
-   it should be done deliberately on a repository where that is fine.
+1. **A delivery sent by GitHub.** Everything either side of it is now verified live against
+   a real pull request — see "The live GitHub run" below — including the parts that were
+   waiting longest: inline anchored comments, cancel-on-push under real timing, and the
+   poller against a real open pull request. What is still unexercised is narrower than it
+   was: a webhook GitHub itself signs and sends, and the App manifest redirect. Both need
+   an App installed on a repository and a public URL.
+2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local
+   stand-in. Ollama Cloud served every model in the live run.
+3. **Forty real containers.** The load scenario is real concurrency over a simulated
+   sandbox; the live run exercised three concurrent agent containers, not forty.
 
 None is a missing implementation; each is a claim only the real thing can settle.
+
+## The live GitHub run
+
+Everything below happened against `mustafarslan/maestro#2`, a throwaway pull request opened
+for this and closed afterwards. It is the run the three GitHub-shaped gaps in the table
+above were waiting for.
+
+| What | Result |
+| --- | --- |
+| Poller against a real open PR | `listOpenPullRequests` returned #2 with its real head SHA; first poll produced one trigger, a second poll on the unchanged head produced none, a moved head produced exactly one, and closing it dropped the entry — tracking 0 |
+| Consolidated comment | One issue comment, 9,023 characters, with the metrics block, the commands actually run and their exit codes |
+| Inline anchored comments | Four, on real diff lines 1, 14, 21 and 29 of `examples/session-store.ts` — the feature that had been built and never sent |
+| Findings quality | Caught the planted defect (`if (s.userId = userId)`) with three agents agreeing, and three I had not planted: `Math.random()` session ids, `expiresAt` never checked, and a module nothing imports |
+| Evidence fencing | The evidence block containing a ```` ``` ```` fence was wrapped in a longer one — the markdown-injection fix, working in a real comment |
+| Declared fallback chain | `primary provider not configured, using declared fallback — requested: anthropic, using: ollama` — Phase 1's fallback resolving live, previously only unit-tested |
+| Idempotency | The daemon's poll trigger for a SHA the CLI had already reviewed enqueued a job that found the existing review and did not review it again |
+| Cancel-on-push, real timing | A push during the analyze phase produced `cancelling superseded in-flight review` one millisecond after the new trigger; the review for the stale SHA is `cancelled`, the newer one continued |
+| Teardown after cancellation | Every container belonging to the cancelled review was gone |
+| Comment updated in place | The third review edited comment `5613936499` rather than adding a second — one comment per pull request, verified across three reviews |
+| Stage reporting | Wrong, and fixed: see 191 |
+| Carry-forward | Broken, and fixed: see 192 |
+
+Three reviews ran: one from the CLI, one cancelled mid-flight by a push, one that superseded
+it. The pull request was closed and its branch deleted afterwards.
+
+**What the reviews found.** The change under review was a small session store with one
+planted defect. Maestro reported it — `revokeUser` assigning instead of comparing, three
+agents agreeing, confidence 100%, with the repository's own failing lint output quoted as
+evidence — and three more that were not planted: `Math.random()` session ids, `expiresAt`
+written and never checked, and a module nothing imports. Four findings, four real.
 
 ## Verified end to end
 
@@ -2448,6 +2474,80 @@ the server never sends fails it, and removing `live` from the server's response 
 
     This is the script every commit in this project has gone through, and it is the third
     time it has been the thing at fault rather than the thing that found one.
+
+190. **A provider that lists no models was reported as healthy.** `maestro llm models`
+    printed `✓ ollama  0 model(s)`. The models were working: `glm-5.3:cloud`,
+    `gpt-oss:120b-cloud` and `gpt-oss:20b-cloud` all answered a real request seconds
+    earlier. Ollama serves its cloud models without listing them — `/v1/models` returns an
+    empty array while the models themselves respond perfectly — so the catalog is empty and
+    nothing was wrong.
+
+    A green tick beside a zero is the problem. The plan's stated purpose for the catalog is
+    "what makes the UI's model picker a real dropdown rather than a text field", so an
+    empty catalog means an empty dropdown, and the one command that would have explained it
+    said the provider was fine.
+
+    Worse, it nearly cost this session an hour: seeing an empty model list, I concluded the
+    Ollama session had lapsed and was about to report that a live review was impossible.
+    One direct request to the endpoint said otherwise.
+
+    It now warns rather than ticks, and says the thing a person needs — a model this
+    endpoint does not list can still be bound by name in the playbook, which is exactly how
+    these three are used.
+
+191. **Two of the review's six states were written by nothing, so the board reported the
+    wrong stage for almost the whole review.** `analyzing` and `triaging` were declared in
+    the first migration, listed in `REVIEW_STATES`, listed in `IN_FLIGHT_STATES`, and
+    referenced by a comment in `reviews.ts` describing an interrupted review "sitting in
+    `analyzing`" — which could never have happened. A review went `preparing` straight to
+    `posting`.
+
+    Measured on the first real run against GitHub: 156 of 158 seconds were the analyze
+    phase, and for all of them the live board said `preparing`. Phase 5's exit criterion is
+    that you can watch a review happen in the browser; what you watched was a stage label
+    that was wrong for 99% of the duration.
+
+    The engine reports the stage now and the caller writes it, because the engine does not
+    own the review row. Asserted behaviourally — a run through the interpreter must report
+    `analyzing` then `triaging`, and must still report `analyzing` when every agent fails,
+    since the stage is where the review is rather than whether it is going well.
+
+    Worth recording how this nearly went wrong. The first guard I wrote for it walked the
+    source for each declared state and required it to appear in a file that also mentions
+    `setState`. It passed, and it passed with the fix reverted: `reviews.ts` both declares
+    the states and defines `setState`, so every state satisfied it trivially. A test that
+    proves a string exists near another string is the class this project has been
+    correcting all session, and writing one while fixing an instance of it is worth
+    admitting rather than quietly deleting.
+
+192. **One push killed carry-forward, and nothing anywhere said so.** Two pieces of the
+    design, each right on its own, disabling a third between them.
+
+    `ingestLineChanges` is file-level on purpose — its own comment explains that line-level
+    would need the patch of every intermediate commit, and that touching the file at all is
+    meaningful evidence. `settleStatus` then treated `line_changed` as grounds for
+    `accepted`. And `accepted` is outside `STANDING_STATUSES`, which is what
+    `unresolvedFindings` selects.
+
+    So one push touching a file settled every finding in that file, and the next review's
+    `carried` was empty. Carry-forward — which the plan names explicitly, and which exists
+    so a finding reported in round one does not silently vanish from round two — was dead
+    on the commonest path there is: a pull request whose author pushes another commit to
+    the same file.
+
+    Measured, not reasoned about. On the live pull request: four findings from the first
+    review, one push touching that file, all four marked `accepted`, `carried` empty, and
+    the next review posted **four duplicate inline comments** beside the originals. Eight
+    threads where there should have been four.
+
+    A file-level signal cannot mean "this particular defect was addressed", so it no longer
+    settles anything. The evidence is kept — the `feedback` row is still written, and
+    `lineChangedByAgent` reports it — it is simply not a verdict. Explicit human verdicts,
+    a thumbs-up or a resolved thread, still settle.
+
+    The test that encoded the old behaviour asserted `accepted` and had to be rewritten. It
+    was not wrong about what the code did; it was wrong that the code should do it, which
+    is the harder kind of wrong test to notice.
 
 ### Found by mechanical sweep, still open
 
