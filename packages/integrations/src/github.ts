@@ -357,9 +357,33 @@ export class GitHubClient {
     }
   }
 
-  /** Short-lived token for cloning. Never enters a container. */
+  /**
+   * Short-lived token for cloning. Never enters a container.
+   *
+   * The argument is not optional, and leaving it out broke the entire GitHub App path.
+   * `octokit.auth()` with no options works for a personal token — the token strategy
+   * simply hands back what it was given — but `@octokit/auth-app` reads `options.type`
+   * and throws `Cannot read properties of undefined (reading 'type')` on the way past.
+   * So every App-authenticated review failed before it cloned anything, with an error
+   * naming neither GitHub nor authentication.
+   *
+   * It survived because every live test until now used `GITHUB_TOKEN`. The App is the
+   * documented, preferred credential and the one the manifest flow creates, and it was
+   * the branch nothing had ever executed.
+   */
   async cloneToken(): Promise<string | undefined> {
-    const auth = (await this.octokit.auth()) as { token?: string };
+    if (this.authKind === "token") {
+      const auth = (await this.octokit.auth()) as { token?: string };
+      return auth?.token;
+    }
+    // An App with no installation cannot mint an installation token at all. Returning
+    // nothing lets the clone fail on a missing credential, which is the truth, rather
+    // than throwing from inside a library on the way to finding that out.
+    if (!this.installationId) return undefined;
+    const auth = (await this.octokit.auth({
+      type: "installation",
+      installationId: this.installationId,
+    })) as { token?: string };
     return auth?.token;
   }
 

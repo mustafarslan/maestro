@@ -3003,6 +3003,38 @@ the server never sends fails it, and removing `live` from the server's response 
     Mutation-checked: restoring the browser URL fails the test that asserts which endpoint is
     used — a test that only checked "a binary arrived" would have passed the broken version.
 
+217. **Every GitHub App review failed before it cloned anything.** The preferred credential —
+    the one `maestro github-app create` exists to produce, the one the documentation
+    recommends over a personal token — could not review a pull request at all.
+
+    `cloneToken()` called `this.octokit.auth()` with no argument. The token strategy hands
+    back what it was given whatever you pass it, so on a PAT the call was correct and
+    exercised constantly. `@octokit/auth-app` reads `options.type`, so on an App it threw
+    `Cannot read properties of undefined (reading 'type')` — an error naming neither GitHub
+    nor authentication, from inside a library, two frames below anything in this repository.
+
+    It survived because every live GitHub test until now used `GITHUB_TOKEN`. The App path
+    had been written, documented, given its own manifest flow, its own storage, its own
+    `doctor` check and its own tests, and never once run end to end. It took installing a real
+    App on a real repository and commenting `@maestro review` to execute one line.
+
+    Found the same way the last three were: by doing the thing for real rather than testing
+    around it. A branch nothing runs is a branch nobody has checked, and "it works" reliably
+    means "the path I use works".
+
+    Fixed by asking for the installation token by type, and by returning nothing for an App
+    with no installation — a state the manifest flow leaves you in by design — so the clone
+    fails on a missing credential rather than throwing from a library on the way to finding
+    out. Mutation-checked: restoring the argument-less call fails two of the three new tests.
+
+218. **The webhook path itself worked first time.** Worth recording because so little else
+    did: `@maestro review` on a real pull request reached a real daemon through a Cloudflare
+    tunnel, and the log line reads
+    `key: mustafarslan/maestro#4@comment-5617612399, reason: requested by a maestro review
+    comment, enqueued: true`. Signature verification, the `issue_comment` shape, the
+    `issue.pull_request` discrimination and comment-keyed idempotency all behaved as written.
+    An unsigned POST through the same tunnel got 401.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

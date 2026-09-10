@@ -263,7 +263,8 @@ export async function doctor(): Promise<number> {
       label: "github",
       detail:
         `app ${storedApp.slug ?? storedApp.appId} is created but not installed anywhere - ` +
-        "install it, then run 'maestro github-app installed <installation-id>'",
+        `install it at https://github.com/apps/${storedApp.slug ?? ""}/installations/new, ` +
+        "then run 'maestro github-app installed'",
     });
   } else {
     // Bounded like every other external call here: doctor must not hang on a wedged
