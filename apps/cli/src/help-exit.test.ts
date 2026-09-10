@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { egressProxy } from "./commands/egress-proxy.js";
 import { evaluate } from "./commands/evaluate.js";
 import { githubApp } from "./commands/github-app.js";
 import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
 import { reap } from "./commands/reap.js";
+import { review } from "./commands/review.js";
 
 /**
  * Asking for help is not an error.
@@ -21,7 +23,11 @@ describe("--help exits 0, a mistake exits 1", () => {
   });
   afterEach(() => log.mockRestore());
 
-  const commands = { playbook, llm, evaluate, reap, githubApp };
+  // `review` and `egressProxy` join late: both printed help and exited 1, because their
+  // usage() doubled as the "you got the arguments wrong" path. Same shape as finding 201,
+  // one level down — the guard was fixed at six call sites and these two were not among
+  // them, because neither tested `--help` at all.
+  const commands = { playbook, llm, evaluate, reap, githubApp, review, egressProxy };
 
   for (const [name, fn] of Object.entries(commands)) {
     it(`${name} --help`, async () => {
@@ -75,5 +81,38 @@ describe("-h means help everywhere, including where it did not", () => {
     // argv[0], so this ran the subcommand.
     expect(await llm(["test", "-h"])).toBe(0);
     expect(await playbook(["export", "--help"])).toBe(0);
+  });
+});
+
+/**
+ * The proxy subcommand's arguments.
+ *
+ * It is the entrypoint of a container nobody watches, so a bad argument must fail loudly
+ * at start rather than produce a proxy that behaves plausibly and wrongly. An empty
+ * allowlist is the dangerous one: it refuses everything, which looks exactly like
+ * enforcement working while actually meaning the daemon passed nothing.
+ */
+describe("maestro egress-proxy arguments", () => {
+  let err: ReturnType<typeof vi.spyOn>;
+  let out: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    err = vi.spyOn(console, "error").mockImplementation(() => {});
+    out = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    err.mockRestore();
+    out.mockRestore();
+  });
+
+  it("refuses to start with no allowlist rather than refusing every host", async () => {
+    expect(await egressProxy(["--port", "8080"])).toBe(2);
+  });
+
+  it("refuses an allowlist that is present but empty", async () => {
+    expect(await egressProxy(["--allowlist", "  ", "--port", "8080"])).toBe(2);
+  });
+
+  it("refuses an allowlist of only separators", async () => {
+    expect(await egressProxy(["--allowlist", ",,,", "--port", "8080"])).toBe(2);
   });
 });

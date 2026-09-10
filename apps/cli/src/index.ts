@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { logger } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
+import { egressProxy } from "./commands/egress-proxy.js";
 import { evaluate } from "./commands/evaluate.js";
 import { githubApp } from "./commands/github-app.js";
 import { init } from "./commands/init.js";
@@ -33,6 +34,7 @@ ${color.bold("COMMANDS")}
   mcp                  stdio MCP server for Claude Code
   eval <sub>           score reviews against golden-PR fixtures
   reap                 sweep leaked containers and snapshot images
+  egress-proxy         run the prepare-phase allowlist proxy (used inside a container)
   prune [--days <n>]   delete the step trace of reviews older than n days (default 30)
   version              print the version
 
@@ -55,6 +57,8 @@ async function main(): Promise<number> {
     case "-v":
       console.log(VERSION);
       return 0;
+    case "egress-proxy":
+      return egressProxy(rest);
     case "init":
       return init();
     case "doctor":

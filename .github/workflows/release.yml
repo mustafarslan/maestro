@@ -1,8 +1,9 @@
 name: Release
 
+# Manual only. Pushing a tag used to fire this, which is the wrong default here: this
+# account has no Actions credits, so a tagged release failed in CI rather than building.
+# Releases are cut locally with `scripts/release.sh`; this stays for whoever has credits.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 permissions:

@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm -r --filter './packages/**' run build",
     "build:binary": "pnpm run build:ui && tsc -b && bun build --compile --outfile dist/maestro apps/cli/dist/index.js",
+    "build:proxy-binary": "node scripts/build-proxy-binary.mjs",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json && tsc -p packages/ui/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",

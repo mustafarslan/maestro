@@ -13,12 +13,19 @@ import {
 import { ProviderConfigStore, type ProviderRegistry } from "@maestro/llm";
 import { type PlaybookDocument, PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
-import { has, rejectUnknownFlags } from "../args.js";
+import { has, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { color } from "../ui.js";
 
 const exec = promisify(execFile);
 
-function usage(): number {
+/**
+ * Printing and exiting are separate here for the reason finding 201 records: `usage()` is
+ * reached both because somebody asked for help and because somebody got the command
+ * wrong, and those are not the same exit code. `review` was the last command still
+ * conflating them — it exited 1 on `--help` while the six fixed alongside it exited 0 —
+ * because its missing-target path and its help path were the same return.
+ */
+function printUsage(): void {
   console.log(`
 ${color.bold("maestro review")} <path | pr-url | owner/repo#123> [options]
 
@@ -37,6 +44,10 @@ Needs Docker and at least one working provider. The default playbook binds its
 agents to Ollama Cloud models, which want ${color.bold("ollama signin")} once; ${color.bold("maestro doctor")}
 reports what is missing and ${color.bold("maestro llm test --all")} proves a model answers.
 `);
+}
+
+function usage(): number {
+  printUsage();
   return 1;
 }
 
@@ -141,6 +152,10 @@ export async function review(argv: string[]): Promise<number> {
     "--force",
   ]);
   const target = argv[0];
+  if (wantsHelp(argv)) {
+    printUsage();
+    return 0;
+  }
   if (!target || target.startsWith("--")) return usage();
 
   const prRef = parsePullRequestRef(target);

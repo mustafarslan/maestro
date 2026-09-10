@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect as netConnect } from "node:net";
@@ -92,24 +92,20 @@ export function runningInContainer(): boolean {
   }
 }
 
-export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy> {
-  const log: EgressProxy["log"] = [];
-  const record = (host: string, allowed: boolean) => {
-    const at = new Date().toISOString();
-    // Bounded by the number of distinct hosts, which is small, rather than by the number
-    // of requests, which is one per package.
-    const seen = log.find((e) => e.host === host && e.allowed === allowed);
-    if (seen) {
-      seen.count++;
-      seen.lastAt = at;
-    } else {
-      log.push({ host, allowed, count: 1, firstAt: at, lastAt: at });
-    }
-    // Still one line per blocked ATTEMPT: a refusal is worth seeing every time it happens,
-    // and there are few of them by construction.
-    if (!allowed) logger.warn({ host }, "egress blocked");
-  };
-
+/**
+ * The allowlist server itself, with no opinion about where it runs.
+ *
+ * Two callers now: `startEgressProxy`, which binds it inside the daemon and is the
+ * advisory posture; and `serveEgressProxy`, which is what runs inside the proxy
+ * container when the allowlist is enforced. They must apply the identical rule — an
+ * enforced proxy that allowed a host the advisory one refused, or the reverse, would
+ * make the enforcement mode change what a review is allowed to fetch. One function, so
+ * that cannot drift.
+ */
+function createEgressServer(
+  allowlist: string[],
+  record: (host: string, allowed: boolean) => void,
+): Server {
   const server: Server = createServer((req, res) => {
     // Plain HTTP through the proxy: the absolute-form request URI carries the host.
     let target: URL;
@@ -163,6 +159,43 @@ export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy
     upstream.on("error", () => clientSocket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"));
     clientSocket.on("error", () => upstream.destroy());
   });
+
+  return server;
+}
+
+/**
+ * Aggregates hosts asked for, allowed or not.
+ *
+ * Shared by both modes for the same reason the server is: the review comment renders
+ * this, and a count that meant different things in the two postures would be worse than
+ * no count.
+ */
+function createRecorder(log: EgressProxy["log"]): (host: string, allowed: boolean) => void {
+  return (rawHost, allowed) => {
+    // CONNECT carries "host:443" and a plain GET carries "host", so the same registry
+    // appeared as two rows and the review comment listed it twice. The allowlist already
+    // matches on the bare host; the log now agrees with it. A non-default port is kept,
+    // because "something dialled :8080" is worth seeing.
+    const host = rawHost.replace(/:(80|443)$/, "");
+    const at = new Date().toISOString();
+    // Bounded by the number of distinct hosts, which is small, rather than by the number
+    // of requests, which is one per package.
+    const seen = log.find((e) => e.host === host && e.allowed === allowed);
+    if (seen) {
+      seen.count++;
+      seen.lastAt = at;
+    } else {
+      log.push({ host, allowed, count: 1, firstAt: at, lastAt: at });
+    }
+    // Still one line per blocked ATTEMPT: a refusal is worth seeing every time it happens,
+    // and there are few of them by construction.
+    if (!allowed) logger.warn({ host }, "egress blocked");
+  };
+}
+
+export async function startEgressProxy(allowlist: string[]): Promise<EgressProxy> {
+  const log: EgressProxy["log"] = [];
+  const server = createEgressServer(allowlist, createRecorder(log));
 
   const host = bindAddress();
   const port = await listenOnAvailablePort(server, host);
@@ -229,4 +262,104 @@ function portCandidates(): number[] {
     throw new Error(`MAESTRO_PROXY_PORT_RANGE "${raw}" is not a valid port range`);
   }
   return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
+
+/**
+ * Where the containerised proxy leaves its state for the daemon to collect.
+ *
+ * A file rather than stdout. The obvious design was to print the log and read it back
+ * with `docker logs`, but this process also writes pino lines to stdout — one per
+ * blocked attempt — so the two would interleave and the parse would depend on nothing
+ * else ever logging. A file has no such coupling, `docker cp` reads it out of a
+ * container that has already exited, and a hard kill still leaves the last snapshot.
+ */
+export const PROXY_LOG_PATH = "/tmp/egress.json";
+
+/**
+ * Written once the socket is accepting connections, and polled by the daemon.
+ *
+ * Without it the prepare container can start first and a package manager gets
+ * ECONNREFUSED, which most of them do not retry — so the review fails with a network
+ * error that looks like the allowlist rejecting something it never saw.
+ */
+export const PROXY_READY_PATH = "/tmp/ready";
+
+/**
+ * Runs the proxy as the container's main process.
+ *
+ * Binds every interface deliberately, which is the opposite of `bindAddress()`'s
+ * reasoning and correct here: this process is alone in a container attached to one
+ * `--internal` network, so "every interface" is that network and nothing else. The
+ * isolation boundary is the network, not the bind address.
+ *
+ * Resolves when the process has been asked to stop, having written a final snapshot.
+ */
+export async function serveEgressProxy(opts: {
+  allowlist: string[];
+  port: number;
+  /** Overridable so tests need not write to the host's /tmp; the container uses the default. */
+  logPath?: string;
+  readyPath?: string;
+  /** Resolves once listening, so a test can drive the proxy without racing it. */
+  onListening?: (port: number) => void;
+}): Promise<void> {
+  const logPath = opts.logPath ?? PROXY_LOG_PATH;
+  const readyPath = opts.readyPath ?? PROXY_READY_PATH;
+  const log: EgressProxy["log"] = [];
+  const record = createRecorder(log);
+  let dirty = false;
+  const server = createEgressServer(opts.allowlist, (host, allowed) => {
+    record(host, allowed);
+    dirty = true;
+  });
+
+  // Written to a temporary name and renamed, so a `docker cp` that races a write reads
+  // either the previous snapshot or the new one, never half of one.
+  const snapshot = () => {
+    try {
+      const tmp = `${logPath}.tmp`;
+      writeFileSync(tmp, JSON.stringify(log));
+      renameSync(tmp, logPath);
+    } catch (err) {
+      logger.warn({ err }, "could not write the egress log");
+    }
+  };
+  snapshot();
+
+  await new Promise<void>((resolve) => {
+    server.listen(opts.port, "0.0.0.0", () => {
+      try {
+        writeFileSync(readyPath, "ready");
+      } catch (err) {
+        logger.warn({ err }, "could not write the readiness marker");
+      }
+      const bound = (server.address() as AddressInfo).port;
+      logger.info({ port: bound, allowlist: opts.allowlist }, "egress proxy listening");
+      opts.onListening?.(bound);
+      resolve();
+    });
+  });
+
+  // Debounced rather than written per request: `npm ci` on a large project asks for one
+  // host a few thousand times, and rewriting the file that often is pure syscall.
+  const ticker = setInterval(() => {
+    if (!dirty) return;
+    dirty = false;
+    snapshot();
+  }, 1_000);
+
+  await new Promise<void>((resolve) => {
+    const stop = () => {
+      clearInterval(ticker);
+      snapshot();
+      server.closeAllConnections?.();
+      server.close(() => resolve());
+      // A prepare phase that is being torn down has connections in flight; do not wait
+      // for them to drain past the point where the daemon has stopped caring.
+      setTimeout(resolve, 2_000).unref();
+    };
+    process.on("SIGTERM", stop);
+    process.on("SIGINT", stop);
+  });
+  snapshot();
 }
