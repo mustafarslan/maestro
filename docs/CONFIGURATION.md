@@ -43,10 +43,16 @@ Maestro needs and lets you confirm them in one click rather than filling in a fo
 
 ```
 maestro github-app create               # or --org <org>, --webhook-url <url>
-# open the printed loopback URL, confirm on GitHub
-maestro github-app installed <id>       # after installing it on your repositories
+# open the printed loopback URL, confirm on GitHub, then install it on your repositories
+maestro github-app installed            # asks GitHub which installation that was
 maestro doctor
 ```
+
+Everything in that flow is loopback — GitHub redirects your own browser back to
+`127.0.0.1`, so it needs no public URL and no tunnel. `installed` takes an id if you want to
+give one, and checks it against this App's real installations either way; with none, it
+records the only installation, or lists them when there is more than one (a personal account
+and an organisation, say).
 
 It asks for **contents** and **metadata** read and **pull requests** and **issues** write — enough
 to read a diff and post one comment, and no write access to code. The private key is stored 0600

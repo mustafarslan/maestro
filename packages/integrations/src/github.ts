@@ -61,6 +61,13 @@ export interface InlineComment {
  * findings, and this class is the sole writer. That separation is what makes it safe to
  * feed attacker-controlled PR content to a model at all.
  */
+/** One place this App is installed, as `maestro github-app installed` reports it. */
+export interface AppInstallation {
+  id: number;
+  account: string;
+  repositorySelection: "all" | "selected";
+}
+
 export class GitHubClient {
   private readonly octokit: Octokit;
   /** Which credential this client holds. The two have different permissions. */
@@ -117,6 +124,65 @@ export class GitHubClient {
       });
     }
     return null;
+  }
+
+  /**
+   * A client authenticated as the App itself, never as one of its installations.
+   *
+   * Two deliberate differences from `fromEnv`, and both matter.
+   *
+   * It does not consult `GITHUB_TOKEN`. A personal token cannot list an App's
+   * installations at all, so preferring one — which `fromEnv` does, correctly, for
+   * everything else — would make this fail on exactly the machines most likely to have a
+   * token lying around from before the App existed.
+   *
+   * And it drops `installationId` rather than passing it through. With one set, the auth
+   * strategy issues an *installation* token, and `GET /app/installations` refuses those
+   * with a 403 that names no cause. Destructured field by field rather than spread, so a
+   * field added to the stored file later cannot quietly reintroduce that.
+   */
+  static appOnly(): GitHubClient | null {
+    const stored = storedGitHubApp();
+    const appId = process.env.GITHUB_APP_ID ?? stored?.appId;
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY ?? stored?.privateKey;
+    if (!appId || !privateKey) return null;
+    return new GitHubClient({
+      kind: "app",
+      app: { appId, privateKey: privateKey.replaceAll("\\n", "\n") },
+    });
+  }
+
+  /**
+   * Where this App is installed.
+   *
+   * Exists so nobody has to copy an installation id out of a browser URL. That was the
+   * one step of the setup flow that asked the operator for a number they had no way to
+   * know, in the middle of a flow whose entire purpose is not making people fill in
+   * fields by hand.
+   */
+  async listInstallations(): Promise<AppInstallation[]> {
+    if (this.authKind !== "app") {
+      throw new Error(
+        "a personal access token cannot list App installations - this needs GitHub App " +
+          "credentials, created with 'maestro github-app create'",
+      );
+    }
+    if (this.installationId) {
+      // Would 403 with no explanation. Caught here so the message names the cause.
+      throw new Error(
+        "this client is authenticated as an installation, which cannot list installations; " +
+          "build it with GitHubClient.appOnly()",
+      );
+    }
+    const { data } = await this.octokit.rest.apps.listInstallations({ per_page: 100 });
+    return data.map((i) => ({
+      id: i.id,
+      // Both a User and an Organization carry `login`, and the field is nullable for
+      // neither reason worth guessing at — an installation nobody can name is still an
+      // installation, and crashing the listing would hide the others.
+      account: (i.account as { login?: string } | null)?.login ?? "(unknown account)",
+      repositorySelection: i.repository_selection === "all" ? "all" : "selected",
+    }));
   }
 
   /**

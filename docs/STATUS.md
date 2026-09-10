@@ -2930,6 +2930,35 @@ the server never sends fails it, and removing `live` from the server's response 
     it from somewhere else. `build:proxy-binary` now also installs into the version-keyed cache
     the daemon reads, and `doctor` from `/tmp` reports `linux binary ready (cache)`.
 
+214. **The setup flow ended by asking for a number nobody had.** `maestro github-app installed
+    <installation-id>` required an id whose only source was the browser's URL bar after
+    installing the App — the last step of a flow whose entire purpose is not making people fill
+    in fields by hand, and the one place it did exactly that.
+
+    It now asks GitHub. The credential is the non-obvious part: `GET /app/installations` needs
+    an app JWT, and a client carrying an installation id issues *installation* tokens, which
+    that endpoint refuses with a 403 naming no cause. `GitHubClient.appOnly()` exists for this
+    and differs from `fromEnv` twice on purpose — it ignores `GITHUB_TOKEN`, because a personal
+    token cannot list an App's installations at all and a machine with one left over from
+    before the App existed would otherwise never work; and it destructures `appId` and
+    `privateKey` rather than spreading the stored object, so a field added later cannot quietly
+    reintroduce the installation id.
+
+    An explicit id is still accepted and now checked against the App's real installations,
+    because recording a typo produces a daemon that authenticates as nothing and fails on its
+    first review, a long way from the mistake. The check is a convenience rather than a
+    dependency: with GitHub unreachable and an id given, it records it and says it could not
+    verify. More than one installation is a normal state — a personal account and an
+    organisation is exactly the shape of somebody reviewing their own projects and their
+    employer's — so that case ends with the command to run rather than a list to interpret.
+
+    Mutation-checked both ways: dropping the id check records the typo, and letting `appOnly`
+    prefer `GITHUB_TOKEN` breaks the listing.
+
+    Also corrected here, because it was written down wrong: this flow needs no public callback.
+    The redirect is `http://127.0.0.1:<port>/callback` and GitHub redirects the operator's own
+    browser, so a laptop behind NAT needs nothing but a browser.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

@@ -2,8 +2,10 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  type AppInstallation,
   appManifest,
   exchangeManifestCode,
+  GitHubClient,
   githubAppPath,
   saveGitHubApp,
   setInstallationId,
@@ -60,19 +62,7 @@ export async function githubApp(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (sub === "installed") {
-    const id = Number(argv[1]);
-    if (!Number.isInteger(id) || id <= 0) {
-      console.log(checkLine("fail", "installation id", "expected a positive integer"));
-      return 1;
-    }
-    if (!setInstallationId(id)) {
-      console.log(checkLine("fail", "no app stored", "run 'maestro github-app create' first"));
-      return 1;
-    }
-    console.log(checkLine("ok", "installation", String(id)));
-    return 0;
-  }
+  if (sub === "installed") return recordInstallation(argv[1]);
 
   if (sub !== "create") {
     console.log(`
@@ -80,7 +70,7 @@ ${color.bold("maestro github-app")} <subcommand>
 
   create [--name <name>] [--org <org>] [--webhook-url <url>]
                               create a GitHub App through GitHub's manifest flow
-  installed <installation-id> record which installation to act as
+  installed [installation-id] record which installation to act as; with no id, finds it
   show                        what is configured
 `);
     // Asked for, or got wrong: the same text, two different exit statuses. This command
@@ -203,8 +193,8 @@ ${color.bold("maestro github-app")} <subcommand>
     console.log(
       `     ${color.cyan(`${app.htmlUrl ?? "https://github.com/settings/apps"}/installations/new`)}`,
     );
-    console.log(`  2. Record which installation to act as:`);
-    console.log(`     ${color.cyan("maestro github-app installed <installation-id>")}`);
+    console.log(`  2. Then let Maestro find that installation:`);
+    console.log(`     ${color.cyan("maestro github-app installed")}`);
     console.log(`  3. ${color.cyan("maestro doctor")} to confirm the credential works\n`);
     return 0;
   } catch (err) {
@@ -213,4 +203,101 @@ ${color.bold("maestro github-app")} <subcommand>
     );
     return 1;
   }
+}
+
+/**
+ * Records which installation to act as, finding it when it can.
+ *
+ * The id used to be a required argument, and there was nowhere to get it except the URL
+ * bar after installing the App — a number the operator had no way to know, asked for in
+ * the middle of a flow whose whole purpose is not filling in fields by hand.
+ *
+ * With no argument this asks GitHub. With one, it still checks: recording an id that
+ * belongs to no installation of this App produces a daemon that authenticates as nothing
+ * and fails on its first review, and a typo is the likeliest way to get there.
+ */
+async function recordInstallation(raw: string | undefined): Promise<number> {
+  if (!storedGitHubApp()) {
+    console.log(checkLine("fail", "no app stored", "run 'maestro github-app create' first"));
+    return 1;
+  }
+
+  const explicit = raw === undefined ? undefined : Number(raw);
+  if (explicit !== undefined && (!Number.isInteger(explicit) || explicit <= 0)) {
+    console.log(checkLine("fail", "installation id", `expected a positive integer, got '${raw}'`));
+    return 1;
+  }
+
+  // Deliberately not `fromEnv()`: it prefers GITHUB_TOKEN, and a personal token cannot
+  // list an App's installations at all.
+  const client = GitHubClient.appOnly();
+  if (!client) {
+    console.log(checkLine("fail", "no app credentials", "run 'maestro github-app create' first"));
+    return 1;
+  }
+
+  let installations: AppInstallation[] | undefined;
+  try {
+    installations = await client.listInstallations();
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    // An explicit id must still work with no network. Somebody who already knows the
+    // number should not be blocked by GitHub being unreachable — the check is a
+    // convenience, and turning it into a hard dependency would be a worse command.
+    if (explicit !== undefined) {
+      console.log(checkLine("warn", "could not verify", why));
+      setInstallationId(explicit);
+      console.log(checkLine("ok", "installation", `${explicit} (recorded unverified)`));
+      return 0;
+    }
+    console.log(checkLine("fail", "could not list installations", why));
+    return 1;
+  }
+
+  if (installations.length === 0) {
+    const app = storedGitHubApp();
+    console.log(
+      checkLine("warn", "not installed anywhere", "install the app, then run this again"),
+    );
+    console.log(
+      `\n  ${color.cyan(`${app?.htmlUrl ?? "https://github.com/settings/apps"}/installations/new`)}\n`,
+    );
+    return 1;
+  }
+
+  if (explicit !== undefined) {
+    const match = installations.find((i) => i.id === explicit);
+    if (!match) {
+      console.log(checkLine("fail", "not an installation of this app", String(explicit)));
+      console.log(`\n  this app is installed on:\n`);
+      for (const i of installations) console.log(`    ${i.id}  ${i.account}`);
+      console.log();
+      return 1;
+    }
+    setInstallationId(match.id);
+    console.log(checkLine("ok", "installation", describe(match)));
+    return 0;
+  }
+
+  if (installations.length === 1) {
+    const only = installations[0] as AppInstallation;
+    setInstallationId(only.id);
+    console.log(checkLine("ok", "installation", describe(only)));
+    console.log(color.dim(`\n  run 'maestro doctor' to confirm the credential works\n`));
+    return 0;
+  }
+
+  // More than one is a normal state, not an error: one App installed on a personal
+  // account and an organisation is exactly what somebody reviewing both would have. So
+  // this ends with the command to run rather than a list to interpret.
+  console.log(checkLine("warn", "more than one installation", "name the one to act as"));
+  console.log();
+  for (const i of installations) console.log(`    ${i.id}  ${describe(i)}`);
+  console.log(`\n  ${color.cyan("maestro github-app installed <installation-id>")}\n`);
+  return 1;
+}
+
+/** "acme (all repositories)" — the id alone says nothing about what was chosen. */
+function describe(i: AppInstallation): string {
+  return `${i.account} (${i.repositorySelection === "all" ? "all repositories" : "selected repositories"})`;
 }
