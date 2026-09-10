@@ -216,7 +216,22 @@ export function loadFixtures(dir: string, only?: string): Fixture[] {
     .filter((f) => !only || f.name === only);
 }
 
-export function saveScore(dir: string, score: EvalScore): string {
+/**
+ * Writes a score, unless no agent completed — in which case there is no score to write.
+ *
+ * A run where every agent failed reports zero hits and every expected finding missed,
+ * which is arithmetically identical to a review that read the diff and found nothing.
+ * They are not the same thing and must not be pooled: a provider outage halfway through a
+ * twenty-fixture run would otherwise rewrite the baseline as a collapse in recall, and the
+ * only trace would be a duration of nine seconds that somebody had to notice. Observed —
+ * an account's session quota ran out mid-run and fourteen real results were followed by
+ * thirty-four zeroes, all indistinguishable from the real ones inside the score files.
+ *
+ * Refused here rather than at the call site so it cannot be forgotten by the next caller.
+ * Returns the path written, or null when there was nothing worth recording.
+ */
+export function saveScore(dir: string, score: EvalScore): string | null {
+  if (score.agentsRun === 0) return null;
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${score.fixture}-${Date.now()}.json`);
   writeFileSync(path, JSON.stringify(score, null, 2));

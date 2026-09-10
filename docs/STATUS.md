@@ -3757,6 +3757,30 @@ committed, traced the new config field through three packages, and found that no
     variable derived from what a pull request author writes must be on the fenced side, and
     the test names the ten rather than checking a boolean somebody could flip back.
     Mutation-checked.
+
+237. **A provider outage scored as a collapse in review quality.** Halfway through a
+    twenty-fixture eval run the account's session quota ran out. Every remaining fixture
+    failed its agent in about nine seconds, and `scoreOutcome` recorded each one as zero
+    hits with every expected finding missed — which is arithmetically identical to a review
+    that read the diff and found nothing. Fourteen genuine results were followed by
+    thirty-four zeroes, and nothing inside the score files distinguished them. The next
+    `maestro eval report` would have pooled all of them and reported the baseline falling
+    off a cliff.
+
+    The only visible tell was a duration of nine seconds where the honest runs took
+    minutes, which someone had to notice. `agentsRun` was already in every score and
+    already zero on exactly those rows; nothing read it.
+
+    `saveScore` refuses a score where no agent completed, and returns null so the caller
+    has to say something rather than carry on. Refused there rather than at the call site
+    because the next caller would have to remember. `maestro eval run` reports the fixture
+    as "no agent completed - not scored" and counts it a failure, which is what it is: the
+    review did not happen. Mutation-checked, with a second test pinning *why* the check is
+    on `agentsRun` — the hits, misses and recall of an outage and of a quiet review are
+    equal, and asserting that is what stops someone moving the check onto one of them.
+
+    The thirty-four rows were moved to `~/.maestro/eval-scores-quota-outage/` rather than
+    deleted; they are the record of the outage, and they are not measurements.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion

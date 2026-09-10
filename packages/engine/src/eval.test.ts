@@ -1,3 +1,6 @@
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ReviewOutcome } from "./engine.js";
 import {
@@ -5,6 +8,7 @@ import {
   type EvalScore,
   type Fixture,
   fixtureDeltas,
+  saveScore,
   scoreOutcome,
   splitOf,
 } from "./eval.js";
@@ -257,5 +261,57 @@ describe("the train/val split", () => {
     const [delta] = fixtureDeltas([older, newer]);
     expect(delta?.split).toBe("val");
     expect(delta?.gained).toEqual(["client-supplied userId"]);
+  });
+});
+
+/**
+ * A run where no agent completed is an outage, not a review that found nothing.
+ *
+ * The two are arithmetically identical in a score — zero hits, every expected finding
+ * missed — and pooling them puts a provider's bad afternoon into the golden set's history
+ * as a collapse in review quality. Seen for real: an account's session quota ran out in
+ * the middle of a twenty-fixture run, and fourteen genuine results were followed by
+ * thirty-four zeroes that nothing in the score files distinguished from them.
+ */
+describe("a fixture whose agent never ran", () => {
+  const failedOutcome = (): ReviewOutcome => ({
+    ...outcome([]),
+    state: "failed",
+    nodes: [
+      {
+        nodeId: "n1",
+        kind: "agent",
+        agentId: "security",
+        state: "failed",
+        durationMs: 9_000,
+        costCents: 0,
+      },
+    ],
+  });
+
+  it("is not written to the score directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "maestro-eval-"));
+    try {
+      expect(saveScore(dir, scoreOutcome(fixture, failedOutcome()))).toBeNull();
+      expect(readdirSync(dir)).toHaveLength(0);
+
+      // And a real one still is, so this refuses the outage rather than everything.
+      expect(saveScore(dir, scoreOutcome(fixture, outcome([finding()])))).not.toBeNull();
+      expect(readdirSync(dir)).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is otherwise indistinguishable, which is why the check is on agentsRun", () => {
+    // Same zeroes as a review that read the diff and found nothing. Nothing else in the
+    // score separates them.
+    const outage = scoreOutcome(fixture, failedOutcome());
+    const quiet = scoreOutcome(fixture, outcome([]));
+    expect(outage.hits).toEqual(quiet.hits);
+    expect(outage.misses).toEqual(quiet.misses);
+    expect(outage.recall).toEqual(quiet.recall);
+    expect(outage.agentsRun).toBe(0);
+    expect(quiet.agentsRun).toBe(1);
   });
 });

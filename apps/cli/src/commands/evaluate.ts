@@ -334,7 +334,22 @@ export async function evaluate(argv: string[]): Promise<number> {
       }
 
       const score = scoreOutcome(fixture, outcome, playbookRecord.id);
-      saveScore(scoresDir(maestroHome()), score);
+      const saved = saveScore(scoresDir(maestroHome()), score);
+
+      // No agent completed, so this is an outage and not a result. Reporting it as 0%
+      // recall would put a provider's bad afternoon into the golden set's history as a
+      // collapse in review quality, which is the number everything else here is judged by.
+      if (!saved) {
+        failures++;
+        console.log(
+          checkLine(
+            "fail",
+            fixture.name,
+            `no agent completed - not scored${outcome.error ? `: ${outcome.error}` : ""}`,
+          ),
+        );
+        continue;
+      }
 
       const ok = score.misses.length === 0 && score.falsePositives.length === 0;
       if (!ok) failures++;
