@@ -276,7 +276,11 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
             : " (proxy-routed traffic only).")
         : outcome.egressEnforcement === "enforced"
           ? " Dependency install ran on an isolated network whose only route out was the allowlist proxy."
-          : ""),
+          : outcome.egressEnforcement === "none"
+            ? // Stronger than the allowlist, and worth saying so plainly: this is the
+              // posture a fork pull request gets, where it matters most.
+              " Nothing was installed, so the prepare phase ran with no network at all."
+            : ""),
     "",
     `**Total** — ${outcome.costKnown === false ? "cost unpriced for this provider" : `${outcome.costCents.toFixed(2)}¢`}` +
       ` across ${agentRows.filter((n) => n.state === "done").length} agent(s) in ${(outcome.durationMs / 1000).toFixed(1)}s.`,

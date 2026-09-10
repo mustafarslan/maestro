@@ -196,7 +196,7 @@ export interface ReviewOutcome {
   allowedCommands: string[];
   egressLog: { host: string; allowed: boolean; count: number }[];
   /** Which posture produced that log; the review comment must not report the two alike. */
-  egressEnforcement?: "enforced" | "advisory";
+  egressEnforcement?: "enforced" | "advisory" | "none";
   error?: string;
 }
 

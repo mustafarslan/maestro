@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Logger, logger, MAESTRO_VERSION, newId } from "@maestro/core";
-import type { EgressEnforcement, EnvSpec } from "@maestro/playbook";
+import type { EnvSpec } from "@maestro/playbook";
 import { dependencyCacheKey, mayWriteCache, snapshotTag } from "./cache.js";
 import {
   PROXY_LOG_PATH,
@@ -14,6 +14,7 @@ import {
 import { resolveProxyBinary } from "./proxy-binary.js";
 import { detectedCommands, detectToolchain, expandAuto } from "./toolchain.js";
 import type {
+  EgressPosture,
   ExecResult,
   PreparedEnvironment,
   PrepareRequest,
@@ -195,7 +196,20 @@ export class DockerSandboxDriver implements SandboxDriver {
     }
 
     // Network for the prepare phase goes through an allowlist proxy — nothing else.
-    const proxy = await startPreparePhaseProxy({ spec, reviewId, id, log });
+    //
+    // Unless nothing will use it. With no setup commands there is nothing in this
+    // container that dials out: the clone is copied in, the image was pulled host-side,
+    // and `docker commit` is the daemon's business. So the phase gets `--network none`,
+    // which is stricter than any allowlist and costs nothing to enforce.
+    //
+    // This is the fork case, and it is the one that matters most. A pull request from a
+    // fork downgrades to `trust: untrusted`, which runs no setup at all — so the phase
+    // that exists to run a stranger's dependency installer now has no network whatsoever
+    // when the stranger's code is exactly what it is holding. It also saves a container
+    // and a network on every such review.
+    const proxy = setup.length
+      ? await startPreparePhaseProxy({ spec, reviewId, id, log })
+      : noNetworkProxy();
     const containerId = `maestro-prep-${id}`;
 
     try {
@@ -222,17 +236,23 @@ export class DockerSandboxDriver implements SandboxDriver {
           "--security-opt",
           "no-new-privileges",
           // Proxy vars are the ONLY route out; the container has no direct egress path
-          // it can use without them for the package managers we drive.
-          "--env",
-          `HTTP_PROXY=${proxyUrl}`,
-          "--env",
-          `HTTPS_PROXY=${proxyUrl}`,
-          "--env",
-          `http_proxy=${proxyUrl}`,
-          "--env",
-          `https_proxy=${proxyUrl}`,
-          "--env",
-          "NO_PROXY=localhost,127.0.0.1",
+          // it can use without them for the package managers we drive. Omitted entirely
+          // when there is no network: pointing a tool at a proxy that does not exist
+          // turns "no network" into a confusing connection error rather than a clean one.
+          ...(proxyUrl
+            ? [
+                "--env",
+                `HTTP_PROXY=${proxyUrl}`,
+                "--env",
+                `HTTPS_PROXY=${proxyUrl}`,
+                "--env",
+                `http_proxy=${proxyUrl}`,
+                "--env",
+                `https_proxy=${proxyUrl}`,
+                "--env",
+                "NO_PROXY=localhost,127.0.0.1",
+              ]
+            : []),
           "--env",
           `npm_config_cache=${CACHE_DIR}/npm`,
           "--env",
@@ -825,7 +845,7 @@ interface PreparePhaseProxy {
   url: string;
   /** Networking arguments the prepare container must be created with. */
   containerArgs: string[];
-  enforcement: EgressEnforcement;
+  enforcement: EgressPosture;
   /** Aggregated egress log. Only complete after `close()`. */
   log(): { host: string; allowed: boolean; count: number }[];
   /** Idempotent: prepare closes explicitly to harvest the log, and again in `finally`. */
@@ -833,6 +853,25 @@ interface PreparePhaseProxy {
 }
 
 const PROXY_PORT = 8080;
+
+/**
+ * What a prepare phase with nothing to install gets: no network at all.
+ *
+ * Reported as its own posture rather than as an enforced allowlist that happened to see
+ * no traffic. "Every host was allowed through a proxy and none was asked for" and "there
+ * was no route to ask down" are different claims, and the second is the stronger one — so
+ * saying the first would be underselling it, and saying nothing would leave the review
+ * comment describing a proxy that never existed.
+ */
+function noNetworkProxy(): PreparePhaseProxy {
+  return {
+    url: "",
+    containerArgs: ["--network", "none"],
+    enforcement: "none",
+    log: () => [],
+    close: async () => {},
+  };
+}
 
 /** A stock glibc image; the proxy binary is copied in, so nothing is built or published. */
 function proxyBaseImage(): string {

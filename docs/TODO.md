@@ -66,12 +66,8 @@ Two things a future reader should know about the shape that was chosen:
   to `git` and the `docker` CLI, so its image carries both and is around 450MB against a 63MB
   binary, and it can never be distroless. Publishing a small one would have been this project's
   first container artifact, which neither option avoids. `docker cp` avoids both.
-- **A prepare phase with no setup commands needs no network at all.** Fork pull requests
-  downgrade to `trust: untrusted`, which runs no setup — and the clone and the image pull both
-  happen host-side, so nothing in that container ever dials out. It still gets a proxy container
-  and an internal network today. Giving an empty-setup prepare `--network none` outright would
-  be both faster and stricter than the proxy, on exactly the path that matters most. Small, and
-  deliberately not bundled into the change that introduced enforcement.
+- ~~**A prepare phase with no setup commands needs no network at all.**~~ **Done —
+  `docs/STATUS.md` 225.** `--network none`, no proxy container, no review network.
 - **A registry would buy one thing: a pinned digest.** If a deployment needs an auditable
   immutable artifact for the component enforcing a supply-chain control, that is the argument
   for publishing a proxy image, and it is the only one. `MAESTRO_PROXY_BINARY` covers the

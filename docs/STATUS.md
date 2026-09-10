@@ -3143,6 +3143,28 @@ the server never sends fails it, and removing `live` from the server's response 
     Mutation-checked both ways: scoping on unvalidated words breaks `it please`, and dropping
     the resolution breaks the two tests that ask for a named agent.
 
+225. **The phase that runs a stranger's installer now has no network when there is nothing to
+    install.** A fork pull request downgrades to `trust: untrusted`, which runs no setup at all —
+    and it was still given a proxy container and an isolated network to not use. The clone is
+    copied in, the image is pulled host-side and `docker commit` is the daemon's business, so
+    nothing in that container was ever going to dial out.
+
+    It gets `--network none` instead, which is stricter than any allowlist and costs nothing to
+    enforce — on exactly the path where it matters most, since untrusted is the case the whole
+    downgrade exists for. It also saves a container and a network on every such review.
+
+    Reported as its own posture rather than as an allowlist that saw no traffic. "Every host was
+    allowed through a proxy and none was asked for" and "there was no route to ask down" are
+    different claims and the second is stronger, so the review comment says
+    *"Nothing was installed, so the prepare phase ran with no network at all"* rather than
+    describing a proxy that never existed. `EgressPosture` is deliberately not a third setting:
+    nobody configures `none`, it is earned by having no setup commands.
+
+    The proxy environment variables are dropped with it. Pointing a tool at a proxy that does
+    not exist turns "no network" into a confusing connection error rather than a clean one.
+
+    Mutation-checked against real Docker: starting the proxy anyway fails the test.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

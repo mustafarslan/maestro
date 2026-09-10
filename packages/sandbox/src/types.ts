@@ -1,4 +1,13 @@
 import type { EgressEnforcement, EnvSpec } from "@maestro/playbook";
+
+/**
+ * What the prepare phase's network actually was, which is not the same as what was asked
+ * for. `EgressEnforcement` is a setting with two values; this adds the third thing that
+ * can be true — there was no network at all, because nothing needed one. Deliberately not
+ * a third setting: nobody configures "none", it is earned by having no setup commands.
+ */
+export type EgressPosture = EgressEnforcement | "none";
+
 import type { Toolchain } from "./toolchain.js";
 
 export interface ExecResult {
@@ -43,7 +52,7 @@ export interface PreparedEnvironment {
    * could have reached anything, so reporting the two identically would overstate what
    * the allowlist proved.
    */
-  egressEnforcement?: EgressEnforcement;
+  egressEnforcement?: EgressPosture;
   /** True when the dependency layer was reused instead of reinstalled. */
   cacheHit?: boolean;
 }

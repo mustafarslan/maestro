@@ -623,6 +623,50 @@ describe("prepare-phase egress enforcement", () => {
     expect(env.egressEnforcement).toBe("advisory");
   }, 900_000);
 
+  it("gives a prepare phase with nothing to install no network at all", async () => {
+    if (!dockerUp) return;
+    // The fork case. An untrusted pull request runs no setup, so the phase that exists to
+    // run a stranger's dependency installer has nothing to install — and a network it
+    // cannot use is still a network.
+    //
+    // Asserted from the outside, because there is nothing running on the inside to ask:
+    // no proxy container and no review network were created, the reported posture is
+    // `none` rather than a proxy that happened to see no traffic, and the analyze
+    // container off the resulting snapshot still has no route.
+    const reviewId = `rv_egress_nonet_${Date.now()}`;
+    const spec = EnvSpecSchema.parse({
+      image: "node:22-bookworm",
+      cpus: 2,
+      memory: "1GiB",
+      timeouts: { prepareSec: 420, analyzeSec: 120, commandSec: 90 },
+      setup: [],
+      allowedCommands: [],
+      egressAllowlist: ["registry.npmjs.org"],
+      egressEnforcement: "enforced",
+    });
+    const env = await driver.prepare({ reviewId, sourcePath: sourceDir, spec });
+    try {
+      // No proxy container and no review network were created for it.
+      const nets = await listManagedNetworks();
+      expect(nets.filter((n) => n.reviewId === reviewId)).toEqual([]);
+      // And it reports the stronger posture rather than claiming an allowlist applied.
+      expect(env.egressEnforcement).toBe("none");
+      expect(env.egressLog).toEqual([]);
+
+      // The analyze container off that snapshot still has no route, which is the
+      // property the whole design rests on and is unchanged by this.
+      const box = await driver.analyze(env, { spec });
+      try {
+        const route = await box.exec("ip route 2>/dev/null || true");
+        expect(route.stdout).not.toMatch(/default via/);
+      } finally {
+        await box.destroy();
+      }
+    } finally {
+      await driver.reap({ reviewId });
+    }
+  }, 900_000);
+
   it("fails the prepare phase rather than quietly falling back to advisory", async () => {
     if (!dockerUp) return;
     // The failure mode this must never have. A supply-chain control that stops enforcing
