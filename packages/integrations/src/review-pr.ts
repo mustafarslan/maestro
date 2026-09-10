@@ -261,15 +261,31 @@ export async function reviewPullRequest(
 
     // Without the comment id, a later reaction cannot be matched back to the findings
     // it was reacting to, and the whole precision signal is lost.
-    db.prepare(
-      "UPDATE findings SET posted_comment_id=?, status='posted' WHERE review_id=? AND status='open'",
-    ).run(String(posted.id), reviewId);
+    //
+    // Per finding where an anchor landed, and the summary otherwise. This was one blanket
+    // UPDATE writing the summary comment's id onto every row, so a single thumbs-down was
+    // ingested as a verdict on every finding in the review — a review-level label that
+    // `agentQuality` then reported per agent. A finding with its own comment is the only
+    // one anybody can react to individually, so it is the only one that can carry an
+    // individual verdict.
+    db.transaction(() => {
+      db.prepare(
+        "UPDATE findings SET posted_comment_id=?, posted_comment_kind='summary', status='posted' WHERE review_id=? AND status='open'",
+      ).run(String(posted.id), reviewId);
+
+      const attribute = db.prepare(
+        "UPDATE findings SET posted_comment_id=?, posted_comment_kind='inline' WHERE review_id=? AND dedupe_group=?",
+      );
+      for (const { dedupeGroup, commentId } of inlinePosted) {
+        attribute.run(String(commentId), reviewId, dedupeGroup);
+      }
+    });
 
     reviews.setState(reviewId, outcome.state, {
       error: outcome.error,
       costCents: outcome.costCents,
     });
-    log.info({ reviewId, posted, inlinePosted }, "review posted");
+    log.info({ reviewId, posted, inlinePosted: inlinePosted.length }, "review posted");
     return { reviewId, state: outcome.state, outcome, markdown, posted };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -448,7 +464,7 @@ export async function postAnchoredComments(
   outcome: ReviewOutcome,
   playbook: PlaybookDocument,
   carried: CarriedFinding[],
-): Promise<number> {
+): Promise<{ dedupeGroup: string; commentId: number }[]> {
   // Anchors an earlier round already left. Without this a carried-forward finding posts
   // the same comment again at the same place on every push.
   const already = new Set(carried.map((c) => anchorKey(c.file ?? "", c.lineStart ?? undefined)));
@@ -461,5 +477,24 @@ export async function postAnchoredComments(
     already,
   });
 
-  return client.postInlineComments(pr, anchors);
+  const posted = await client.postInlineComments(pr, anchors);
+
+  // Matched on the anchor, not on order: GitHub is free to return a review's comments in
+  // whatever order it likes, and pairing by index would attribute a verdict to the wrong
+  // finding without ever failing. An ambiguous anchor — two findings the triage kept
+  // separate on the same line — is left unattributed rather than guessed at; those
+  // findings keep the summary comment, which is what every finding had before.
+  const seen = new Map<string, number>();
+  for (const a of anchors)
+    seen.set(anchorKey(a.path, a.line), (seen.get(anchorKey(a.path, a.line)) ?? 0) + 1);
+
+  const byAnchor = new Map(anchors.map((a) => [anchorKey(a.path, a.line), a.dedupeGroup]));
+  const out: { dedupeGroup: string; commentId: number }[] = [];
+  for (const c of posted) {
+    const key = anchorKey(c.path, c.line);
+    if ((seen.get(key) ?? 0) !== 1) continue;
+    const dedupeGroup = byAnchor.get(key);
+    if (dedupeGroup) out.push({ dedupeGroup, commentId: c.id });
+  }
+  return out;
 }

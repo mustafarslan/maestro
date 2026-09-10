@@ -262,5 +262,14 @@ describe("an id that does not exist says so", () => {
     expect(
       db.prepare("SELECT status FROM findings WHERE id='fd-1'").get<{ status: string }>()?.status,
     ).toBe("dismissed");
+
+    // And it reaches the table the quality loop is measured from. This tool wrote the
+    // status alone, so the most deliberate feedback signal in the system was invisible to
+    // every query that reads `feedback` — two paths against one schema, disagreeing about
+    // whether the same verdict had been given.
+    const fb = db
+      .prepare("SELECT signal FROM feedback WHERE finding_id='fd-1'")
+      .all<{ signal: string }>();
+    expect(fb.map((r) => r.signal)).toEqual(["thumbs_down"]);
   });
 });

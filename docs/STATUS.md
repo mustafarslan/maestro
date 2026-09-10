@@ -3468,6 +3468,47 @@ the server never sends fails it, and removing `live` from the server's response 
     of the architecture agent; the current eight fixtures are six architecture and two
     security, which is the ratio the source material has.
 
+233. **Every finding in a review shared one comment id, so every verdict was a review-level
+    verdict wearing a finding-level label.** After posting, one blanket
+    `UPDATE findings SET posted_comment_id=? WHERE review_id=? AND status='open'` wrote the
+    *summary* comment's id onto every row. `postAnchoredComments` had been leaving inline
+    comments since finding 170 and never stored their ids. So `ingestReaction` looked a
+    comment id up and got back every finding in that review: one 👎 on the summary dismissed
+    all of them, and `agentQuality` reported the result per agent as though somebody had
+    judged each one.
+
+    Nothing about that announces itself. The acceptance rate is a plausible number either
+    way, and the only symptom is that it moves in blocks.
+
+    Findings that anchored an inline comment now carry that comment's id. `createReview`
+    answers with the review rather than its comments, so the client reads them back —
+    one extra request per review that has any anchors at all — and each is matched to a
+    finding **by its anchor, never by order**: nothing promises the order a review's comments
+    come back in, and pairing by index would attribute a verdict to the wrong finding without
+    ever failing. Two findings triage kept separate on the same line are left unattributed
+    rather than guessed at; they keep the summary comment, which is what every finding had
+    before.
+
+    The kind travels with the id, in `findings.posted_comment_kind` (migration 003). Issue
+    comments and pull request review comments are separate resources with separate reaction
+    endpoints and independent id sequences, so a summary comment's id is usually also a valid
+    review-comment id: asking the wrong endpoint returns somebody else's reactions or a 404,
+    and matching on the id alone settles a finding nobody reacted to. NULL reads as
+    `'summary'`, which is what every id written before the column actually was.
+
+    Alongside it, the second half of the same defect: **MCP `dismiss_finding` wrote
+    `findings.status` and no `feedback` row at all.** Two feedback paths against one schema —
+    `agentQuality` reads status and saw it, anything reading the `feedback` table did not — so
+    the most deliberate signal in the system, somebody typing a dismissal, was the one missing
+    from the table the quality loop is measured from. It goes through `recordDismissal` now,
+    which records the row and settles the status through the same rule a reaction does rather
+    than writing `'dismissed'` straight in; deciding that separately in two places is how the
+    paths diverged to begin with.
+
+    Both mutation-checked: ingesting without the kind carries a summary reaction onto a
+    review comment sharing its id, and pairing comments by index swaps two findings on
+    adjacent lines. Each fails its own test and nothing else.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

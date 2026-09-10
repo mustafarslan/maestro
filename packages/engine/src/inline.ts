@@ -5,6 +5,14 @@ export interface InlineAnchor {
   path: string;
   line: number;
   body: string;
+  /**
+   * The triage group this comment speaks for.
+   *
+   * Carried so the comment's id can be written back to the finding row it belongs to.
+   * Without it every finding in a review shared the summary comment's id, and one
+   * thumbs-down on that summary was ingested as a verdict on all of them.
+   */
+  dedupeGroup: string;
 }
 
 /** `file:line` — the identity of a place a comment has been left. */
@@ -44,7 +52,7 @@ export function inlineComments(
     const line = [f.lineStart, f.lineEnd].find((n) => n !== undefined && lines.has(n));
     if (!line) continue;
 
-    out.push({ path: f.file, line, body: renderInlineBody(f) });
+    out.push({ path: f.file, line, body: renderInlineBody(f), dedupeGroup: f.dedupeGroup });
   }
   return out;
 }

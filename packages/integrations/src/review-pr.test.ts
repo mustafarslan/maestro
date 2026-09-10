@@ -292,12 +292,16 @@ describe("anchored comments on the diff", () => {
     let seen: { path: string; line: number; body: string }[] | null = null;
     const n = await postAnchoredComments(
       {
+        // GitHub answers `createReview` with the review and the client then reads back the
+        // comments it created, so the stub hands back ids the way the real one does — and
+        // deliberately in the reverse order, because nothing promises the order they were
+        // sent in and the mapping must not depend on it.
         postInlineComments: async (
           _pr: unknown,
           comments: { path: string; line: number; body: string }[],
         ) => {
           seen = comments;
-          return comments.length;
+          return comments.map((c, i) => ({ id: 1000 + i, path: c.path, line: c.line })).reverse();
         },
       } as never,
       { owner: "o", repo: "r", number: 7, commentable } as never,
@@ -327,8 +331,45 @@ describe("anchored comments on the diff", () => {
   it("posts nothing when no finding can be anchored", async () => {
     // A whole-PR point has nowhere to go, and the summary comment already carries it.
     const { n, seen } = await run([finding({ title: "whole-PR point" })], diff);
-    expect(n).toBe(0);
+    expect(n).toEqual([]);
     expect(seen).toEqual([]);
+  });
+
+  it("pairs each comment id with the finding it speaks for, whatever order they come back in", async () => {
+    // Every finding used to carry the SUMMARY comment's id, so one thumbs-down on the
+    // summary was ingested as a verdict on all of them. Attribution is what makes the
+    // acceptance rate a statement about a finding rather than about a review.
+    const { n } = await run(
+      [
+        finding({ file: "src/index.ts", lineStart: 4, dedupeGroup: "g-four" }),
+        finding({ file: "src/index.ts", lineStart: 5, dedupeGroup: "g-five" }),
+      ],
+      diff,
+    );
+
+    // The stub returns them reversed; pairing by index would swap these two.
+    expect(n).toEqual(
+      expect.arrayContaining([
+        { dedupeGroup: "g-four", commentId: 1000 },
+        { dedupeGroup: "g-five", commentId: 1001 },
+      ]),
+    );
+    expect(n).toHaveLength(2);
+  });
+
+  it("leaves an ambiguous anchor unattributed rather than guessing which finding it was", async () => {
+    // Two findings triage kept separate on the same line produce two comments at one
+    // anchor, and nothing in the response says which is which. Attributing either would
+    // be a coin toss recorded as a verdict; both keep the summary comment instead.
+    const { n, seen } = await run(
+      [
+        finding({ file: "src/index.ts", lineStart: 4, dedupeGroup: "g-a" }),
+        finding({ file: "src/index.ts", lineStart: 4, dedupeGroup: "g-b" }),
+      ],
+      diff,
+    );
+    expect(seen).toHaveLength(2);
+    expect(n).toEqual([]);
   });
 
   it("does not repeat an anchor an earlier round already left", async () => {

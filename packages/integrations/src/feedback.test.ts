@@ -6,6 +6,7 @@ import {
   ingestReaction,
   lineChangedByAgent,
   pollCommentReactions,
+  recordDismissal,
   signalFromReaction,
 } from "./feedback.js";
 
@@ -448,5 +449,66 @@ describe("reactions are polled, because no webhook delivers them", () => {
     const c = client([{ content: "+1", login: "alice" }]);
     expect(await pollCommentReactions(db, c)).toMatchObject({ comments: 0 });
     expect(c.calls).toBe(0);
+  });
+});
+
+describe("a reaction belongs to one comment, not to a whole review", () => {
+  /** Same numeric id on both kinds, which is the ordinary case: separate sequences. */
+  function seedKinded(kind: "summary" | "inline", commentId: number): string {
+    const id = seedFinding("security", commentId);
+    db.prepare("UPDATE findings SET posted_comment_kind=? WHERE id=?").run(kind, id);
+    return id;
+  }
+
+  it("does not carry a summary reaction onto a review comment with the same id", () => {
+    // Issue comments and review comments are drawn from independent sequences, so a
+    // summary comment's id is usually also a valid review-comment id. Matching on the id
+    // alone would settle a finding nobody reacted to.
+    const summaryFinding = seedKinded("summary", 4242);
+    const inlineFinding = seedKinded("inline", 4242);
+
+    ingestReaction(db, 4242, "-1", "ada", "summary");
+
+    const statusOf = (id: string) =>
+      db.prepare("SELECT status FROM findings WHERE id=?").get<{ status: string }>(id)?.status;
+    expect(statusOf(summaryFinding)).toBe("dismissed");
+    expect(statusOf(inlineFinding)).toBe("open");
+  });
+
+  it("reads a row written before the column existed as a summary comment", () => {
+    // Every id written before the kind was stored was a summary comment's, so that is
+    // what NULL means. Treating it as unknown would drop the entire existing history.
+    const id = seedFinding("security", 99);
+    expect(
+      db.prepare("SELECT posted_comment_kind AS k FROM findings WHERE id=?").get<{
+        k: string | null;
+      }>(id)?.k,
+    ).toBeNull();
+
+    ingestReaction(db, 99, "-1", "ada");
+    expect(
+      db.prepare("SELECT status FROM findings WHERE id=?").get<{ status: string }>(id)?.status,
+    ).toBe("dismissed");
+  });
+});
+
+describe("a dismissal typed by a person", () => {
+  it("records the feedback row as well as the status", () => {
+    const id = seedFinding();
+    expect(recordDismissal(db, id, { reason: "not real", actor: "ada" })).toBe(true);
+
+    const rows = db
+      .prepare("SELECT signal, actor FROM feedback WHERE finding_id=?")
+      .all<{ signal: string; actor: string }>(id);
+    expect(rows).toEqual([{ signal: "thumbs_down", actor: "ada" }]);
+    expect(
+      db
+        .prepare("SELECT status, suppressed_reason AS why FROM findings WHERE id=?")
+        .get<{ status: string; why: string }>(id),
+    ).toEqual({ status: "dismissed", why: "not real" });
+  });
+
+  it("says so rather than reporting a dismissal that landed nowhere", () => {
+    expect(recordDismissal(db, "fd_does_not_exist")).toBe(false);
   });
 });

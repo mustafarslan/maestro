@@ -55,6 +55,21 @@ export interface InlineComment {
 }
 
 /**
+ * Which of GitHub's two comment resources a finding's feedback lives on.
+ *
+ * They have different reaction endpoints and independent id sequences, so the kind must
+ * be stored beside the id rather than derived from it.
+ */
+export type PostedCommentKind = "summary" | "inline";
+
+/** An anchored comment that landed, and where. */
+export interface PostedInlineComment {
+  id: number;
+  path: string;
+  line: number;
+}
+
+/**
  * The only component that talks to GitHub.
  *
  * Agents never hold a token: they run offline in a container and return structured
@@ -423,10 +438,13 @@ export class GitHubClient {
    * review over one bad line, so one unanchorable finding would otherwise cost all of
    * them.
    */
-  async postInlineComments(pr: PullRequestContext, inline: InlineComment[]): Promise<number> {
-    if (!inline.length) return 0;
+  async postInlineComments(
+    pr: PullRequestContext,
+    inline: InlineComment[],
+  ): Promise<PostedInlineComment[]> {
+    if (!inline.length) return [];
     try {
-      await this.octokit.rest.pulls.createReview({
+      const { data: review } = await this.octokit.rest.pulls.createReview({
         owner: pr.owner,
         repo: pr.repo,
         pull_number: pr.number,
@@ -442,13 +460,26 @@ export class GitHubClient {
           side: "RIGHT",
         })),
       });
-      return inline.length;
+
+      // `createReview` answers with the review, not with its comments, and their ids are
+      // what a later reaction has to be matched against. One extra request per review with
+      // any anchors at all, which is the price of a finding-level quality signal instead of
+      // a review-level one.
+      const posted = await this.octokit.paginate(this.octokit.rest.pulls.listCommentsForReview, {
+        owner: pr.owner,
+        repo: pr.repo,
+        pull_number: pr.number,
+        review_id: review.id,
+        per_page: 100,
+      });
+
+      return posted.map((c) => ({ id: c.id, path: c.path, line: c.line ?? 0 }));
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), anchors: inline.length },
         "inline review rejected; the summary comment already carries every finding",
       );
-      return 0;
+      return [];
     }
   }
 
@@ -566,11 +597,24 @@ export class GitHubClient {
     }
   }
 
+  /**
+   * Reactions on one comment Maestro left.
+   *
+   * The kind is required rather than inferred: an issue comment and a pull request review
+   * comment are separate resources with separate endpoints and separate id sequences, so a
+   * summary comment's id is usually also a valid review-comment id and asking the wrong
+   * endpoint returns somebody else's reactions or a 404 — neither of which announces itself.
+   */
   async listCommentReactions(
     pr: PullRequestRef,
     commentId: number,
+    kind: PostedCommentKind = "summary",
   ): Promise<{ content: string; login?: string }[]> {
-    const data = await this.octokit.paginate(this.octokit.rest.reactions.listForIssueComment, {
+    const endpoint =
+      kind === "inline"
+        ? this.octokit.rest.reactions.listForPullRequestReviewComment
+        : this.octokit.rest.reactions.listForIssueComment;
+    const data = await this.octokit.paginate(endpoint, {
       owner: pr.owner,
       repo: pr.repo,
       comment_id: commentId,

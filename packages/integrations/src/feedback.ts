@@ -143,6 +143,39 @@ export async function ingestLineChanges(
   return changed;
 }
 
+/**
+ * A person dismissing a finding, from a surface that is not a reaction.
+ *
+ * `dismiss_finding` over MCP set `findings.status` directly and wrote no `feedback` row,
+ * so there were two feedback paths against one schema: `agentQuality` reads `status` and
+ * saw it, while anything reading the `feedback` table did not. The same verdict counted
+ * once or twice depending on which query asked, and the dismissal that carried the most
+ * intent — somebody typing it deliberately — was the one missing from the record.
+ *
+ * Returns false when no such finding exists, so the caller can say so rather than report
+ * a dismissal that landed nowhere.
+ */
+export function recordDismissal(
+  db: SqlDatabase,
+  findingId: string,
+  opts: { reason?: string; actor?: string } = {},
+): boolean {
+  const exists = db.prepare("SELECT id FROM findings WHERE id=?").get<{ id: string }>(findingId);
+  if (!exists) return false;
+
+  return db.transaction(() => {
+    recordFeedback(db, findingId, "thumbs_down", opts.actor);
+    if (opts.reason) {
+      db.prepare("UPDATE findings SET suppressed_reason=? WHERE id=?").run(opts.reason, findingId);
+    }
+    // Through the same settling rule as a reaction, rather than writing 'dismissed'
+    // straight in: a suppressed finding is deliberately not re-graded, and two callers
+    // each deciding that for themselves is how the two paths diverged in the first place.
+    settleStatus(db, findingId);
+    return true;
+  });
+}
+
 /** Maps a GitHub reaction webhook to a feedback signal. */
 export function signalFromReaction(content: string): FeedbackSignal | null {
   if (content === "+1" || content === "heart" || content === "hooray" || content === "rocket") {
@@ -171,6 +204,7 @@ export async function pollCommentReactions(
     listCommentReactions(
       pr: { owner: string; repo: string; number: number },
       commentId: number,
+      kind?: "summary" | "inline",
     ): Promise<{ content: string; login?: string }[]>;
   },
   opts: { sinceMs?: number; maxComments?: number } = {},
@@ -190,7 +224,9 @@ export async function pollCommentReactions(
   // cheaper failure than exhausting the rate limit.
   const rows = db
     .prepare(
-      `SELECT DISTINCT f.posted_comment_id AS commentId, r.pr_number AS number,
+      `SELECT DISTINCT f.posted_comment_id AS commentId,
+              COALESCE(f.posted_comment_kind, 'summary') AS kind,
+              r.pr_number AS number,
               repos.owner AS owner, repos.name AS repo,
               COALESCE(r.finished_at, r.created_at) AS at
          FROM findings f
@@ -201,10 +237,13 @@ export async function pollCommentReactions(
         ORDER BY at DESC
         LIMIT ?`,
     )
-    .all<{ commentId: string; number: number; owner: string; repo: string }>(
-      since,
-      opts.maxComments ?? 50,
-    );
+    .all<{
+      commentId: string;
+      kind: "summary" | "inline";
+      number: number;
+      owner: string;
+      repo: string;
+    }>(since, opts.maxComments ?? 50);
 
   let recorded = 0;
   for (const row of rows) {
@@ -212,9 +251,16 @@ export async function pollCommentReactions(
       const reactions = await client.listCommentReactions(
         { owner: row.owner, repo: row.repo, number: row.number },
         Number(row.commentId),
+        row.kind,
       );
       for (const reaction of reactions) {
-        const result = ingestReaction(db, Number(row.commentId), reaction.content, reaction.login);
+        const result = ingestReaction(
+          db,
+          Number(row.commentId),
+          reaction.content,
+          reaction.login,
+          row.kind,
+        );
         if (result) recorded += result.recorded;
       }
     } catch (err) {
@@ -226,18 +272,28 @@ export async function pollCommentReactions(
   return { comments: rows.length, recorded };
 }
 
+/**
+ * @param kind Which comment resource the id belongs to. Required for correctness, not
+ *   tidiness: issue comments and review comments have independent id sequences, so a
+ *   summary comment's id is usually also a valid review-comment id, and matching on the
+ *   id alone would carry a reaction on one to the findings of the other.
+ */
 export function ingestReaction(
   db: SqlDatabase,
   commentId: number,
   reactionContent: string,
   actor?: string,
+  kind: "summary" | "inline" = "summary",
 ): IngestResult | null {
   const signal = signalFromReaction(reactionContent);
   if (!signal) return null;
 
   const findings = db
-    .prepare("SELECT id, review_id FROM findings WHERE posted_comment_id=?")
-    .all<{ id: string; review_id: string }>(String(commentId));
+    .prepare(
+      `SELECT id, review_id FROM findings
+        WHERE posted_comment_id=? AND COALESCE(posted_comment_kind, 'summary')=?`,
+    )
+    .all<{ id: string; review_id: string }>(String(commentId), kind);
   if (!findings.length) return null;
 
   let accepted = 0;

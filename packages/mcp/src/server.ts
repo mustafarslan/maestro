@@ -9,7 +9,7 @@ import {
   type SqlDatabase,
 } from "@maestro/core";
 import { compareVersions, type EvalScore, loadScores, scoresDir } from "@maestro/engine";
-import { findingCountsByAgent, parsePullRequestRef } from "@maestro/integrations";
+import { findingCountsByAgent, parsePullRequestRef, recordDismissal } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore, safeParsePlaybook } from "@maestro/playbook";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -134,17 +134,18 @@ export function buildServer(deps: McpDeps): McpServer {
       inputSchema: { findingId: z.string(), reason: z.string().optional() },
     },
     async ({ findingId, reason }) => {
-      const done = db
-        .prepare(
-          "UPDATE findings SET status='dismissed', suppressed_reason=COALESCE(?, suppressed_reason) WHERE id=?",
-        )
-        .run(reason ?? null, findingId);
-      // `ok: true` for a finding that does not exist told the caller the dismissal
-      // landed when nothing was updated. This tool is the feedback signal precision is
-      // measured from, so a silently dropped dismissal is not a cosmetic error: the
-      // number it feeds is quietly wrong, and a person who typed the id slightly wrong
+      // Through `recordDismissal`, which writes the `feedback` row as well as settling the
+      // status. This wrote the status alone, so the most deliberate feedback signal in the
+      // system — somebody typing a dismissal — was the one absent from the table the
+      // quality loop is measured from.
+      //
+      // `ok: true` for a finding that does not exist told the caller the dismissal landed
+      // when nothing was updated. A silently dropped dismissal is not a cosmetic error:
+      // the number it feeds is quietly wrong, and a person who typed the id slightly wrong
       // has no way to know.
-      if (done.changes === 0) return text(`no finding with id ${findingId}`);
+      if (!recordDismissal(db, findingId, { reason })) {
+        return text(`no finding with id ${findingId}`);
+      }
       return text({ ok: true, findingId, reason });
     },
   );

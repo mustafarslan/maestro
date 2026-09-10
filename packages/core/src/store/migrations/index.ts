@@ -1,5 +1,6 @@
 import { up as m001 } from "./001_init.js";
 import { up as m002 } from "./002_trajectories.js";
+import { up as m003 } from "./003_comment_kind.js";
 
 export interface Migration {
   version: number;
@@ -14,4 +15,5 @@ export interface Migration {
 export const migrations: Migration[] = [
   { version: 1, name: "init", sql: m001 },
   { version: 2, name: "trajectories", sql: m002 },
+  { version: 3, name: "comment-kind", sql: m003 },
 ];
