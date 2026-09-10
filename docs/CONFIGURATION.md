@@ -279,8 +279,9 @@ output tokens down 43%, input tokens up 3% — and made the held-out reviews sli
 recall 90% to 80%, precision 67% to 57%. That is one finding out of six on five fixtures, so
 it is a direction rather than a measurement. `docs/STATUS.md` finding 234 has the whole
 account, including the hypothesis it was built on turning out to be false. It is off by
-default, it is not a schema field, and it is worth reaching for today only if you are paying
-per review rather than per finding.
+default and it is not a schema field. What it buys and what it costs are the two numbers
+above; which of them matters more is a judgement about your own repository, not one this
+document can make for you.
 
 ## Spend caps
 

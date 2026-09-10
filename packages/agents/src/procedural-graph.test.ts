@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   guidanceFor,
   PG_START,
   type ProceduralGraph,
+  ProceduralGraphSchema,
   proceduralGraphFrom,
 } from "./procedural-graph.js";
 
@@ -140,5 +143,27 @@ describe("reading a graph out of a node's config", () => {
     });
     expect(parsed?.nodes[0]).toEqual({ id: "git_diff", type: "ACTION", description: "" });
     expect(parsed?.edges[0]?.relation).toBe("LEADS_TO");
+  });
+});
+
+describe("the graph shipped in docs/", () => {
+  it("still parses, so the documented example is not quietly stale", () => {
+    // `docs/procedural-graph-architecture.json` is the graph the measured experiment used
+    // and CONFIGURATION.md tells people to paste it in. Nothing else reads it, which makes
+    // it exactly the shape of defect this repository has recorded most often: a file that
+    // looks load-bearing, drifts from the schema, and says nothing when it does.
+    const raw = readFileSync(
+      join(import.meta.dirname, "../../../docs/procedural-graph-architecture.json"),
+      "utf8",
+    );
+    const parsed = ProceduralGraphSchema.safeParse(JSON.parse(raw));
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
+    // And it is a graph, not a node list: every edge reaches nodes that exist.
+    const ids = new Set(parsed.data?.nodes.map((n) => n.id));
+    for (const e of parsed.data?.edges ?? []) {
+      expect(ids.has(e.from), `edge from unknown node ${e.from}`).toBe(true);
+      expect(ids.has(e.to), `edge to unknown node ${e.to}`).toBe(true);
+    }
   });
 });
