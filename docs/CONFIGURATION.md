@@ -241,6 +241,22 @@ it prints a partial report saying which agents did not complete. A second Ctrl-C
 immediately without waiting, in case the cleanup is itself stuck — which will leave
 containers behind, and `maestro reap` collects them.
 
+## Concurrency
+
+Four limits apply to agent admission at once, and the tightest one wins:
+
+| Limit | Default | Applies to |
+| --- | --- | --- |
+| `global` | 6 | every agent across every review |
+| `perProvider` | 4 | agents resolving to one provider |
+| `perRepo` | 3 | agents reviewing one repository |
+| `perAgent` | 2 | one agent id across concurrent reviews |
+
+**With a single provider configured, `perProvider` is the ceiling and `global` is
+unreachable** — raising `global` alone changes nothing. That is the ordinary case: a fresh
+install has one credential. Measured, with 30 concurrent reviews across 3 repositories:
+peak admission was 4, exactly `perProvider`, never 6.
+
 ## Load
 
 `scripts/load-check.mjs` runs the Phase 7 scenario against real Docker: N reviews across M

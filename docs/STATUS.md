@@ -32,8 +32,14 @@ What that leaves, in order of how much it would tell us:
    browser and a public callback.
 2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local
    stand-in. Ollama Cloud served every model in the live run.
-3. **Forty real containers.** The load scenario is real concurrency over a simulated
-   sandbox; the live run exercised three concurrent agent containers, not forty.
+3. ~~**Forty real containers.**~~ **Done.** `scripts/load-check.mjs` runs the Phase 7
+   scenario against real Docker — 30 reviews across 3 repositories, more than the 10 the
+   phase asks for. All 30 completed, peak admission was exactly the binding limit and never
+   over it, and nothing was left behind: no containers, no fairness tallies. The provider is
+   stubbed, because the scenario is about containers, admission and teardown and real agent
+   runs would cost an hour to say nothing about any of them. What remains untested by it is
+   an unclean kill of `serve` mid-review, whose mechanics are covered by tests and whose
+   startup sweep is verified.
 
 None is a missing implementation; each is a claim only the real thing can settle.
 
@@ -2680,6 +2686,23 @@ the server never sends fails it, and removing `live` from the server's response 
     and is what `pkill` had sent when the leak was first observed, so the comparison was
     redone with it: without the handler, three containers left; with it, zero, and the
     review prints a correctly-stated partial report on the way out.
+
+199. **The global concurrency limit is unreachable on a normal install, and the load
+    harness passed without noticing.** Four limits gate agent admission and the tightest
+    wins. `perProvider` defaults to 4 and `global` to 6, and every agent in a single-credential
+    install resolves to one provider — so admission is capped at 4 and `global` never binds.
+    An operator raising it alone would see nothing change.
+
+    The first version of the load harness asserted `peak <= global`, saw a peak of 4 against
+    a limit of 6, and passed. That is a green result about admission from a run in which
+    admission was never under pressure — the same vacuous shape this file records over and
+    over, written by me, in the harness whose entire purpose is to exercise that mechanism.
+    It now asserts peak equals the binding limit exactly: too high fails, and so does too
+    low, because a run that never reached the ceiling did not test it.
+
+    Measured at 30 reviews across 3 repositories: peak 4, binding limit 4. Documented in
+    `docs/CONFIGURATION.md`, since "raise `global`" is otherwise reasonable advice that does
+    nothing.
 
 ### Found by mechanical sweep, still open
 

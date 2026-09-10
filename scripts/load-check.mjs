@@ -153,15 +153,33 @@ const other = outcomes.filter((o) => o.state !== "done");
 const after = managed();
 
 console.log(`\n  completed        ${done}/${REVIEWS} in ${seconds}s`);
-console.log(`  peak concurrent  ${peak} agent slot(s) (limit ${DEFAULT_LIMITS.global})`);
+console.log(
+  `  peak concurrent  ${peak} agent slot(s) (binding limit ${Math.min(DEFAULT_LIMITS.global, DEFAULT_LIMITS.perProvider)}` +
+    `, global ${DEFAULT_LIMITS.global}, per-provider ${DEFAULT_LIMITS.perProvider})`,
+);
 console.log(`  containers       ${before} before, ${after} after`);
 console.log(`  scheduler        ${scheduler.trackedReviews()} review(s) still tracked`);
 for (const o of other) console.log(`  NOT DONE         ${o.state} ${o.error ?? ""}`);
 
 const failures = [];
 if (done !== REVIEWS) failures.push(`${REVIEWS - done} review(s) did not complete`);
-if (peak > DEFAULT_LIMITS.global)
-  failures.push(`peak concurrency ${peak} exceeded the limit of ${DEFAULT_LIMITS.global}`);
+// The limit that actually binds, which is not the global one.
+//
+// Every agent here resolves to a single provider, so `perProvider` caps admission below
+// `global` and `global` is unreachable. Asserting against `global` would have been a test
+// that passes without ever exercising the thing it names — the first version did exactly
+// that, reporting a peak of 4 against a limit of 6 and calling it a pass.
+const ceiling = Math.min(DEFAULT_LIMITS.global, DEFAULT_LIMITS.perProvider);
+if (peak > ceiling)
+  failures.push(`peak concurrency ${peak} exceeded the binding limit of ${ceiling}`);
+// And a run that never reached it did not test it: "peak <= limit" passes trivially when
+// nothing ever queued, and a green result that proves nothing about admission is worse
+// than no result, because it reads as though it does.
+if (peak < ceiling)
+  failures.push(
+    `peak concurrency only reached ${peak} of ${ceiling}, so admission was never under ` +
+      "pressure and this run says nothing about it — raise the review count",
+  );
 if (after > before) failures.push(`${after - before} container(s) leaked`);
 if (scheduler.trackedReviews() !== 0)
   failures.push(`${scheduler.trackedReviews()} review(s) leaked a fairness tally`);
