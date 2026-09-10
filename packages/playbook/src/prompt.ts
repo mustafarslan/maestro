@@ -107,8 +107,14 @@ export const TEMPLATE_VARIABLES = [
     description: "Commands this agent is allowed to run, comma-joined",
   },
   {
+    // Fenced, and the two halves of this codebase disagreed about it. `buildUserPrompt`
+    // has always wrapped these, under a comment calling them attacker-derived — they are
+    // model text written from a diff whoever opened the pull request controls, so they
+    // are no more trustworthy than the diff. This column said otherwise, so a persona
+    // reading `{{carriedFindings}}` spliced the same strings into the *system* prompt
+    // unfenced, which is the one place the fence exists to keep them out of.
     path: "carriedFindings",
-    untrusted: false,
+    untrusted: true,
     description: "Titles of unresolved findings from the previous round",
   },
 ] as const;

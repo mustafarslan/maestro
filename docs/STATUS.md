@@ -3729,6 +3729,26 @@ committed, traced the new config field through three packages, and found that no
     What this does not verify remains the write half: a review Maestro posted, a thumbs-down
     left on one of its inline comments, and exactly one finding dismissed. That needs a
     repository somebody is willing to have Maestro write to.
+
+236. **A persona mentioning `{{carriedFindings}}` spliced attacker-derived text into the
+    system prompt.** The two halves of the prompt builder disagreed about the same values.
+    `buildUserPrompt` has always wrapped carried findings in the untrusted fence, under a
+    comment calling them attacker-derived — they are model text written from a diff whoever
+    opened the pull request controls, and are no more trustworthy than the diff.
+    `TEMPLATE_VARIABLES` marked the same path `untrusted: false`, and that column is what
+    decides whether `renderTemplate` fences a value. So the user prompt fenced them and any
+    persona that referenced them put the identical strings into the *system* prompt raw —
+    the one place the fence exists to keep them out of, beside the injection defenses and
+    above the output contract.
+
+    Not reachable by the default personas, none of which mention the variable. Reachable by
+    anyone who edits one, which is what the variable is for. Flagged in this session's plan
+    as pre-existing and in the blast radius, and then nearly left there.
+
+    Marked untrusted, and the guard is the whole table rather than the one row: every
+    variable derived from what a pull request author writes must be on the fenced side, and
+    the test names the ten rather than checking a boolean somebody could flip back.
+    Mutation-checked.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion

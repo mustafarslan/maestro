@@ -204,6 +204,32 @@ describe("template variables", () => {
     }
   });
 
+  it("fences every variable derived from what a pull request author controls", () => {
+    // The `untrusted` column decides whether `renderTemplate` fences a value into the
+    // *system* prompt, so a value marked trusted here that `buildUserPrompt` fences over
+    // there is a disagreement with only one safe reading. `carriedFindings` was exactly
+    // that: model text written from an attacker-controlled diff, wrapped in the user
+    // prompt under a comment saying so, and spliced raw into the system prompt by any
+    // persona that mentioned it.
+    const derived = new Set([
+      "pr.title",
+      "pr.description",
+      "pr.author",
+      "diff.summary",
+      "diff.changedFiles",
+      "linear.identifier",
+      "linear.title",
+      "linear.description",
+      "linear.acceptanceCriteria",
+      "carriedFindings",
+    ]);
+    for (const v of TEMPLATE_VARIABLES) {
+      expect(v.untrusted, `${v.path} is on the wrong side of the fence`).toBe(derived.has(v.path));
+    }
+    // And the rendering really is fenced, not merely flagged.
+    expect(renderTemplate("{{carriedFindings}}", FULL_CONTEXT)).toContain("untrusted-content");
+  });
+
   it("names the variables a persona references that do not exist", () => {
     // The spelling in Maestro's own design document, against a field named
     // `acceptanceCriteria`. It renders empty, so nothing at run time reveals it.
