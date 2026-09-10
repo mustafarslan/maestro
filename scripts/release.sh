@@ -74,14 +74,23 @@ if [ -n "$LINUX_ASSET" ]; then
   CID="$(docker create --entrypoint /usr/local/bin/maestro debian:bookworm-slim egress-proxy --help)"
   docker cp "$LINUX_ASSET" "$CID:/usr/local/bin/maestro" >/dev/null
   docker start -a "$CID" >/dev/null 2>&1 || true
-  if docker logs "$CID" 2>&1 | grep -q "egress-proxy"; then
-    echo "  linux binary carries egress-proxy"
-  else
-    docker rm -f "$CID" >/dev/null
-    echo "the linux binary does not answer 'egress-proxy --help'" >&2
-    exit 1
-  fi
+  # Captured into a variable rather than piped into `grep -q`. Under `pipefail` that
+  # pipeline fails whenever grep matches early enough to close the pipe before `docker
+  # logs` has finished writing: grep exits 0, docker logs takes SIGPIPE and exits
+  # non-zero, and pipefail reports the pipeline as failed. It is a race, so the check
+  # refused a perfectly good binary on one run and passed it on the next — which is worse
+  # than either outcome, and is the third time this repository has been bitten by a
+  # pipeline's exit status not being the exit status of the command that mattered.
+  LOGS="$(docker logs "$CID" 2>&1 || true)"
   docker rm -f "$CID" >/dev/null
+  case "$LOGS" in
+    *egress-proxy*) echo "  linux binary carries egress-proxy" ;;
+    *)
+      echo "the linux binary does not answer 'egress-proxy --help'; it said:" >&2
+      echo "$LOGS" | head -5 >&2
+      exit 1
+      ;;
+  esac
 else
   echo "  (no docker; skipped the egress-proxy check on the linux asset)"
 fi

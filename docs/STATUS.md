@@ -2959,6 +2959,27 @@ the server never sends fails it, and removing `live` from the server's response 
     The redirect is `http://127.0.0.1:<port>/callback` and GitHub redirects the operator's own
     browser, so a laptop behind NAT needs nothing but a browser.
 
+215. **The release script's own verification was a race, and refused a good binary.** Caught by
+    running it for real: `scripts/release.sh --publish` stopped with "the linux binary does not
+    answer 'egress-proxy --help'" on a binary that answers it perfectly.
+
+    `docker logs "$CID" 2>&1 | grep -q "egress-proxy"` under `set -o pipefail`. `grep -q` exits
+    at the first match, closing the pipe; `docker logs` then takes SIGPIPE and exits non-zero;
+    `pipefail` reports the pipeline as failed. Whether it fires depends on whether the match
+    arrives before the writer finishes — so the same bytes passed on one run and failed on the
+    next, which is worse than failing consistently.
+
+    Captured into a variable and matched with `case` instead. It also prints what the binary
+    actually said when it fails, because "does not answer" with no evidence sent me to debug the
+    binary rather than the check.
+
+    Third time in this repository that a pipeline's exit status has not been the exit status of
+    the command that mattered — `scripts/ship.sh` exists because of the first two. The lesson
+    that keeps not generalising: `cmd | grep` reports grep, and under `pipefail` it can report
+    something neither of them meant.
+
+    It failed closed, which is the one part that behaved. Nothing was published.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
