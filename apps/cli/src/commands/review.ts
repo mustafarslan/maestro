@@ -32,6 +32,10 @@ ${color.bold("maestro review")} <path | pr-url | owner/repo#123> [options]
 
 Reviews a local checkout: prepares an isolated container, runs the playbook's
 agents against it, and prints the consolidated review.
+
+Needs Docker and at least one working provider. The default playbook binds its
+agents to Ollama Cloud models, which want ${color.bold("ollama signin")} once; ${color.bold("maestro doctor")}
+reports what is missing and ${color.bold("maestro llm test --all")} proves a model answers.
 `);
   return 1;
 }

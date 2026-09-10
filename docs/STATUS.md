@@ -2749,6 +2749,59 @@ the server never sends fails it, and removing `live` from the server's response 
 
     Mutation-checked by making every provider error retryable, which fails both.
 
+201. **`maestro reap -h` ran the destructive sweep.** `rejectUnknownFlags` lists `-h` in the
+    set it accepts, so `-h` reaches the command; every command then tested only
+    `argv.includes("--help")`. The two spellings disagreed, and the error message had
+    already promised the flag was understood. Running it printed `· swept nothing to
+    sweep` and `✓ records 6 stale environment row(s) closed` — the sweep did happen, and
+    it closed rows. `serve` had the same shape; `evaluate`, `llm`, `playbook` and
+    `github-app` checked `argv[0]` only, so `maestro llm test --help` ran the test rather
+    than describing it.
+
+    One spelling now: `wantsHelp(argv)` in `apps/cli/src/args.ts`, at all six call sites.
+    The tests assert `reap -h` never reaches Docker and that help works after a
+    subcommand.
+
+    Found by Maestro reviewing its own commit — the first review where each agent ran a
+    different model. It is the most useful finding the tool has produced about itself,
+    because the guard's own accept-list was the thing that made the bug reachable, and
+    reading either file alone would not show it.
+
+202. **Four agents, four models, one review.** Playbook v3 binds `security` to
+    `glm-5.3:cloud`, `architecture` to `deepseek-v4-pro:cloud`, `product` to
+    `kimi-k3:cloud` and `ui-ux` to `gpt-oss:20b-cloud` — the arrangement the
+    cross-agent agreement boost was designed for, since two copies of one model agreeing
+    is one opinion stated twice.
+
+    Five findings. One was the `-h` bug above. One was correct but not a defect: the diff
+    did not match the commit title, which is true, and is an artefact of diffing twenty
+    commits under one `--base`. The rest were noise. A ~20% real rate on a codebase this
+    heavily reviewed is roughly what the triage thresholds are calibrated for.
+
+203. **`maestro review --help` never said it needed a provider.** Reported in the same
+    review, with the details wrong and the gap real. It claimed the help text drops an
+    `ollama pull` instruction; there is no such instruction anywhere, and the default
+    playbook binds `:cloud` models, which want `ollama signin` rather than a pull. But
+    `review` was the one command that described its flags without saying it needs Docker
+    and a working provider at all — so a fresh install's first command fails on a
+    prerequisite its own help never mentioned. It now names them and points at `doctor`
+    and `llm test --all`.
+
+    Worth recording as a shape: the finding was worth acting on and its stated reason was
+    not true. Triage cannot tell those apart, which is the argument for reading findings
+    rather than applying them.
+
+204. **The reviews list was the only table in the UI without column headers — and its
+    selection was announced to nobody.** `<tr aria-selected>` is only meaningful inside a
+    grid; on a plain table the attribute is invalid and screen readers drop it, so the
+    keyboard navigation added earlier led somewhere that never said where it had landed.
+
+    The obvious repair — `role="grid"` on the table, which is the upgrade ARIA defines for
+    exactly this — is rejected by Biome's `noNoninteractiveElementToInteractiveRole`. Rather
+    than suppress the rule, the row now carries `aria-current`, which is valid on any
+    element and says the truer thing: this is the row the detail pane is showing. Plus a
+    `<thead>`, matching Environments, Providers and Quality.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

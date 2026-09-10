@@ -160,7 +160,16 @@ export function Reviews({ reviews }: { reviews: ReviewRow[] }) {
             </div>
           </div>
         ) : (
+          // Every other table in this UI names its columns; this one was the exception.
           <table>
+            <thead>
+              <tr>
+                <th scope="col">Review</th>
+                <th scope="col" style={{ textAlign: "right" }}>
+                  State
+                </th>
+              </tr>
+            </thead>
             <tbody>
               {reviews.map((r) => (
                 // A row that only responds to a click is unreachable by keyboard, which
@@ -169,7 +178,12 @@ export function Reviews({ reviews }: { reviews: ReviewRow[] }) {
                   key={r.id}
                   className={`clickable ${selected === r.id ? "selected" : ""}`}
                   tabIndex={0}
-                  aria-selected={selected === r.id}
+                  // `aria-selected` was here, and meant nothing: it is only defined for
+                  // rows inside a grid, so screen readers dropped it and the keyboard
+                  // navigation moved between rows that never said where it had landed.
+                  // `aria-current` is valid on any element and says the true thing —
+                  // this is the row the detail pane is showing.
+                  aria-current={selected === r.id ? "true" : undefined}
                   onClick={() => setSelected(r.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
