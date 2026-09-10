@@ -1,8 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { openStore, type SqlDatabase } from "@maestro/core";
+import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { evaluate } from "./commands/evaluate.js";
+import { evaluate, resolveEvalPlaybook } from "./commands/evaluate.js";
 import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
 
@@ -128,5 +130,48 @@ describe("registering a provider does not quietly replace one", () => {
     ).toBe(0);
     expect(logs.join("\n")).toContain("registered");
     expect(await baseUrlOf("my-vllm")).toBe("http://y/v1");
+  });
+});
+
+/**
+ * `--playbook` scores a version without activating it.
+ *
+ * Two arms of an experiment used to be two `playbook activate` calls, so a measurement
+ * changed what every other review on the machine would use, and a run that died between
+ * them left the wrong one active with nothing saying so.
+ *
+ * Against a real store, because the interesting half is the lookup and not the message:
+ * the message names the requested version on both branches, so a test that only read it
+ * passed with the lookup mutated back to `getActive`.
+ */
+describe("choosing which playbook version a run scores", () => {
+  let db: SqlDatabase;
+  let store: PlaybookStore;
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    store = new PlaybookStore(db);
+  });
+
+  it("scores the version named, not the active one", () => {
+    const active = store.publish(defaultPlaybook(), { activate: true });
+    const other = store.publish(defaultPlaybook(), { activate: false });
+    expect(other.id).not.toBe(active.id);
+
+    const resolved = resolveEvalPlaybook(store, other.id);
+    expect("record" in resolved && resolved.record.id).toBe(other.id);
+  });
+
+  it("falls back to the active default when none is named", () => {
+    const active = store.publish(defaultPlaybook(), { activate: true });
+    const resolved = resolveEvalPlaybook(store, undefined);
+    expect("record" in resolved && resolved.record.id).toBe(active.id);
+  });
+
+  it("names the version that does not exist rather than sending anyone to 'maestro init'", () => {
+    store.publish(defaultPlaybook(), { activate: true });
+    const resolved = resolveEvalPlaybook(store, "pv_nope");
+    expect("error" in resolved && resolved.error).toContain("pv_nope");
+    expect("error" in resolved && resolved.error).not.toContain("maestro init");
   });
 });

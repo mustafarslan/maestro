@@ -19,7 +19,7 @@ import {
 } from "@maestro/engine";
 import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
-import { PlaybookStore } from "@maestro/playbook";
+import { PlaybookStore, type PlaybookVersionRecord } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { arg, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { checkLine, color } from "../ui.js";
@@ -54,6 +54,7 @@ ${color.bold("maestro eval")} <subcommand>
     --split train|val        which half of the golden set it belongs to (default val)
   run [--fixture <name>]     review each fixture and score it against its answer key
     --split train|val        run only that half
+    --playbook <version-id>  score that version instead of the active default
   report                     precision and recall per playbook version and split
 
 A fixture is a repository state with a known answer key. Scoring against it turns
@@ -76,8 +77,35 @@ function splitFlag(argv: string[]): EvalSplit | undefined | null {
   return null;
 }
 
+/**
+ * Which playbook version a run scores: the one named, else the active default.
+ *
+ * `--playbook` exists so that measuring a version does not mean activating it. Comparing
+ * two pipelines used to be two `playbook activate` calls, which made a measurement change
+ * what every other review on this machine would use, and left the wrong one active if the
+ * run died between them. The version under measurement is a poor thing for a global
+ * setting to be.
+ *
+ * A function rather than four lines inline, because the guard has to be able to fail: with
+ * it inline, a test could only reach the error string, and the error string names the
+ * requested version on both branches — so mutating the lookup back to `getActive` left
+ * every assertion passing.
+ */
+export function resolveEvalPlaybook(
+  store: Pick<PlaybookStore, "getVersion" | "getActive">,
+  wantVersion: string | undefined,
+): { record: PlaybookVersionRecord } | { error: string } {
+  const record = wantVersion ? store.getVersion(wantVersion) : store.getActive("default");
+  if (record) return { record };
+  return {
+    error: wantVersion
+      ? `no playbook version '${wantVersion}'. Run 'maestro playbook versions' to list them.`
+      : "no active playbook - run 'maestro init'",
+  };
+}
+
 export async function evaluate(argv: string[]): Promise<number> {
-  rejectUnknownFlags(argv, ["--base", "--fixture", "--split"]);
+  rejectUnknownFlags(argv, ["--base", "--fixture", "--playbook", "--split"]);
   const sub = argv[0];
   if (wantsHelp(argv)) return usage(0);
   if (!sub) return usage();
@@ -190,11 +218,13 @@ export async function evaluate(argv: string[]): Promise<number> {
 
   const db = await openStore();
   try {
-    const playbookRecord = new PlaybookStore(db).getActive("default");
-    if (!playbookRecord) {
-      console.error("no active playbook - run 'maestro init'");
+    const wantVersion = arg(argv, "--playbook");
+    const resolved = resolveEvalPlaybook(new PlaybookStore(db), wantVersion);
+    if ("error" in resolved) {
+      console.error(resolved.error);
       return 1;
     }
+    const playbookRecord = resolved.record;
     const providers = new ProviderConfigStore(db);
     providers.ensureDefaults();
     const registry = await providers.buildRegistry();
@@ -206,7 +236,8 @@ export async function evaluate(argv: string[]): Promise<number> {
 
     console.log(
       color.bold(
-        `\nevaluating ${fixtures.length} fixture(s) against playbook v${playbookRecord.version}\n`,
+        `\nevaluating ${fixtures.length} fixture(s) against playbook v${playbookRecord.version}` +
+          `${wantVersion ? ` (${playbookRecord.id}, not the active one)` : ""}\n`,
       ),
     );
     let failures = 0;

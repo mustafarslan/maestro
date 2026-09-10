@@ -3641,12 +3641,15 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
   base branch at review time rather than cached in a column. Both are decisions; the columns are
   what is left of an earlier plan.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
-- **`maestro eval run` can only score the active default playbook.** `getActive("default")`
-  is the only source, so comparing two pipelines means publishing and activating each in
-  turn — including the case the split exists for, measuring one agent by disabling the
-  others. A `--playbook <version>` flag is the obvious fix and is not built; until it is,
-  the version under measurement is a global setting, which is a poor thing for a
-  measurement to be.
+- ~~**`maestro eval run` can only score the active default playbook.**~~ **Fixed.**
+  `--playbook <version-id>` scores a version without activating it. It mattered more than it
+  reads: the three runs behind finding 234 were three `playbook activate` calls, so measuring
+  changed what every other review on that machine would have used, and a run that died
+  between them would have left the wrong playbook active with nothing saying so. The lookup
+  is a function rather than four lines inline, because the error string names the requested
+  version on *both* branches — a test that read only the message passed with the lookup
+  mutated back to `getActive`, which is the guard-that-holds-nothing shape this file has a
+  section about.
 - ~~**Reaction feedback is ungated, and its delivery is unproven.**~~ **Answered, and fixed
   properly.** GitHub's webhook catalogue has no `reaction` event — checked against the published
   documentation rather than guessed at — so the daemon's handler for one could never fire. The

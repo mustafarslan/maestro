@@ -220,6 +220,7 @@ Every fixture belongs to one of two halves:
 maestro eval add my-case ./repo --split train    # a case a change may be tuned against
 maestro eval add my-case ./repo                  # held out; this is the default
 maestro eval run --split val                     # score only the held-out half
+maestro eval run --playbook pv_1234...           # score a version without activating it
 maestro eval report                              # both halves, reported separately
 ```
 
