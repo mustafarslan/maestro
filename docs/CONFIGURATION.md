@@ -304,6 +304,72 @@ The daemon says so on startup when it finds reviews in that state, so an apparen
 queue is distinguishable from a genuinely stuck one. Containers left by the killed process
 are swept by the startup reap unless they belong to a review still inside that window.
 
+## Checking a pull request's claims
+
+A pull request that says "3x faster", "fixes the flaky login test" or "smaller bundle" is,
+by default, just text. `envSpec.compareCommands` makes those claims checkable: each command
+runs at the **merge base** — the commit the pull request was written against — and again at
+the head, and both results are given to the agents as evidence and printed in the review.
+
+```yaml
+# playbook.yaml
+envSpec:
+  compareCommands:
+    - npm test
+    - npm run build
+```
+
+Off unless you set it. There is no `auto`: every other command list can be detected from the
+toolchain because there is a right answer, but which command bears on a claim is a judgement,
+and a measurement nobody asked for is a measurement nobody should trust.
+
+**What it reports, and what it refuses to report.**
+
+The verdict is the exit code and nothing else. A test that fails at the merge base and passes
+at the head is a fact about the change; that is what the review says, and it is the signal
+worth acting on. Timings are printed raw, per run, alongside how many other agent containers
+were running at the time — and never as a ratio. A container with two CPUs sharing a host
+with other reviews is a poor benchmark host, and "1.8x faster" states far more than two
+samples taken there can support.
+
+Output differences are shown but never turned into a verdict. Test runners print timestamps,
+durations and temporary paths, so two identical runs differ byte for byte; a normalisation
+rule that is subtly wrong yields a confident wrong answer, which is worse than no answer. The
+agents read the output and judge it.
+
+Commands are repeated three times per side when the first run took under 30 seconds, so the
+spread is visible; slower commands run once and the review says variance was not measured.
+The decision uses the slower of the two sides, so both always get the same number of samples.
+
+**When it does not run**, the review says so rather than printing an empty table — "we did
+not check" and "we checked and found nothing" are different claims:
+
+| Situation | Reported as |
+| --- | --- |
+| Fork pull request | `fork pull requests execute no commands` |
+| Fork point not found in the clone | `the fork point could not be found, so there is no baseline` |
+| Merge-base environment failed to build | `the merge-base environment could not be prepared` |
+| The command is new in this pull request | `does not exist at the merge base` |
+
+That last row matters: an npm script the pull request *adds* exits non-zero at the base with
+"Missing script", which by exit code alone is indistinguishable from a failing test. Calling
+it a base-side failure would manufacture exactly the "fixed" verdict the feature exists to
+earn honestly.
+
+**Cost and safety.** This is a second prepared environment and two more analyze containers
+per review, and they are not counted against the scheduler's concurrency limits. Fork pull
+requests are excluded twice over — `compareCommands` is emptied along with `setup` and
+`allowedCommands`, and the engine refuses again on `trust`. Entries go through the same
+deny-pattern check as `allowedCommands`, so a shell metacharacter or a network tool is
+rejected when the playbook is saved. A repository's `.maestro.yaml` may remove a command
+from this list but never add one.
+
+Local reviews work the same way, which is the cheapest way to try it:
+
+```
+maestro review . --base HEAD~1
+```
+
 ## Sandbox networking
 
 Only the `prepare` phase has any network, and only through an allowlist proxy. `analyze` runs

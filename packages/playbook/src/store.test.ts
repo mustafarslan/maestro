@@ -129,3 +129,27 @@ describe("assigning a playbook to one repository", () => {
     expect(store.assignmentFor(repoId)).toBeNull();
   });
 });
+
+describe("a version stored before a schema field existed stays usable", () => {
+  it("fills in fields the stored document predates", () => {
+    // Versions are immutable, so a document written before a field was added never gains
+    // it. `hydrate` used to cast the parsed JSON straight to PlaybookDocument, asserting
+    // that yesterday's shape matches today's type — and adding envSpec.compareCommands
+    // made `maestro doctor` crash on every pre-existing install, iterating a property
+    // that was undefined. Found by the gate against a real database, not reasoned about.
+    const seeded = store.ensureDefault();
+
+    // Rewrite the row as an older Maestro would have written it.
+    const old = JSON.parse(JSON.stringify(seeded.doc)) as {
+      envSpec: Record<string, unknown>;
+    };
+    delete old.envSpec.compareCommands;
+    db.prepare("UPDATE playbook_versions SET document=? WHERE id=?").run(
+      JSON.stringify(old),
+      seeded.id,
+    );
+
+    const read = store.ensureDefault();
+    expect(read.doc.envSpec.compareCommands).toEqual([]);
+  });
+});

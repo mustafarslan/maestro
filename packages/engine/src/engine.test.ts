@@ -497,3 +497,54 @@ describe("the stages a review reports", () => {
     expect(stages[0]).toBe("analyzing");
   });
 });
+
+describe("base-versus-head comparison is refused where commands are refused", () => {
+  const comparingPlaybook = (trust: "trusted" | "untrusted") => {
+    const doc = twoAgentPlaybook();
+    doc.envSpec = { ...doc.envSpec, trust, compareCommands: ["npm test"] };
+    return doc;
+  };
+
+  it("refuses on an untrusted review even when commands are still configured", async () => {
+    // `resolveEnvSpec` empties `compareCommands` for forks, but it is not the only way in:
+    // `maestro review` and `maestro eval` never call it, and `trust` is read in exactly
+    // one other place in the whole codebase. A guard that lived only in the webhook path
+    // would protect the webhook path and nothing else, so the engine checks again.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: comparingPlaybook("untrusted"), baselinePath: "/tmp/base" }),
+    );
+
+    expect(outcome.comparisons).toHaveLength(1);
+    expect(outcome.comparisons?.[0]?.skipped).toBe("untrusted");
+    // Skipped, and it says so: an empty result would read as "checked, nothing found".
+    expect(outcome.comparisons?.[0]?.base).toBeNull();
+  });
+
+  it("says there was no baseline rather than producing an empty comparison", async () => {
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: comparingPlaybook("trusted") }),
+    );
+    expect(outcome.comparisons?.[0]?.skipped).toBe("no-merge-base");
+  });
+
+  it("compares when the review is trusted and a baseline exists", async () => {
+    // Guards against the two tests above passing for the wrong reason: if nothing ever
+    // compared, "it skipped" would be satisfied by the feature being broken outright.
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ playbook: comparingPlaybook("trusted"), baselinePath: "/tmp/base" }),
+    );
+    expect(outcome.comparisons?.[0]?.skipped).toBeUndefined();
+    expect(outcome.comparisons?.[0]?.verdict).toBe("same-exit");
+  });
+
+  it("does nothing when no playbook asked for it", async () => {
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry() },
+      request({ baselinePath: "/tmp/base" }),
+    );
+    expect(outcome.comparisons).toBeUndefined();
+  });
+});

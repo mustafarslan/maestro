@@ -1,4 +1,5 @@
 export * from "./cache.js";
+export * from "./compare.js";
 export * from "./docker.js";
 export * from "./egress-proxy.js";
 export * from "./proxy-binary.js";

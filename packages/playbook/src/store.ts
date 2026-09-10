@@ -1,6 +1,10 @@
 import { newId, type SqlDatabase } from "@maestro/core";
 import { defaultPlaybook } from "./default-playbook.js";
-import { PLAYBOOK_SCHEMA_VERSION, type PlaybookDocument } from "./schema.js";
+import {
+  PLAYBOOK_SCHEMA_VERSION,
+  type PlaybookDocument,
+  PlaybookDocumentSchema,
+} from "./schema.js";
 import { parsePlaybook } from "./validate.js";
 
 export interface PlaybookVersionRecord {
@@ -23,13 +27,30 @@ interface VersionRow {
   created_at: string;
 }
 
+/**
+ * Reads a stored version, filling in fields that did not exist when it was written.
+ *
+ * Versions are immutable, so a document stored before a schema field was added never
+ * gains it — and this used to be `JSON.parse(...) as PlaybookDocument`, a bare cast
+ * asserting that yesterday's JSON matches today's type. That assertion is false the
+ * moment a field is added: adding `envSpec.compareCommands` made `maestro doctor` crash
+ * on every pre-existing install, iterating a property that was undefined.
+ *
+ * Parsing through the schema applies each field's default instead, which is what the
+ * defaults are for. A document that cannot be parsed at all is returned as it was found:
+ * old versions must stay readable for trace inspection even after the schema moves on,
+ * and refusing to hydrate one would make past reviews unexplainable — which is the thing
+ * immutable versions exist to guarantee.
+ */
 function hydrate(row: VersionRow): PlaybookVersionRecord {
+  const raw = JSON.parse(row.document) as PlaybookDocument;
+  const parsed = PlaybookDocumentSchema.safeParse(raw);
   return {
     id: row.id,
     playbookId: row.playbook_id,
     version: row.version,
     schemaVersion: row.schema_version,
-    doc: JSON.parse(row.document) as PlaybookDocument,
+    doc: parsed.success ? parsed.data : raw,
     notes: row.notes ?? undefined,
     createdAt: row.created_at,
   };

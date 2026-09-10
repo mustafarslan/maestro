@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   type CarriedFinding,
   logger,
@@ -140,6 +142,9 @@ export async function reviewPullRequest(
   const repoOverride = await readRepoConfig(client, pr);
   const envSpec = resolveEnvSpec(narrowEnvSpec(playbook.envSpec, repoOverride, log), pr);
   const workdir = mkdtempSync(join(tmpdir(), `maestro-${pr.repo}-`));
+  // Declared out here so the finally can remove it. A working-tree copy left behind on
+  // the failure path is exactly the kind of leak that only shows up as a full disk.
+  let baselineDir: string | undefined;
 
   try {
     reviews.setState(reviewId, "preparing");
@@ -159,6 +164,13 @@ export async function reviewPullRequest(
     // against existed only inside a prompt that is discarded when the review ends.
     if (issue) reviews.setLinearIssue(reviewId, issue);
 
+    // A second checkout at the fork point, so configured commands can be run "before"
+    // as well as "after". Only when a playbook asked for it — this costs a copy of the
+    // working tree and a second prepared environment.
+    if (envSpec.compareCommands.length) {
+      baselineDir = await materialiseBaseline(workdir, checkout.mergeBaseSha, log);
+    }
+
     const outcome = await runReview(
       { ...opts.deps, db },
       {
@@ -173,6 +185,7 @@ export async function reviewPullRequest(
         // point is missing, and both halves of that fallback exit 0 — so without this
         // the review would read the wrong diff and say nothing.
         diffDegraded: !checkout.mergeBase,
+        baselinePath: baselineDir,
         // The stages the board shows. Without this a review went `preparing` straight to
         // `posting`, so `analyzing` and `triaging` — both declared, both in
         // `IN_FLIGHT_STATES` — were written by nothing, and the live board reported
@@ -265,6 +278,51 @@ export async function reviewPullRequest(
     throw err;
   } finally {
     rmSync(workdir, { recursive: true, force: true });
+    if (baselineDir) rmSync(baselineDir, { recursive: true, force: true });
+  }
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * A checkout of the fork point, copied from the one already on disk.
+ *
+ * A copy rather than a second clone: the shallow fetch is not a *partial* one, so once
+ * `ensureMergeBase` has succeeded the fork point's trees and blobs are already local, and
+ * cloning again would spend another token and another network round trip to fetch bytes
+ * we have. A copy also gives the container a real `.git` directory — `git worktree add`
+ * would leave a `.git` *file* holding an absolute host path, which means nothing once
+ * `docker cp` has moved it into a container.
+ *
+ * Returns undefined rather than throwing: no baseline is a comparison that says it was
+ * skipped, which is a far better outcome than a review that fails.
+ */
+async function materialiseBaseline(
+  workdir: string,
+  mergeBaseSha: string | null,
+  log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void },
+): Promise<string | undefined> {
+  if (!mergeBaseSha) {
+    log.warn({}, "no fork point, so no baseline to compare against");
+    return undefined;
+  }
+  const dir = mkdtempSync(join(tmpdir(), "maestro-base-"));
+  try {
+    await execFileAsync("cp", ["-R", `${workdir}/.`, dir], { maxBuffer: 64 * 1024 * 1024 });
+    const git = (args: string[]) =>
+      execFileAsync("git", ["-C", dir, ...args], { maxBuffer: 64 * 1024 * 1024 });
+    await git(["checkout", "--quiet", "--force", mergeBaseSha]);
+    // Untracked files are not carried by `git checkout`, so the head checkout's leftovers
+    // would otherwise sit in the baseline tree and be measured as if they were the base.
+    // Not `-x`: that would also remove ignored files, which on a local review is where
+    // the dependencies live.
+    await git(["clean", "-fd"]);
+    log.info({ mergeBaseSha }, "baseline checkout ready");
+    return dir;
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : err }, "baseline checkout failed");
+    rmSync(dir, { recursive: true, force: true });
+    return undefined;
   }
 }
 
@@ -280,6 +338,11 @@ export function resolveEnvSpec(base: EnvSpec, pr: PullRequestContext): EnvSpec {
     trust: "untrusted",
     setup: [],
     allowedCommands: [],
+    // Base-versus-head comparison runs the repository's commands twice, so it is command
+    // execution by another name and belongs in this list. Emptying it here is the primary
+    // guard; the engine refuses again on `trust` rather than relying on this one, because
+    // the two other `runReview` entry points never call this function.
+    compareCommands: [],
     egressAllowlist: [],
   };
 }
@@ -297,6 +360,7 @@ const RepoConfigSchema = z.object({
         })
         .optional(),
       allowedCommands: z.array(z.string()).optional(),
+      compareCommands: z.array(z.string()).optional(),
       egressAllowlist: z.array(z.string()).optional(),
     })
     .optional(),
@@ -356,6 +420,9 @@ export function narrowEnvSpec(
     allowedCommands: spec.allowedCommands
       ? base.allowedCommands.filter((c) => spec.allowedCommands?.includes(c))
       : base.allowedCommands,
+    compareCommands: spec.compareCommands
+      ? base.compareCommands.filter((c) => spec.compareCommands?.includes(c))
+      : base.compareCommands,
     egressAllowlist: spec.egressAllowlist
       ? base.egressAllowlist.filter((h) => spec.egressAllowlist?.includes(h))
       : base.egressAllowlist,

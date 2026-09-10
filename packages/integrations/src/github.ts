@@ -602,7 +602,7 @@ export async function checkoutPullRequest(
   token?: string,
   /** Extra commit to fetch, so an incremental review can diff against the last round. */
   alsoFetch?: string,
-): Promise<{ mergeBase: boolean }> {
+): Promise<{ mergeBase: boolean; mergeBaseSha: string | null }> {
   const url = token
     ? pr.cloneUrl.replace("https://", `https://x-access-token:${token}@`)
     : pr.cloneUrl;
@@ -636,12 +636,12 @@ export async function checkoutPullRequest(
   }
   await run(["-C", dir, "checkout", "--quiet", pr.headSha]);
 
-  const mergeBase = await ensureMergeBase(run, dir, pr);
+  const mergeBaseSha = await ensureMergeBase(run, dir, pr);
 
   // Strip the credential so it cannot leak via .git/config into the container.
   await run(["-C", dir, "remote", "set-url", "origin", pr.cloneUrl]);
 
-  return { mergeBase };
+  return { mergeBase: mergeBaseSha !== null, mergeBaseSha };
 }
 
 /** Commits fetched initially. Enough for almost every pull request. */
@@ -666,24 +666,31 @@ const DEEPEN_STEPS = [200, 1000];
  *
  * Nothing reported it. The fallback is a `||` inside a shell command; both halves exit 0.
  *
- * Returns false when the fork point is still missing after deepening, so the review can
+ * Returns null when the fork point is still missing after deepening, so the review can
  * say its diff is unreliable rather than quietly reviewing the wrong change.
+ *
+ * Returns the SHA rather than a boolean because the fork point is also the only defensible
+ * baseline for running a command "before" the change. The base branch's tip is not: it
+ * carries every commit that landed there since the fork, so a command measured against it
+ * measures other people's work as well as this pull request's. This function already
+ * computed the commit and threw it away.
  */
 async function ensureMergeBase(
-  run: (args: string[]) => Promise<unknown>,
+  run: (args: string[]) => Promise<{ stdout: string }>,
   dir: string,
   pr: PullRequestContext,
-): Promise<boolean> {
+): Promise<string | null> {
   const found = async () => {
     try {
-      await run(["-C", dir, "merge-base", pr.baseSha, pr.headSha]);
-      return true;
+      const res = await run(["-C", dir, "merge-base", pr.baseSha, pr.headSha]);
+      return res.stdout.trim() || null;
     } catch {
-      return false;
+      return null;
     }
   };
 
-  if (await found()) return true;
+  const first = await found();
+  if (first) return first;
 
   for (const depth of DEEPEN_STEPS) {
     try {
@@ -701,9 +708,10 @@ async function ensureMergeBase(
     } catch {
       // A repository shallower than the step, or already complete. Ask again anyway.
     }
-    if (await found()) {
+    const sha = await found();
+    if (sha) {
       logger.info({ pr: pr.number, depth }, "deepened the clone to reach the fork point");
-      return true;
+      return sha;
     }
   }
 
@@ -712,5 +720,5 @@ async function ensureMergeBase(
     "fork point not found after deepening; the diff will compare two points rather than " +
       "the change, and will include commits this pull request did not make",
   );
-  return false;
+  return null;
 }

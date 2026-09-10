@@ -229,14 +229,23 @@ export function validateGraph(doc: PlaybookDocument): ValidationIssue[] {
 
   // ── Command allowlist deny-patterns: config is an attack surface too ──────
   const denied = /(?:^|[\s;|&])(curl|wget|nc|ncat|ssh|scp)\b|[|&;`$(){}<>]|\.\.\//;
-  for (const cmd of doc.envSpec.allowedCommands) {
-    if (cmd === "auto") continue;
-    if (denied.test(cmd)) {
-      issues.push({
-        code: "unsafe-command",
-        message: `allowedCommands entry '${cmd}' contains a shell metacharacter or network tool`,
-        target: cmd,
-      });
+  // Both lists, not just the first. `compareCommands` executes in a container exactly as
+  // `allowedCommands` does, so checking only its sibling would reopen a hole that was
+  // deliberately closed — through a field whose name does not say "this runs code".
+  const commandLists: [string, string[]][] = [
+    ["allowedCommands", doc.envSpec.allowedCommands],
+    ["compareCommands", doc.envSpec.compareCommands],
+  ];
+  for (const [field, commands] of commandLists) {
+    for (const cmd of commands) {
+      if (cmd === "auto") continue;
+      if (denied.test(cmd)) {
+        issues.push({
+          code: "unsafe-command",
+          message: `${field} entry '${cmd}' contains a shell metacharacter or network tool`,
+          target: cmd,
+        });
+      }
     }
   }
 

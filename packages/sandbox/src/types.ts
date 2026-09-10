@@ -57,6 +57,53 @@ export interface PreparedEnvironment {
   cacheHit?: boolean;
 }
 
+/**
+ * One command's result at one ref, as evidence rather than as a number.
+ *
+ * `durationsMs` is a list because a single sample under concurrent load says very little,
+ * and `concurrentAgents` is recorded per run rather than per comparison because the two
+ * refs are measured seconds apart and a review can start in between.
+ */
+export interface CommandRun {
+  exitCode: number;
+  stdoutTail: string;
+  stderrTail: string;
+  durationsMs: number[];
+  timedOut: boolean;
+  /** Agent containers running elsewhere while this was measured. */
+  concurrentAgents: number;
+}
+
+/**
+ * Why a comparison produced nothing.
+ *
+ * A skipped comparison has to say so. An empty result rendered as an empty table reads as
+ * "we checked and there was nothing", which is a different and much stronger claim.
+ */
+export type ComparisonSkip =
+  | "untrusted"
+  | "no-merge-base"
+  | "base-prepare-failed"
+  | "not-runnable"
+  | "not-configured";
+
+export interface CommandComparison {
+  command: string;
+  base: CommandRun | null;
+  head: CommandRun | null;
+  /**
+   * Exit codes only, on purpose.
+   *
+   * A test that failed at the merge-base and passes at the head is a defensible claim
+   * about a change. A timing difference measured in a 2-CPU container beside other
+   * reviews is not, and neither is an output diff: test runners print timestamps,
+   * durations and temp paths, so two identical runs differ byte for byte. Output is
+   * shown for a human and the agents to read; it never becomes a verdict here.
+   */
+  verdict: "fixed" | "broken" | "same-exit" | "not-comparable";
+  skipped?: ComparisonSkip;
+}
+
 /** One agent's isolated view of the prepared snapshot. */
 export interface Sandbox {
   id: string;

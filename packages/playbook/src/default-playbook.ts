@@ -327,6 +327,10 @@ and is far better than inventing filler.`,
       timeouts: { prepareSec: 600, analyzeSec: 900, commandSec: 300 },
       setup: ["auto"],
       allowedCommands: ["auto"],
+      // Off by default. Base-versus-head comparison doubles a review's command execution,
+      // and which command bears on a pull request's claim is a judgement no default can
+      // make. A repository opts in by naming the commands it wants checked.
+      compareCommands: [],
       egressAllowlist: ["registry.npmjs.org", "pypi.org", "proxy.golang.org", "crates.io"],
       // The allowlist above is a control rather than a request: prepare runs on an
       // --internal network whose only route out is the proxy container.

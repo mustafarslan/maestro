@@ -444,6 +444,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           // starts every agent of every review at once and the per-agent, per-repo and
           // per-provider limits are decoration.
           acquireSlot: (slot, signal) => scheduler.acquire(slot, signal),
+          // So a base-versus-head timing can say what else was competing for the host
+          // while it was taken. Only the daemon knows about the other reviews; a lone
+          // `maestro review` has nothing to report and supplies nothing.
+          sampleLoad: () => scheduler.stats().running,
         },
         playbook: doc,
         playbookVersionId: record.id,

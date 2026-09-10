@@ -141,3 +141,94 @@ describe("what the metrics block claims about the network", () => {
     expect(md).toContain("analyzed with no network access");
   });
 });
+
+describe("the base-versus-head table reports what it measured and no more", () => {
+  const withComparisons = (comparisons: ReviewOutcome["comparisons"]) =>
+    renderReview(
+      { ...outcome([{ agentId: "security", state: "done" }]), comparisons },
+      { title: "t" },
+    );
+
+  const run = (exitCode: number, durationsMs: number[]) => ({
+    exitCode,
+    stdoutTail: "",
+    stderrTail: "",
+    durationsMs,
+    timedOut: false,
+    concurrentAgents: 3,
+  });
+
+  it("states an exit-code change as the result", () => {
+    const out = withComparisons([
+      {
+        command: "npm test",
+        base: run(1, [9000]),
+        head: run(0, [8800]),
+        verdict: "fixed",
+      },
+    ]);
+    expect(out).toContain("Base vs head");
+    expect(out).toContain("fails on base, passes on head");
+  });
+
+  it("never prints a speedup ratio, however tempting the numbers are", () => {
+    // A ten-to-one difference measured in a two-CPU container beside three other agents
+    // is not a 10x speedup, and a number that claims more than its evidence supports is
+    // worse than no number at all. This is the assertion that keeps it that way.
+    const out = withComparisons([
+      { command: "npm test", base: run(0, [10_000]), head: run(0, [1_000]), verdict: "same-exit" },
+    ]);
+    expect(out).not.toMatch(/\d+(\.\d+)?\s*[x×]\s*(faster|slower)/i);
+    expect(out).not.toMatch(/\d+\s*%\s*(faster|slower)/i);
+    expect(out).toContain("no change in exit code");
+    expect(out).toContain("not expressed as a ratio");
+  });
+
+  it("says the load it was measured under", () => {
+    const out = withComparisons([
+      { command: "npm test", base: run(0, [900]), head: run(0, [880]), verdict: "same-exit" },
+    ]);
+    expect(out).toContain("3 other agent container(s) running");
+  });
+
+  it("says variance was not measured when it was not", () => {
+    const out = withComparisons([
+      { command: "npm test", base: run(0, [45_000]), head: run(0, [44_000]), verdict: "same-exit" },
+    ]);
+    expect(out).toContain("variance was not measured");
+  });
+
+  it("says a skipped comparison was skipped, and why", () => {
+    // An empty table reads as "we checked and found nothing", which is a much stronger
+    // claim than "we could not check".
+    const out = withComparisons([
+      {
+        command: "npm test",
+        base: null,
+        head: null,
+        verdict: "not-comparable",
+        skipped: "untrusted",
+      },
+    ]);
+    expect(out).toContain("not run: fork pull requests execute no commands");
+  });
+
+  it("distinguishes a command new in this pull request from one that failed", () => {
+    const out = withComparisons([
+      {
+        command: "npm run bench",
+        base: null,
+        head: run(0, [500]),
+        verdict: "not-comparable",
+        skipped: "not-runnable",
+      },
+    ]);
+    expect(out).toContain("does not exist at the merge base");
+  });
+
+  it("renders nothing at all when no comparison was configured", () => {
+    expect(
+      renderReview(outcome([{ agentId: "security", state: "done" }]), { title: "t" }),
+    ).not.toContain("Base vs head");
+  });
+});

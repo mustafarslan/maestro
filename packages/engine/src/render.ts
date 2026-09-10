@@ -1,3 +1,4 @@
+import type { CommandComparison } from "@maestro/sandbox";
 import type { ReviewOutcome } from "./engine.js";
 
 const SEVERITY_ICON: Record<string, string> = {
@@ -35,6 +36,100 @@ const SEVERITY_ICON: Record<string, string> = {
  */
 
 /** A fence longer than the longest backtick run inside, so content cannot close it. */
+
+/**
+ * The base-versus-head table.
+ *
+ * Called "Base vs head" and not "Claim checks" on purpose: this compares *commands*.
+ * Which of the pull request's claims a given command bears on is a judgement, and
+ * judgement belongs to the agents and to triage's summary, not to a renderer that has
+ * only exit codes to work with.
+ *
+ * Timings are printed raw and never as a ratio. A container with two CPUs running beside
+ * other reviews is a poor benchmark host; "1.8x faster" states far more than the number
+ * underneath it can support, and this project's rule is that a number claiming more than
+ * its evidence is worse than no number.
+ */
+function renderComparisons(comparisons: CommandComparison[]): string[] {
+  const lines: string[] = ["**Base vs head**", ""];
+  lines.push(
+    "Each command ran at the merge base and at the head, in containers with identical " +
+      "resource limits.",
+    "",
+    "| Command | Merge base | Head | Result |",
+    "| --- | --- | --- | --- |",
+  );
+
+  for (const c of comparisons) {
+    if (c.skipped) {
+      lines.push(`| ${code(c.command)} | — | — | not run: ${skipReason(c.skipped)} |`);
+      continue;
+    }
+    const verdict =
+      c.verdict === "fixed"
+        ? "**fails on base, passes on head**"
+        : c.verdict === "broken"
+          ? "**passes on base, fails on head**"
+          : "no change in exit code";
+    lines.push(
+      `| ${code(c.command)} | exit ${c.base?.exitCode ?? "—"} | exit ${c.head?.exitCode ?? "—"} | ${verdict} |`,
+    );
+  }
+  lines.push("");
+
+  const timed = comparisons.filter((c) => c.base && c.head);
+  if (timed.length) {
+    lines.push("<details><summary>Timings</summary>", "");
+    for (const c of timed) {
+      const b = c.base as NonNullable<typeof c.base>;
+      const h = c.head as NonNullable<typeof c.head>;
+      lines.push(
+        `- ${code(c.command)} — base ${b.durationsMs.map(ms).join(", ")} | ` +
+          `head ${h.durationsMs.map(ms).join(", ")}` +
+          (h.concurrentAgents > 0 || b.concurrentAgents > 0
+            ? ` (measured with up to ${Math.max(b.concurrentAgents, h.concurrentAgents)} other agent container(s) running)`
+            : ""),
+      );
+    }
+    const singleSample = timed.some((c) => (c.base?.durationsMs.length ?? 0) < 2);
+    lines.push(
+      "",
+      "> Indicative only, and deliberately not expressed as a ratio. These ran in a " +
+        "resource-capped container that may have been sharing the host with other " +
+        "reviews. " +
+        (singleSample
+          ? "Run-to-run variance was not measured: the command was too slow to repeat cheaply."
+          : "Repeated runs are listed so the spread is visible."),
+      "",
+      "Exit-code changes above are the defensible signal; treat a timing difference as a " +
+        "prompt to measure properly, not as a result.",
+      "</details>",
+      "",
+    );
+  }
+
+  return lines;
+}
+
+function ms(value: number): string {
+  return `${(value / 1000).toFixed(1)}s`;
+}
+
+function skipReason(skip: NonNullable<CommandComparison["skipped"]>): string {
+  switch (skip) {
+    case "untrusted":
+      return "fork pull requests execute no commands";
+    case "no-merge-base":
+      return "the fork point could not be found, so there is no baseline";
+    case "base-prepare-failed":
+      return "the merge-base environment could not be prepared";
+    case "not-runnable":
+      return "this command does not exist at the merge base — it is new in this pull request";
+    default:
+      return "not configured";
+  }
+}
+
 function fenced(text: string): string[] {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
   const fence = "`".repeat(Math.max(3, longest + 1));
@@ -200,6 +295,10 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
       );
     }
     lines.push("");
+  }
+
+  if (outcome.comparisons?.length) {
+    lines.push(...renderComparisons(outcome.comparisons));
   }
 
   if (t?.suppressed.length) {

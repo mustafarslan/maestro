@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import { ReviewRecorder, renderReview, runReview } from "@maestro/engine";
@@ -177,6 +178,8 @@ export async function review(argv: string[]): Promise<number> {
   const interrupt = abortOnInterrupt();
 
   const db = await openStore();
+  // Declared out here so the finally removes it even when the review throws.
+  let baselineDir: string | undefined;
   try {
     const playbookRecord = new PlaybookStore(db).getActive("default");
     if (!playbookRecord) {
@@ -326,6 +329,21 @@ export async function review(argv: string[]): Promise<number> {
       ),
     );
 
+    // A second checkout at the base ref, when the playbook asked for command comparison.
+    // This is the cheapest way to exercise the feature — the base is right there on the
+    // command line, and no GitHub round trip is involved.
+    //
+    // Note this path never calls `resolveEnvSpec`, so `trust` stays at the schema default
+    // of "trusted". That is correct for a local review of your own checkout; the engine
+    // still refuses on `trust` for anything that reaches it downgraded.
+    const compareSpec = playbook.envSpec;
+    if (compareSpec.compareCommands.length) {
+      baselineDir = await materialiseLocalBaseline(sourcePath, baseRef);
+      if (!baselineDir) {
+        console.error(`cannot check out '${baseRef}' for comparison; skipping base vs head`);
+      }
+    }
+
     const outcome = await runReview(
       { driver, registry, spans: new SpanRecorder(db), db },
       {
@@ -333,6 +351,7 @@ export async function review(argv: string[]): Promise<number> {
         playbook,
         sourcePath,
         baseRef,
+        baselinePath: baselineDir,
         changedFiles,
         changedLines,
         context: {
@@ -366,6 +385,35 @@ export async function review(argv: string[]): Promise<number> {
     return outcome.state === "failed" ? 1 : 0;
   } finally {
     db.close();
+    if (baselineDir) rmSync(baselineDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * A checkout of `baseRef` beside the working tree, for base-versus-head comparison.
+ *
+ * `git worktree add` is deliberately not used: its `.git` is a file holding an absolute
+ * host path, which is meaningless once the tree has been copied into a container. A plain
+ * copy plus a checkout gives a real repository that survives the trip.
+ */
+async function materialiseLocalBaseline(
+  sourcePath: string,
+  baseRef: string,
+): Promise<string | undefined> {
+  const dir = mkdtempSync(join(tmpdir(), "maestro-base-"));
+  try {
+    await exec("cp", ["-R", `${sourcePath}/.`, dir], { maxBuffer: 64 * 1024 * 1024 });
+    const run = (args: string[]) =>
+      exec("git", ["-C", dir, ...args], { maxBuffer: 64 * 1024 * 1024 });
+    await run(["checkout", "--quiet", "--force", baseRef]);
+    // Untracked files do not move with a checkout, so without this the head tree's
+    // leftovers would be measured as though they were the base. Not `-x`: ignored files
+    // are where a local checkout keeps its dependencies.
+    await run(["clean", "-fd"]);
+    return dir;
+  } catch {
+    rmSync(dir, { recursive: true, force: true });
+    return undefined;
   }
 }
 

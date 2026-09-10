@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { EnvSpecSchema } from "@maestro/playbook";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { runComparisons } from "./compare.js";
 import { DockerSandboxDriver, dockerCommand, listManagedNetworks } from "./docker.js";
 import { startEgressProxy } from "./egress-proxy.js";
 import type { PreparedEnvironment, Sandbox } from "./types.js";
@@ -485,6 +486,141 @@ describe("dependency cache", () => {
         }
         rmSync(first, { recursive: true, force: true });
         rmSync(second, { recursive: true, force: true });
+      }
+    },
+    600_000,
+  );
+});
+
+describe("base versus head, end to end", () => {
+  itDocker(
+    "measures a test that genuinely fails at the base and passes at the head",
+    async () => {
+      // The whole feature in one assertion: a pull request that says "this fixes the
+      // failing test" is checkable, because the command was actually run at both refs.
+      //
+      // The fix is an ADDED file, deliberately. `docker cp` overwrites same-path files,
+      // so a fixture whose fix MODIFIES an existing file would still pass even if the
+      // base checkout were contaminated by the head tree — the contaminating copy would
+      // be the correct base content. Only a file the pull request adds survives into a
+      // wrongly-built base tree, so only an added file exercises the hazard.
+      const reviewId = `${REVIEW_ID}-compare`;
+      const compareSpec = EnvSpecSchema.parse({
+        image: "node:22-bookworm",
+        cpus: 2,
+        memory: "1GiB",
+        timeouts: { prepareSec: 300, analyzeSec: 300, commandSec: 60 },
+        setup: [],
+        allowedCommands: [],
+        compareCommands: ["npm test"],
+      });
+
+      const write = (dir: string, rel: string, body: string) => {
+        mkdirSync(dirname(join(dir, rel)), { recursive: true });
+        writeFileSync(join(dir, rel), body);
+      };
+
+      // The test requires a module that exists only at the head.
+      const testFile =
+        "const { total } = require('./src/cart');\n" +
+        "if (total([{price:2},{price:3}]) !== 5) { console.error('wrong total'); process.exit(1); }\n" +
+        "console.log('cart total ok');\n";
+
+      const baseDir = mkdtempSync(join(tmpdir(), "maestro-cmp-base-"));
+      write(
+        baseDir,
+        "package.json",
+        JSON.stringify({ name: "cmp", scripts: { test: "node test.js" } }),
+      );
+      write(baseDir, "test.js", testFile);
+      // No src/cart.js here: `npm test` cannot resolve it, so it exits non-zero.
+
+      const headDir = mkdtempSync(join(tmpdir(), "maestro-cmp-head-"));
+      write(
+        headDir,
+        "package.json",
+        JSON.stringify({ name: "cmp", scripts: { test: "node test.js" } }),
+      );
+      write(headDir, "test.js", testFile);
+      write(
+        headDir,
+        "src/cart.js",
+        "exports.total = (items) => items.reduce((n, i) => n + i.price, 0);\n",
+      );
+
+      let baseEnv: PreparedEnvironment | undefined;
+      let headEnv: PreparedEnvironment | undefined;
+      try {
+        baseEnv = await driver.prepare({ reviewId, sourcePath: baseDir, spec: compareSpec });
+        headEnv = await driver.prepare({ reviewId, sourcePath: headDir, spec: compareSpec });
+
+        const [result] = await runComparisons(
+          {
+            headEnv,
+            baseEnv,
+            commands: compareSpec.compareCommands,
+            spec: compareSpec,
+          },
+          { driver, sampleLoad: () => 0 },
+        );
+
+        expect(result?.base?.exitCode).not.toBe(0);
+        expect(result?.head?.exitCode).toBe(0);
+        expect(result?.verdict).toBe("fixed");
+        // Output is carried for a human and the agents to read, never turned into a verdict.
+        expect(result?.head?.stdoutTail).toContain("cart total ok");
+      } finally {
+        await driver.reap({ reviewId });
+        rmSync(baseDir, { recursive: true, force: true });
+        rmSync(headDir, { recursive: true, force: true });
+      }
+    },
+    600_000,
+  );
+
+  itDocker(
+    "reports the same command as unchanged when the change does not affect it",
+    async () => {
+      // The other half of honest reporting: a comparison that finds nothing must say so,
+      // rather than reaching for a timing difference to have something to report.
+      const reviewId = `${REVIEW_ID}-cmp-same`;
+      const sameSpec = EnvSpecSchema.parse({
+        image: "node:22-bookworm",
+        cpus: 2,
+        memory: "1GiB",
+        timeouts: { prepareSec: 300, analyzeSec: 300, commandSec: 60 },
+        setup: [],
+        allowedCommands: [],
+        compareCommands: ["npm test"],
+      });
+
+      const make = (dir: string, note: string) => {
+        writeFileSync(
+          join(dir, "package.json"),
+          JSON.stringify({ name: "cmp", scripts: { test: "node test.js" } }),
+        );
+        writeFileSync(join(dir, "test.js"), `console.log('ok ${note}');\n`);
+      };
+      const a = mkdtempSync(join(tmpdir(), "maestro-same-a-"));
+      const b = mkdtempSync(join(tmpdir(), "maestro-same-b-"));
+      make(a, "one");
+      make(b, "two");
+
+      try {
+        const baseEnv = await driver.prepare({ reviewId, sourcePath: a, spec: sameSpec });
+        const headEnv = await driver.prepare({ reviewId, sourcePath: b, spec: sameSpec });
+        const [result] = await runComparisons(
+          { headEnv, baseEnv, commands: ["npm test"], spec: sameSpec },
+          { driver },
+        );
+        expect(result?.verdict).toBe("same-exit");
+        // Different output, identical exit code, and no verdict drawn from the difference.
+        expect(result?.base?.stdoutTail).toContain("ok one");
+        expect(result?.head?.stdoutTail).toContain("ok two");
+      } finally {
+        await driver.reap({ reviewId });
+        rmSync(a, { recursive: true, force: true });
+        rmSync(b, { recursive: true, force: true });
       }
     },
     600_000,

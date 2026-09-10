@@ -80,6 +80,21 @@ describe("a repository's own .maestro.yaml", () => {
   const base = defaultPlaybook().envSpec;
   const quiet = { info: () => {} };
 
+  it("lets a repository drop a comparison command but never add one", () => {
+    const playbook = { ...base, compareCommands: ["npm test", "npm run bench"] };
+    // Removing is legitimate: a repo may not want a slow benchmark on every review.
+    expect(
+      narrowEnvSpec(playbook, { envSpec: { compareCommands: ["npm test"] } }, quiet)
+        .compareCommands,
+    ).toEqual(["npm test"]);
+    // Adding is not. `.maestro.yaml` is read from the base branch, but anyone with write
+    // access could otherwise introduce a command the playbook never authorised.
+    expect(
+      narrowEnvSpec(playbook, { envSpec: { compareCommands: ["curl evil"] } }, quiet)
+        .compareCommands,
+    ).toEqual([]);
+  });
+
   it("lets a repo ask for less, which is the point of the file", () => {
     const out = narrowEnvSpec(base, { envSpec: { cpus: 1 } }, quiet);
     expect(out.cpus).toBe(Math.min(base.cpus, 1));
@@ -208,6 +223,16 @@ describe("fork pull requests are downgraded before anything runs", () => {
 
   it("leaves a same-repo pull request exactly as configured", () => {
     expect(resolveEnvSpec(base, pr(false))).toBe(base);
+  });
+
+  it("gives a fork no comparison commands, because comparing runs them twice", () => {
+    // A fork gets no `setup` and no `allowedCommands`; base-versus-head comparison is
+    // command execution under another name and has to be emptied with them. The engine
+    // refuses again on `trust`, because the two other runReview entry points never reach
+    // this function at all.
+    expect(
+      resolveEnvSpec({ ...base, compareCommands: ["npm test"] }, pr(true)).compareCommands,
+    ).toEqual([]);
   });
 
   it("marks a fork untrusted", () => {

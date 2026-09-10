@@ -3195,6 +3195,83 @@ the server never sends fails it, and removing `live` from the server's response 
     this project four times. It reads into a file and checks each step under `set -e`. A cleanup
     that cannot run fails closed, falling back to a full install rather than to a wrong tree.
 
+227. **A pull request's comparative claims are now checkable rather than merely readable.**
+    `pr.description` has always reached the agents — fenced and labelled as author-written
+    data — so a claim of "3x faster" or "fixes the flaky test" was visible. What was missing
+    was anything to check it against: `allowedCommands` ran at the head only, which supports
+    "the tests fail" and no claim of the form "this is better than before".
+
+    `envSpec.compareCommands` runs each named command at the merge base and at the head and
+    hands both results to the agents as trusted evidence. Opt-in, and deliberately never
+    `auto`: every other command list is detectable from the toolchain because there is a
+    right answer, whereas which command bears on a claim is a judgement.
+
+    **Exit codes are the verdict; nothing else is.** A test that fails at the merge base and
+    passes at the head is a fact about the change. Timings are printed per run with the
+    concurrent agent count beside them and never as a ratio — two samples from a 2-CPU
+    container sharing a host cannot support "1.8x faster", and this project's standing rule
+    is that a number claiming more than its evidence is worse than no number. There is no
+    `output-changed` verdict at all: runners print timestamps and temp paths, so identical
+    runs differ byte for byte, and a normalisation rule that is subtly wrong produces a
+    confident wrong answer. The output is shown; the agents read it.
+
+    **The merge base, not the base branch tip.** `ensureMergeBase` already computed the fork
+    point and threw it away, returning a boolean. It returns the SHA now. The tip would carry
+    every commit that landed on the branch since the fork, so a command measured against it
+    measures other people's work too.
+
+    **Where a false "verified" would be minted, and what stops it.** The comparison is the
+    first evidence an agent is *given* rather than fetches, and it sits beside a claim written
+    by the author of the change under review. The block is labelled "MEASURED BY MAESTRO",
+    placed outside every `wrapUntrusted` fence while the description stays inside one, and
+    carries an explicit instruction that only an exit-code change verifies a claim and that
+    timing differences are not evidence. Two mutations hold that: dropping the label fails,
+    and moving the block before the fence fails.
+
+    **Refused where commands are refused, twice.** `resolveEnvSpec` empties the list for forks
+    alongside `setup` and `allowedCommands`; the engine checks `spec.trust` again independently,
+    because `maestro review` and `maestro eval` never call `resolveEnvSpec` and `trust` is read
+    in exactly one other place in the codebase. Entries go through the same deny-pattern check
+    as `allowedCommands` — checking only the sibling field would have reopened a closed hole
+    through a name that does not announce that it runs code. `.maestro.yaml` may remove a
+    command but never add one.
+
+    A skipped comparison says it was skipped and why. An empty table reads as "we checked and
+    found nothing", which is a materially stronger claim than "we could not check". A command
+    the pull request *adds* is reported as not runnable at the base rather than as a base-side
+    failure, which would have manufactured a `fixed` verdict.
+
+    Verified end to end against real Docker with a fixture whose fix is an **added** file —
+    chosen deliberately, because `docker cp` overwrites same-path files, so a fixture whose fix
+    modified an existing file would pass even with a contaminated base tree. Mutation-checked
+    three ways: pointing the base run at the head snapshot, removing the untrusted guard, and
+    both prompt-labelling mutations above.
+
+    Honest limitation: the comparison runs two extra analyze containers per review outside the
+    scheduler's concurrency limits, so a repository that opts in adds load the limits do not
+    see. Stated here rather than discovered later.
+
+228. **Adding one playbook field broke `maestro doctor` on every existing install.**
+    `hydrate` read a stored version with `JSON.parse(row.document) as PlaybookDocument` — a
+    bare cast asserting that yesterday's JSON matches today's type. Playbook versions are
+    immutable by design, so a document written before a field existed never gains it, and
+    that assertion is false the moment the schema grows. Adding `envSpec.compareCommands`
+    made the doctor's database check iterate a property that was `undefined`.
+
+    The design document listed "playbook schema drift" as a known risk and said
+    `packages/playbook` owns forward-migrations. Nothing did: the cast was the migration.
+
+    `hydrate` now parses through `PlaybookDocumentSchema`, which applies each field's
+    default — which is what the defaults were always for. A document that cannot be parsed
+    at all is returned exactly as found rather than rejected: old versions must stay
+    readable for trace inspection after the schema moves on, or past reviews stop being
+    explainable, which is the one thing immutable versions exist to guarantee.
+
+    Found by the gate against a real database rather than by reading, and only because the
+    doctor check runs there. Mutation-checked: restoring the cast fails the new test. The
+    test strips the field from a stored row, so it will keep catching this for the next
+    field too, rather than for this one only.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

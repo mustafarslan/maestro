@@ -6,7 +6,7 @@ import {
   type PromptContext,
   wrapUntrusted,
 } from "@maestro/playbook";
-import type { Sandbox } from "@maestro/sandbox";
+import type { CommandComparison, Sandbox } from "@maestro/sandbox";
 import { type Finding, SubmitFindingsSchema } from "./finding.js";
 import { buildDispatch, TERMINAL_TOOL, type ToolContext, toolsForAgent } from "./tools.js";
 
@@ -22,6 +22,14 @@ export interface ReviewAgentRequest {
   setupFailed?: boolean;
   /** False when the checkout is mounted read-only, which makes some commands fail. */
   writableWorkdir?: boolean;
+  /**
+   * What the configured commands did at the merge base and at the head.
+   *
+   * Maestro's own measurement. Handed to the agent as trusted evidence, and labelled as
+   * such in the prompt, so a pull request's claim about being faster or fixing a test can
+   * be checked against something rather than taken at its word.
+   */
+  comparisons?: CommandComparison[];
   context: PromptContext;
   /**
    * Trace correlation. Without the review id an agent's log lines cannot be tied to the
@@ -75,6 +83,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
     req.allowedCommands,
     req.setupFailed,
     req.writableWorkdir,
+    req.comparisons,
   );
 
   const loop = await runAgent({
@@ -137,6 +146,7 @@ function buildUserPrompt(
   allowedCommands: string[],
   setupFailed?: boolean,
   writableWorkdir?: boolean,
+  comparisons?: CommandComparison[],
 ): string {
   const parts: string[] = ["Review the pull request described below."];
 
@@ -218,6 +228,9 @@ function buildUserPrompt(
     );
   }
 
+  const measured = renderComparisons(comparisons);
+  if (measured) parts.push(measured);
+
   parts.push(
     "Start with git_diff to see the change, then read the surrounding code before judging it.",
     allowedCommands.length
@@ -234,6 +247,98 @@ function buildUserPrompt(
   );
 
   return parts.join("\n\n");
+}
+
+/**
+ * What Maestro measured at the merge base and at the head.
+ *
+ * This is the first evidence an agent is *given* rather than fetches, which is why its
+ * provenance is spelled out in the text instead of being left implied. Everything else
+ * factual in this prompt arrived through a tool the agent called; the pull request's own
+ * claims arrive fenced and labelled as author-written data. This block sits outside every
+ * fence and says so, because the entire value of the feature is that a claim and a
+ * measurement cannot be mistaken for one another.
+ *
+ * The instruction is deliberately strict about what counts. An agent handed two timings
+ * will otherwise announce a speedup, and a timing taken in a shared 2-CPU container is
+ * not evidence of one.
+ */
+function renderComparisons(comparisons?: CommandComparison[]): string {
+  if (!comparisons?.length) return "";
+
+  const skipped = comparisons.filter(
+    (c): c is CommandComparison & { skipped: NonNullable<CommandComparison["skipped"]> } =>
+      c.skipped !== undefined,
+  );
+  const ran = comparisons.filter((c) => !c.skipped);
+
+  const lines: string[] = [
+    "MEASURED BY MAESTRO (trusted; not from the pull request author).",
+    "Each command below was run twice: once at the merge base — the commit this pull " +
+      "request was written against — and once at its head, in containers with identical " +
+      "cpu, memory and process limits.",
+  ];
+
+  for (const c of ran) {
+    const base = c.base;
+    const head = c.head;
+    if (!base || !head) continue;
+    const verdict =
+      c.verdict === "fixed"
+        ? "exit code changed from failing to passing"
+        : c.verdict === "broken"
+          ? "exit code changed from passing to failing"
+          : `both runs exited ${head.exitCode}`;
+    lines.push(
+      `$ ${c.command}\n` +
+        `  merge base: exit ${base.exitCode}${base.timedOut ? " (timed out)" : ""}\n` +
+        `  head:       exit ${head.exitCode}${head.timedOut ? " (timed out)" : ""}\n` +
+        `  ${verdict}\n` +
+        `  timings (ms) base ${base.durationsMs.join(", ")} | head ${head.durationsMs.join(", ")}` +
+        `  — measured with ${head.concurrentAgents} other agent container(s) running\n` +
+        `  head stdout (tail):\n${indent(head.stdoutTail)}\n` +
+        `  merge-base stdout (tail):\n${indent(base.stdoutTail)}`,
+    );
+  }
+
+  for (const c of skipped) {
+    lines.push(
+      `$ ${c.command}\n  NOT RUN (${skipReason(c.skipped)}). Treat this claim as unchecked.`,
+    );
+  }
+
+  lines.push(
+    "How to use this: a comparative claim in the pull request — faster, smaller, fixes " +
+      "the failing test — is VERIFIED only where a measured exit-code change supports it. " +
+      "Timing differences are NOT evidence: these ran on a shared host under concurrent " +
+      "load, and the numbers are indicative only. Output differences are for you to read " +
+      "and judge, not a verdict in themselves. Where the measurements do not cover a " +
+      "claim, say the claim is unverified rather than assuming either way.",
+  );
+
+  return lines.join("\n\n");
+}
+
+function skipReason(skip: NonNullable<CommandComparison["skipped"]>): string {
+  switch (skip) {
+    case "untrusted":
+      return "fork pull requests execute no commands";
+    case "no-merge-base":
+      return "the fork point could not be found, so there is no baseline";
+    case "base-prepare-failed":
+      return "the merge-base environment could not be prepared";
+    case "not-runnable":
+      return "the command does not exist at the merge base — it is new in this pull request";
+    default:
+      return "not configured";
+  }
+}
+
+function indent(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => `    ${l}`)
+    .join("\n");
 }
 
 /**

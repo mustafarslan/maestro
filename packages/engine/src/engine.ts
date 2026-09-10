@@ -8,7 +8,13 @@ import {
   type PlaybookDocument,
   type PromptContext,
 } from "@maestro/playbook";
-import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
+import {
+  type CommandComparison,
+  type PreparedEnvironment,
+  runComparisons,
+  type Sandbox,
+  type SandboxDriver,
+} from "@maestro/sandbox";
 import { type RouteDecision, route } from "./router.js";
 import { type AgentFindings, type TriageResult, triage } from "./triage.js";
 
@@ -32,6 +38,15 @@ export interface EngineDeps {
     req: { reviewId: string; agentId: string; repoId: string; providerId: string },
     signal?: AbortSignal,
   ) => Promise<() => void>;
+  /**
+   * Agent containers running elsewhere right now, sampled when a timing is taken.
+   *
+   * Supplied by the daemon for the same reason as `acquireSlot`: only it knows about the
+   * other reviews. Timings measured in a 2-CPU container beside three other agents are
+   * worth much less than the same numbers measured alone, and a comparison that cannot
+   * say which it was should not be presenting timings at all.
+   */
+  sampleLoad?: () => number;
 }
 
 export interface ReviewRequest {
@@ -66,6 +81,14 @@ export interface ReviewRequest {
    * agents read includes commits this pull request did not make.
    */
   diffDegraded?: boolean;
+  /**
+   * Host path to a checkout at the merge base, when one could be made.
+   *
+   * Present only when `envSpec.compareCommands` is non-empty and the fork point was
+   * reachable. Its absence is reported as a skipped comparison rather than as an empty
+   * one — "we did not check" and "we checked and found nothing" are different claims.
+   */
+  baselinePath?: string;
   signal?: AbortSignal;
 }
 
@@ -197,7 +220,77 @@ export interface ReviewOutcome {
   egressLog: { host: string; allowed: boolean; count: number }[];
   /** Which posture produced that log; the review comment must not report the two alike. */
   egressEnforcement?: "enforced" | "advisory" | "none";
+  /**
+   * What the configured commands did at the merge base and at the head.
+   *
+   * Maestro's own measurement, not an agent's report — which is why it travels on the
+   * outcome rather than inside a `Finding`. Routing it through findings would subject it
+   * to triage's dedupe and severity threshold, so a measurement could be rewritten by a
+   * model or dropped by a cap.
+   */
+  comparisons?: CommandComparison[];
   error?: string;
+}
+
+/**
+ * Prepares the merge base and runs the configured commands at both refs.
+ *
+ * Every failure here degrades to a stated skip rather than to an exception. A review
+ * whose findings are lost because a benchmark script is missing would be a bad trade for
+ * a feature that exists only to add evidence — so this returns comparisons that say
+ * "not run, and here is why" instead of throwing out of the prepare node.
+ */
+async function runComparison(opts: {
+  spec: EnvSpec;
+  req: ReviewRequest;
+  headEnv: PreparedEnvironment;
+  deps: EngineDeps;
+  log: { info: (obj: object, msg: string) => void; warn: (obj: object, msg: string) => void };
+}): Promise<CommandComparison[]> {
+  const { spec, req, headEnv, deps, log } = opts;
+  const commands = spec.compareCommands;
+
+  const skipAll = (skipped: CommandComparison["skipped"]): CommandComparison[] =>
+    commands.map((command) => ({
+      command,
+      base: null,
+      head: null,
+      verdict: "not-comparable" as const,
+      skipped,
+    }));
+
+  // Checked here and not only in `resolveEnvSpec`, which empties this list for forks.
+  // `trust` is otherwise read in exactly one place in the whole codebase, and the two
+  // other `runReview` entry points never call `resolveEnvSpec` at all — so a guard that
+  // lived only there would protect the webhook path and nothing else.
+  if (spec.trust === "untrusted") {
+    log.info({}, "comparison skipped: untrusted pull request");
+    return skipAll("untrusted");
+  }
+
+  // The fork point is the only defensible baseline. Without it there is no "before".
+  if (!req.baselinePath) {
+    log.info({}, "comparison skipped: no merge-base checkout");
+    return skipAll("no-merge-base");
+  }
+
+  let baseEnv: PreparedEnvironment | null = null;
+  try {
+    baseEnv = await deps.driver.prepare({
+      reviewId: req.reviewId,
+      sourcePath: req.baselinePath,
+      spec,
+      signal: req.signal,
+    });
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : err }, "merge-base prepare failed");
+    return skipAll("base-prepare-failed");
+  }
+
+  return runComparisons(
+    { headEnv, baseEnv, commands, spec, signal: req.signal },
+    { driver: deps.driver, sampleLoad: deps.sampleLoad, log },
+  );
 }
 
 /**
@@ -217,6 +310,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
   const nodes: NodeOutcome[] = [];
 
   let prepared: PreparedEnvironment | undefined;
+  let comparisons: CommandComparison[] | undefined;
   const sandboxes: Sandbox[] = [];
 
   // Environment rows exist so a crash can be reconciled against Docker afterwards, and
@@ -268,6 +362,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],
     egressEnforcement: prepared?.egressEnforcement,
+    comparisons,
     ...over,
   });
 
@@ -292,6 +387,25 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       );
       return env;
     });
+
+    // ── base-versus-head command comparison ────────────────────────────────
+    //
+    // Opt-in, and off unless a playbook named commands. Runs before the agents because
+    // its results go into their prompts as evidence.
+    //
+    // Not a new node kind: this is a second call to the same driver inside the same
+    // prepare step, so it needs no schema change, no validator change and no Studio
+    // change. Both environments carry the review's label, so the existing finalizer
+    // reaps them.
+    if (spec.compareCommands.length) {
+      comparisons = await runComparison({
+        spec,
+        req,
+        headEnv: prepared,
+        deps,
+        log,
+      });
+    }
 
     // ── router ─────────────────────────────────────────────────────────────
     const routerNode = byKind("router")[0];
@@ -406,6 +520,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             baseRef: req.baseRef,
             commandTimeoutSec: spec.timeouts.commandSec,
             setupFailed: readyEnv.setupResults.some((r) => r.exitCode !== 0),
+            comparisons,
             writableWorkdir: spec.writableWorkdir,
             context: req.context,
             // So an agent's log lines can be tied back to the review and the graph node

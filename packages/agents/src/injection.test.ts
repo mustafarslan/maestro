@@ -70,6 +70,18 @@ function systemText(body: unknown): string {
   return "";
 }
 
+/** The first user message, which is where the review request and its evidence live. */
+function userText(body: unknown): string {
+  const messages = (body as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return "";
+  const first = messages[0] as { content?: unknown };
+  if (typeof first?.content === "string") return first.content;
+  if (Array.isArray(first?.content)) {
+    return first.content.map((b) => (b as { text?: string }).text ?? "").join("\n");
+  }
+  return "";
+}
+
 const doc = defaultPlaybook();
 const agent = doc.agents.find((a) => a.id === "security")!;
 
@@ -215,6 +227,116 @@ describe("untrusted content is fenced wherever it enters the prompt", () => {
       const system = systemText(t.requests[0]?.body);
       expect(system).not.toContain(payload);
     }
+  });
+});
+
+describe("a claim and a measurement cannot be mistaken for one another", () => {
+  /**
+   * The comparison block is the first evidence an agent is GIVEN rather than fetches, and
+   * it sits beside a claim written by the person whose change is under review. If the two
+   * were to blur, the feature would be worse than not having it: a pull request could
+   * assert its own verification.
+   */
+  const claim = "This makes the test suite 10x faster and fixes the flaky login test.";
+
+  const sendWithComparison = async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "submit_findings", input: { findings: [] } }] },
+    ]);
+    await runReviewAgent({
+      agent,
+      provider: new Provider(fakeConfig(t)),
+      model: "claude-opus-5",
+      sandbox: sandbox(),
+      allowedCommands: ["npm test"],
+      baseRef: "main",
+      commandTimeoutSec: 60,
+      context: { pr: { title: "Speed up tests", description: claim } },
+      comparisons: [
+        {
+          command: "npm test",
+          base: {
+            exitCode: 1,
+            stdoutTail: "1 failing",
+            stderrTail: "",
+            durationsMs: [9000],
+            timedOut: false,
+            concurrentAgents: 2,
+          },
+          head: {
+            exitCode: 0,
+            stdoutTail: "0 failing",
+            stderrTail: "",
+            durationsMs: [900],
+            timedOut: false,
+            concurrentAgents: 2,
+          },
+          verdict: "fixed",
+        },
+      ],
+      budget: { maxSteps: 3, costCapCents: 50 },
+    });
+    return userText(t.requests[0]?.body);
+  };
+
+  it("labels the measurement as Maestro's own and the claim as the author's", async () => {
+    const prompt = await sendWithComparison();
+    expect(prompt).toContain("MEASURED BY MAESTRO");
+    expect(prompt).toContain("untrusted-content");
+  });
+
+  it("puts the author's claim inside the fence and the measurement outside it", async () => {
+    const prompt = await sendWithComparison();
+
+    const fenceStart = prompt.indexOf("<untrusted-content");
+    const fenceEnd = prompt.lastIndexOf("</untrusted-content");
+    const claimAt = prompt.indexOf(claim);
+    const measuredAt = prompt.indexOf("MEASURED BY MAESTRO");
+
+    expect(fenceStart).toBeGreaterThanOrEqual(0);
+    // The claim is data: it belongs between the tags.
+    expect(claimAt).toBeGreaterThan(fenceStart);
+    expect(claimAt).toBeLessThan(fenceEnd);
+    // The measurement is Maestro speaking: it must not be inside anything the author can
+    // write into, or a description could forge its own evidence block.
+    expect(measuredAt).toBeGreaterThan(fenceEnd);
+  });
+
+  it("tells the agent that a timing difference is not verification", async () => {
+    // Handed a 9000ms base and a 900ms head, a model will otherwise announce a 10x
+    // speedup — from two samples taken on a shared host beside two other agents.
+    const prompt = await sendWithComparison();
+    expect(prompt).toContain("Timing differences are NOT evidence");
+    expect(prompt).toContain("exit-code change");
+  });
+
+  it("says plainly when a comparison did not run", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "submit_findings", input: { findings: [] } }] },
+    ]);
+    await runReviewAgent({
+      agent,
+      provider: new Provider(fakeConfig(t)),
+      model: "claude-opus-5",
+      sandbox: sandbox(),
+      allowedCommands: [],
+      baseRef: "main",
+      commandTimeoutSec: 60,
+      context: { pr: { title: "Speed up tests", description: claim } },
+      comparisons: [
+        {
+          command: "npm test",
+          base: null,
+          head: null,
+          verdict: "not-comparable",
+          skipped: "untrusted",
+        },
+      ],
+      budget: { maxSteps: 3, costCapCents: 50 },
+    });
+    const prompt = userText(t.requests[0]?.body);
+    expect(prompt).toContain("NOT RUN");
+    expect(prompt).toContain("Treat this claim as unchecked");
   });
 });
 

@@ -26,6 +26,18 @@ export const EnvSpecSchema = z.object({
   setup: z.array(z.string()).default(["auto"]),
   /** Agents may run ONLY these. "auto" => detected test/build/lint scripts. */
   allowedCommands: z.array(z.string()).default(["auto"]),
+  /**
+   * Commands run at BOTH the merge-base and the head, so a pull request claiming
+   * "faster", "smaller" or "fixes the failing test" can be checked rather than reasoned
+   * about. Maestro runs these itself; agents receive the results as evidence.
+   *
+   * Opt-in, and deliberately never "auto". Every other command list can be detected from
+   * the toolchain because there is a right answer — the repo's own test script is its
+   * test script. Which command bears on a claim is a judgement about intent, and a
+   * measurement nobody asked for is a measurement nobody should trust. An empty list
+   * means the feature is off, which is the default.
+   */
+  compareCommands: z.array(z.string()).default([]),
   /** Applies during `prepare` only; `analyze` always runs with --network none. */
   egressAllowlist: z
     .array(z.string())
