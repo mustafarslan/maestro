@@ -536,6 +536,36 @@ export class GitHubClient {
    * exist. The daemon had a handler for a `reaction` event that could therefore never
    * fire, so the reaction half of the quality signal was built and unreachable.
    */
+  /**
+   * Reacts to the comment that asked for a review, so the asker knows they were heard.
+   *
+   * A review takes minutes. Until it posts, `@maestro review` produced nothing at all —
+   * no reaction, no comment, no anything — which is indistinguishable from a bot that is
+   * broken or was never installed. Observed on this project's own first live request: the
+   * comment sat there for twelve minutes while three agents worked.
+   *
+   * Deliberately a reaction rather than a comment. One consolidated comment per pull
+   * request is the whole anti-noise design, and a "working on it" comment would be the
+   * first crack in it — a reaction is exactly as loud as an acknowledgement needs to be.
+   *
+   * Never throws. Failing to acknowledge a review must not stop it: the reaction is
+   * courtesy, and the review is the point.
+   */
+  async reactToComment(pr: PullRequestRef, commentId: number, content: "eyes"): Promise<boolean> {
+    try {
+      await this.octokit.rest.reactions.createForIssueComment({
+        owner: pr.owner,
+        repo: pr.repo,
+        comment_id: commentId,
+        content,
+      });
+      return true;
+    } catch (err) {
+      logger.warn({ pr: pr.number, commentId, err }, "could not acknowledge the review request");
+      return false;
+    }
+  }
+
   async listCommentReactions(
     pr: PullRequestRef,
     commentId: number,

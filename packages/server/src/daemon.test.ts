@@ -5,8 +5,9 @@ import { type AddressInfo, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobQueue, newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { GitHubClient } from "@maestro/integrations";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type RunningDaemon, startDaemon, supersedes } from "./daemon.js";
 
 let db: SqlDatabase;
@@ -94,6 +95,16 @@ describe("manual-only reviews", () => {
       body: raw,
     });
     return res.status;
+  };
+
+  /** Acknowledgement is fire-and-forget, so the 202 arrives before it has happened. */
+  const waitFor = async (cond: () => boolean, ms = 3000): Promise<void> => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (cond()) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error("condition never became true");
   };
 
   const queuedReviews = (): number =>
@@ -192,6 +203,57 @@ describe("manual-only reviews", () => {
     const port = await start(false);
     await deliver(port, "issue_comment", requested(11));
     await deliver(port, "issue_comment", requested(11));
+    expect(queuedReviews()).toBe(1);
+  });
+
+  it("reacts to the comment that asked, so the asker is not left in silence", async () => {
+    // A review takes minutes. Until it posted, asking produced nothing at all — no
+    // reaction, no comment — which is indistinguishable from a bot that is broken or was
+    // never installed. Observed on this project's own first live request: the comment sat
+    // there for twelve minutes while three agents worked.
+    const reacted: { commentId: number; content: string }[] = [];
+    vi.spyOn(GitHubClient, "fromEnv").mockReturnValue({
+      reactToComment: async (_pr: unknown, commentId: number, content: string) => {
+        reacted.push({ commentId, content });
+        return true;
+      },
+    } as unknown as GitHubClient);
+
+    const port = await start(true);
+    expect(await deliver(port, "issue_comment", requested(4242))).toBe(202);
+    await waitFor(() => reacted.length > 0);
+    expect(reacted[0]).toEqual({ commentId: 4242, content: "eyes" });
+  });
+
+  it("does not react to a review the pull request asked for itself", async () => {
+    // Nobody is waiting on an answer to a `pull_request.opened` event, and reacting to a
+    // comment nobody wrote is not possible anyway.
+    const reacted: unknown[] = [];
+    vi.spyOn(GitHubClient, "fromEnv").mockReturnValue({
+      reactToComment: async () => {
+        reacted.push(1);
+        return true;
+      },
+    } as unknown as GitHubClient);
+
+    const port = await start(true);
+    expect(await deliver(port, "pull_request", opened)).toBe(202);
+    await waitFor(() => queuedReviews() > 0);
+    expect(reacted).toEqual([]);
+  });
+
+  it("queues the review even when acknowledging it fails", async () => {
+    // The reaction is courtesy; the review is the point. A revoked token, a deleted
+    // comment or a rate limit must not cost somebody their review.
+    vi.spyOn(GitHubClient, "fromEnv").mockReturnValue({
+      reactToComment: async () => {
+        throw new Error("403 rate limited");
+      },
+    } as unknown as GitHubClient);
+
+    const port = await start(true);
+    expect(await deliver(port, "issue_comment", requested(99))).toBe(202);
+    await waitFor(() => queuedReviews() > 0);
     expect(queuedReviews()).toBe(1);
   });
 

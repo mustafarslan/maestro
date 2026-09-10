@@ -344,6 +344,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // asked directly.
     if (t.source === "comment" && hasPendingReviewJob(db, t.pr)) {
       logger.info({ pr: t.pr.number }, "a review of this pull request is already queued");
+      // Still acknowledged. From where the asker sits, "your request was folded into the
+      // one already running" and "nothing happened" look identical, and the second person
+      // to ask is the one most likely to conclude the bot is broken.
+      void acknowledge(t.pr, t.commentId);
       return;
     }
     const id = queue.enqueue({
@@ -358,6 +362,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dedupeKey: key,
     });
     logger.info({ key, reason: t.reason, enqueued: Boolean(id) }, "review trigger");
+
+    // Only for a person, and only once the work is real: reacting to a request that was
+    // deduplicated away or refused would be telling somebody their review is coming when
+    // it is not. Fire-and-forget — a failed acknowledgement must not fail the review.
+    if (t.source === "comment" && id) void acknowledge(t.pr, t.commentId);
 
     // A new head SHA makes any in-flight review of this PR unpostable; cancel it so it
     // stops holding a container and a scheduler slot.
@@ -664,6 +673,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await Promise.allSettled(workers);
     },
   };
+}
+
+/**
+ * Tells the person who asked that their request arrived.
+ *
+ * Separate from the trigger path so its failures stay there: no credential, a deleted
+ * comment or a rate limit all mean "not acknowledged", none of them mean "do not review".
+ */
+async function acknowledge(pr: PullRequestRef, commentId: number): Promise<void> {
+  try {
+    const client = GitHubClient.fromEnv();
+    if (!client) return;
+    await client.reactToComment(pr, commentId, "eyes");
+  } catch (err) {
+    logger.warn({ pr: pr.number, commentId, err }, "could not acknowledge the review request");
+  }
 }
 
 function sleep(ms: number): Promise<void> {

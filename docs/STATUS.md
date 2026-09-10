@@ -3100,13 +3100,33 @@ the server never sends fails it, and removing `live` from the server's response 
     two rules existing is not the property that matters. `accepted` is deliberately not the
     success green: a person agreeing with a finding means the code had a problem.
 
+223. **Asking for a review produced nothing at all until it posted.** `@maestro review` was
+    accepted, verified, authorised, deduplicated and enqueued in silence — no reaction, no
+    comment, nothing — and a review takes minutes. From the asker's side that is
+    indistinguishable from a bot that is broken, uninstalled, or never saw the comment.
+
+    Observed rather than reasoned about: this project's own first live request sat there for
+    twelve minutes while three agents worked, and the only way to know it had been heard was to
+    read the daemon's log.
+
+    It reacts 👀 to the comment now. Deliberately a reaction and not a comment — one
+    consolidated comment per pull request is the whole anti-noise design, and a "working on it"
+    comment would be the first crack in it. Only for a real request that was actually enqueued,
+    or one folded into a review already queued: reacting to a refused or rate-limited request
+    would promise a review that is not coming. And it never fails the review — a revoked token, a
+    deleted comment or a rate limit means "not acknowledged", not "do not review".
+
+    Mutation-checked both ways: removing the call fails the test that asks for it, and
+    acknowledging every trigger fails the one that says a pull request opening has nobody
+    waiting on an answer.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
 
-- **`findings.task_id` is never written.** A finding cannot be traced to the agent run that
-  produced it. `agent_id` covers most of what that is wanted for; the task link would matter for
-  Phase 8's "click a failed task" once findings are shown beside the waterfall.
+- ~~**`findings.task_id` is never written.**~~ **Done — finding 219.** Written when exactly one
+  agent produced the finding, and deliberately left NULL for a merged one, where no single task
+  is the honest answer.
 - **`tasks.lease_until`, `worker_id` and `started_at` are never written.** The plan gave tasks
   their own leases for crash recovery. What exists is job-level leasing plus `recoverStaleReviews`,
   which recovers at the review granularity. That is a legitimate simplification — a review is the
@@ -3114,8 +3134,13 @@ Recorded rather than fixed, because each is a decision rather than an oversight:
 - **`environments.volume_ids` is never written**, because no named volumes are created: the
   dependency cache is an image, and everything else is tmpfs or a bind mount. The plan's "the
   reaper must sweep volumes" has nothing to sweep.
-- **`repos.config_json`, `repos.installation_id` and the whole `installations` table are unused**,
-  since no GitHub App exists yet.
+- **`repos.config_json`, `repos.installation_id` and the whole `installations` table are unused.**
+  The reason recorded here was "no GitHub App exists yet", and that stopped being true the moment
+  one was created and installed on a real repository. They are unused for a different reason: App
+  credentials live in `~/.maestro/github-app.json` rather than the database, because key material
+  does not belong in a file people copy between machines, and `.maestro.yaml` is read from the
+  base branch at review time rather than cached in a column. Both are decisions; the columns are
+  what is left of an earlier plan.
 - **`task_deps` is unused.** Dependencies are expressed by the graph, resolved in memory.
 - ~~**Reaction feedback is ungated, and its delivery is unproven.**~~ **Answered, and fixed
   properly.** GitHub's webhook catalogue has no `reaction` event — checked against the published
