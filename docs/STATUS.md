@@ -30,8 +30,24 @@ What that leaves, in order of how much it would tell us:
    "The live GitHub run" below, and "A delivery GitHub composed" under it. What remains is
    the browser round trip that converts a manifest into an App, which needs somebody at a
    browser and a public callback.
-2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local
-   stand-in. Ollama Cloud served every model in the live run.
+2. **A hosted provider call that succeeds.** Narrower than it was.
+   `scripts/live-provider-check.mjs` sends a real request to `api.anthropic.com` and to
+   Google's endpoint with a deliberately invalid key, and asserts on the refusal — the
+   technique `live-linear-check.mjs` already uses, because a service tells you a great
+   deal before it authenticates you. That establishes the endpoint resolves, TLS
+   completes, the path exists, the request is one the service can parse, and the adapter
+   maps the refusal to a non-retryable error rather than letting the loop re-send it until
+   the budget is gone.
+
+   It also settled a difference nobody here knew: Anthropic refuses with 401, Google with
+   400. A check written on the assumption that a refusal is a 401 called Google's answer a
+   malformed request. Found by running it.
+
+   What is left needs a key: that a valid credential produces a completion, a tool call
+   and a schema-constrained output. `maestro llm test --provider anthropic` is the
+   one-minute check when there is one. Ollama Cloud served every model in the live runs,
+   so the loop, the budgets and the tool dispatch are exercised — what is unproven is
+   specifically these two adapters' happy path.
 3. ~~**Forty real containers.**~~ **Done.** `scripts/load-check.mjs` runs the Phase 7
    scenario against real Docker — 30 reviews across 3 repositories, more than the 10 the
    phase asks for. All 30 completed, peak admission was exactly the binding limit and never
@@ -2710,6 +2726,26 @@ the server never sends fails it, and removing `live` from the server's response 
     Measured at 30 reviews across 3 repositories: peak 4, binding limit 4. Documented in
     `docs/CONFIGURATION.md`, since "raise `global`" is otherwise reasonable advice that does
     nothing.
+
+200. **The two adapters nobody could call were still checkable.** `anthropic` and `google`
+    were the last untested surfaces, on the grounds that a completion needs a credential.
+    Most of what could be wrong does not: the base URL, the header names, the API version,
+    the request the SDK builds, and what the adapter does with the answer are all
+    observable from a refusal.
+
+    `scripts/live-provider-check.mjs` sends a real request with an invalid key and asserts
+    the failure is the right *kind*: a status at all (no status means DNS, TLS or a base
+    URL wrong in a way no unit test sees), not 404 (a path that does not exist), not a 400
+    about anything but the credential (something the service cannot parse), and — the part
+    that matters at run time — not retryable, because a loop that re-sends a rejected key
+    spends its whole budget being refused.
+
+    Both pass. And it corrected an assumption in its first version: Anthropic refuses with
+    401, Google with 400, so a check written to expect 401 reported Google's answer as a
+    malformed request. That is the sort of thing only a real request tells you, which is
+    the entire argument for these scripts.
+
+    Mutation-checked by making every provider error retryable, which fails both.
 
 ### Found by mechanical sweep, still open
 

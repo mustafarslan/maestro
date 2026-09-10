@@ -267,6 +267,7 @@ or fairness tally is left behind.
 ```
 node scripts/load-check.mjs 10 3          # ten reviews, three repositories
 node scripts/crash-recovery-check.mjs     # what a restart does with a killed daemon's leftovers
+node scripts/live-provider-check.mjs      # anthropic and google reachable, refusals mapped (no key)
 ```
 
 The second builds the state a killed daemon leaves — a review stuck mid-flight and a real
