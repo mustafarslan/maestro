@@ -274,14 +274,13 @@ paste in. A malformed graph degrades to no guidance rather than failing the revi
 unmatched step gets silence rather than the whole graph — the paper's own ablation is the
 argument for that, having measured full-graph guidance *below* no graph at all.
 
-**Measured, on eight fixtures, one agent.** It halved the agent's solver steps — 126 to 63,
-output tokens down 43%, input tokens up 3% — and made the held-out reviews slightly worse:
-recall 90% to 80%, precision 67% to 57%. That is one finding out of six on five fixtures, so
-it is a direction rather than a measurement. `docs/STATUS.md` finding 234 has the whole
-account, including the hypothesis it was built on turning out to be false. It is off by
-default and it is not a schema field. What it buys and what it costs are the two numbers
-above; which of them matters more is a judgement about your own repository, not one this
-document can make for you.
+**Measured, on eight fixtures, one agent, against two runs of the same configuration
+without it.** It used fewer solver steps than both control runs on all eight fixtures — 126
+and 148 steps down to 63 — with input tokens up 3% and output tokens down 43%. Whether it
+changes what the review *finds* is not measurable on a set this small: four of the eight
+fixtures moved between the two control runs, so the arms are separated by less than the noise.
+`docs/STATUS.md` finding 234 has the whole account, including the hypothesis it was built on
+turning out to be false. Off by default, and not a schema field.
 
 ## Spend caps
 
