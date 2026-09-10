@@ -26,12 +26,10 @@ The gap between those two columns is the honest summary of this project's state.
 
 What that leaves, in order of how much it would tell us:
 
-1. **A delivery sent by GitHub.** Everything either side of it is now verified live against
-   a real pull request — see "The live GitHub run" below — including the parts that were
-   waiting longest: inline anchored comments, cancel-on-push under real timing, and the
-   poller against a real open pull request. What is still unexercised is narrower than it
-   was: a webhook GitHub itself signs and sends, and the App manifest redirect. Both need
-   an App installed on a repository and a public URL.
+1. **The App manifest redirect.** Everything else on this line has been verified — see
+   "The live GitHub run" below, and "A delivery GitHub composed" under it. What remains is
+   the browser round trip that converts a manifest into an App, which needs somebody at a
+   browser and a public callback.
 2. **A hosted provider call.** `anthropic` and `google` are the two adapters with no local
    stand-in. Ollama Cloud served every model in the live run.
 3. **Forty real containers.** The load scenario is real concurrency over a simulated
@@ -62,6 +60,30 @@ above were waiting for.
 
 Three reviews ran: one from the CLI, one cancelled mid-flight by a push, one that superseded
 it. The pull request was closed and its branch deleted afterwards.
+
+**A delivery GitHub composed.** Signing payloads locally proves the verifier agrees with
+itself. So a repository webhook was created with a random secret, pointed at a URL that
+cannot answer, and three events were triggered — a ping, a push and a pull request opened
+for the purpose. GitHub records every delivery it attempts, including the exact bytes and
+the `X-Hub-Signature-256` it computed over them, and those bytes turn out to be
+reproducible: `JSON.stringify` of the recorded payload hashes to the signature GitHub sent,
+for all three.
+
+Replayed at a running listener holding the same secret, GitHub's own signature over
+GitHub's own body was accepted for all three — `202 accepted` — and `interpretEvent` read
+the real `pull_request.opened` payload as a review trigger for `mustafarslan/maestro#3` at
+head `983b2c08`, which is the commit that branch actually pointed at. The same signature
+over a body with one word changed was refused with `401 invalid signature`. The daemon ran
+with no GitHub credential in its environment, so the review it queued could not start a
+container or spend anything.
+
+The only link left untested is TCP reachability, which is a fact about networks rather than
+about Maestro. The payload is kept as a fixture: every other webhook test in the repository
+builds its own, so they all share the assumption that the shape imagined here is the shape
+GitHub sends — this is the one that checks it. Mutation-verified by reading the base SHA
+instead of the head SHA, which is the mistake an invented fixture hides.
+
+The hook, both pull requests and both branches were removed afterwards.
 
 **What the reviews found.** The change under review was a small session store with one
 planted defect. Maestro reported it — `revokeUser` assigning instead of comparing, three
