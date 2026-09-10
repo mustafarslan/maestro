@@ -92,6 +92,25 @@ export interface RunAgentOptions {
    * with zero findings and full cost — the worst possible outcome.
    */
   wrapUpAtStepsRemaining?: number;
+  /**
+   * Situational guidance for the next step, from the tools just called.
+   *
+   * The loop already inserts two synthetic user turns — the wrap-up nudge and the ask to
+   * submit — so this is the same mechanism rather than a new one. It is called after the
+   * tool results are appended and its text is merged into the single turn that follows,
+   * rather than pushed as a second consecutive `user` message. `toModelMessages` maps
+   * Maestro's messages one to one and promises no coalescing; the Anthropic provider
+   * happens to merge a tool-result message with the text after it, which is that
+   * provider's behaviour rather than a contract every other one owes.
+   *
+   * Called on every tool-calling step, which is the point. A rule stated once at the top
+   * of a forty-step run is not the same thing as the same rule restated where it applies.
+   * A prose turn calls no tools and so localizes nowhere; it is skipped.
+   *
+   * Whatever this returns lands in the prompt, so anything derived from repository content
+   * has to be fenced by the caller. Today's caller passes operator-authored text.
+   */
+  guidance?: (step: { index: number; toolNames: string[] }) => string | undefined;
 }
 
 const DEFAULT_RETRIES = 3;
@@ -210,6 +229,17 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
 
     messages.push({ role: "tool", results: toolResults });
 
+    // One synthetic turn per step, carrying whichever of the two things there is to say.
+    // They were separate pushes at first, which put two `user` messages in a row whenever
+    // both fired.
+    const parts: string[] = [];
+
+    const guidance = opts.guidance?.({
+      index,
+      toolNames: response.toolCalls.map((c) => c.name),
+    });
+    if (guidance) parts.push(guidance);
+
     // Budget awareness. A model that cannot see its own step budget will happily explore
     // until it is cut off; telling it how much room is left converts a wasted run into a
     // submitted one.
@@ -217,15 +247,15 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
     const remaining = budget.maxSteps - index - 1;
     const nearCostCap = totalCost >= budget.costCapCents * 0.8;
     if (remaining > 0 && (remaining <= wrapUpAt || nearCostCap)) {
-      messages.push({
-        role: "user",
-        content:
-          `You have ${remaining} step${remaining === 1 ? "" : "s"} left` +
+      parts.push(
+        `You have ${remaining} step${remaining === 1 ? "" : "s"} left` +
           (nearCostCap ? " and are near your cost budget" : "") +
           `. Stop investigating and call ${terminalTool} now with what you already have. ` +
           "Reporting fewer, well-supported findings is the expected outcome; an empty list is valid.",
-      });
+      );
     }
+
+    if (parts.length) messages.push({ role: "user", content: parts.join("\n\n") });
 
     // Copied, not shared. `trimHistory`'s last resort truncates oversized tool outputs
     // in place on the objects inside `messages` — and those were the very same objects,

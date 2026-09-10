@@ -8,6 +8,7 @@ import {
 } from "@maestro/playbook";
 import type { CommandComparison, Sandbox } from "@maestro/sandbox";
 import { type Finding, SubmitFindingsSchema } from "./finding.js";
+import { guidanceFor, PG_START, type ProceduralGraph } from "./procedural-graph.js";
 import { buildDispatch, TERMINAL_TOOL, type ToolContext, toolsForAgent } from "./tools.js";
 
 export interface ReviewAgentRequest {
@@ -40,6 +41,15 @@ export interface ReviewAgentRequest {
   reviewId?: string;
   nodeId?: string;
   budget: { maxSteps: number; costCapCents: number; deadlineMs?: number; maxPromptChars?: number };
+  /**
+   * A procedural graph for this agent's tool use, if its node carries one.
+   *
+   * Operator-authored, out of the playbook, so it is not fenced: it is Maestro's own text
+   * in the same category as the tool contract. Anything derived from the repository would
+   * have to be, and `injection.test.ts` now reads every message rather than the first for
+   * exactly that reason.
+   */
+  proceduralGraph?: ProceduralGraph;
   signal?: AbortSignal;
   onStep?: (step: { index: number; costCents: number }) => void;
 }
@@ -94,6 +104,10 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
     req.setupFailed,
     req.writableWorkdir,
     req.comparisons,
+    // Step 0's guidance. The per-step hook fires after tool results are appended, so the
+    // first model call would otherwise never see any and the graph's Start node would be
+    // a node nothing reads — the shape of defect this repository has recorded most often.
+    req.proceduralGraph && guidanceFor(req.proceduralGraph, [PG_START]),
   );
 
   const loop = await runAgent({
@@ -111,6 +125,9 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
     thinkingBudget: req.agent.model.thinkingBudget,
     signal: req.signal,
     onStep: (s) => req.onStep?.({ index: s.index, costCents: s.costCents }),
+    guidance: req.proceduralGraph
+      ? ({ toolNames }) => guidanceFor(req.proceduralGraph as ProceduralGraph, toolNames)
+      : undefined,
   });
 
   if (loop.stopKind !== "terminal-tool") {
@@ -160,6 +177,7 @@ function buildUserPrompt(
   setupFailed?: boolean,
   writableWorkdir?: boolean,
   comparisons?: CommandComparison[],
+  openingGuidance?: string,
 ): string {
   const parts: string[] = ["Review the pull request described below."];
 
@@ -258,6 +276,11 @@ function buildUserPrompt(
       : "",
     `When you are done, call ${TERMINAL_TOOL}. Reporting nothing is better than reporting noise.`,
   );
+
+  // Last, next to the instruction it refines rather than at the top where it would read
+  // as a second set of rules. Restated at every subsequent step by the loop's guidance
+  // hook; this is only the opening one, which has no prior tool call to localize from.
+  if (openingGuidance) parts.push(`Procedural guidance for this step:\n${openingGuidance}`);
 
   return parts.join("\n\n");
 }

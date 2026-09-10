@@ -3517,6 +3517,77 @@ the server never sends fails it, and removing `live` from the server's response 
     that have never been made; both are ordinary reads, and both are exactly the kind of
     assumption this file exists to stop anyone claiming.
 
+234. **A procedural graph over the agent's tool use: half the work, and slightly worse
+    reviews.** Built from arXiv:2609.09153 (Lu, Chen, Wu, Arık, Google). A procedural graph
+    organises a task's procedure into (procedure, relation, procedure) triplets the way a
+    knowledge graph organises facts into (entity, relation, entity) ones; at each step the
+    framework localizes the agent's active node and hands it the surrounding subgraph as
+    situational guidance. The paper's own ablation is the reason to localize: injecting the
+    *whole* graph scored 54.48 on ALFWorld against 72.58 for no graph at all.
+
+    Maestro is a good fit for the localization half — matching the last action to a node is an
+    exact match against eight tool names — and `loop.ts` already inserted synthetic user turns,
+    so the mechanism is the one that was there. Twelve edges over nine nodes, in the
+    architecture agent node's `config`, and a run of the eight fixtures against it.
+
+    **What it did to the work:**
+
+    | | steps | tool calls | input tokens | output tokens | wall clock |
+    | --- | --- | --- | --- | --- | --- |
+    | control | 126 | 182 | 81,329 | 251,375 | 31.7 min |
+    | guided | 63 | 109 | 83,881 | 143,763 | 22.8 min |
+
+    Solver steps halved. That is a larger reduction than the paper reports for itself
+    (28.20 to 18.57 on GDPval), and it costs almost nothing: input tokens rose 3% and output
+    tokens fell 43%, because Maestro injects the serialized subgraph directly rather than
+    spending a second model call per step generating prose from it — the cheaper of the two
+    configurations the paper compares.
+
+    **What it did to the reviews:**
+
+    | | precision | recall |
+    | --- | --- | --- |
+    | held out, control | 67% | 90% |
+    | held out, guided | 57% | 80% |
+    | training, control | 67% | 67% |
+    | training, guided | 100% | 67% |
+
+    Worse on the half that decides. `severity-sql-order` went from finding one of its two
+    defects to finding neither, in 15 steps instead of 26: the guidance told it to submit once
+    nothing specific was still in question, and it stopped before the question arrived.
+    `numeric-flag-nan` went the other way, from 33% precision to 100% — the same decisiveness,
+    cutting noise instead of investigation. On five held-out fixtures carrying six expected
+    findings, 90% to 80% is one finding. It is a direction, not a measurement.
+
+    **The hypothesis it was built on was wrong, and the trajectory table said so.** Finding
+    231's transcript of the run that found nothing showed a file read in eight overlapping
+    windows and what looked like the same grep five times, so four of the twelve edges warn
+    against re-issuing a call already made. Counting exact `(tool, input)` repeats across all
+    sixteen runs: **two in the control arm and two in the guided arm.** The repetition was
+    overlapping and near-duplicate, not identical, and edges written against identical calls
+    address something that barely happens.
+
+    **And the fixture the graph was designed from was never a procedural problem at all.**
+    `reaper-double-count` hit the 900-second ceiling in both arms, on 21 steps and then on 11.
+    Its model calls average 45 and 66 seconds and peak at 234, against 15 seconds across every
+    other fixture. It is a slow-provider problem wearing a deadline's clothes. The plan for
+    this experiment said in advance that if the failed run turned out to be one slow model call
+    then guidance was aimed at the wrong thing; it was, and writing that down first is the only
+    reason the result is readable rather than arguable.
+
+    **This is the paper's own Mode 1 result, reproduced.** Its Table 2 shows a hand-crafted
+    expert graph taking MultiChallenge from 87.50 to 58.93 — a prior that makes things worse —
+    and the mechanism it offers for repairing one is the self-evolution loop: run a batch,
+    contrast the failures with the successes, propose edits, and commit only those that hold up
+    on a held-out split. That loop is what finding 232 built the split *for*, and it is the half
+    that is still blocked: eight fixtures is not enough for a validation gate whose decisions
+    would turn on one of them.
+
+    Kept, off by default and behind no schema field — it is read out of `GraphNode.config` the
+    way a gate's config is, so a graph that never earns its place leaves no migration behind.
+    What it has already earned is the halving of steps at a 3% input-token cost, which is worth
+    something on its own to anyone paying per review rather than per finding.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

@@ -1,0 +1,103 @@
+{
+  "nodes": [
+    { "id": "Start", "type": "STATE", "description": "nothing has been read yet" },
+    { "id": "git_diff", "type": "ACTION", "description": "the change under review" },
+    { "id": "read_file", "type": "ACTION", "description": "the code the change lives in" },
+    { "id": "grep", "type": "ACTION", "description": "the rest of the repository" },
+    { "id": "git_log", "type": "ACTION", "description": "why the surrounding code is as it is" },
+    { "id": "git_blame", "type": "ACTION", "description": "who last touched a line, and when" },
+    { "id": "list_dir", "type": "ACTION", "description": "where things are" },
+    { "id": "run_command", "type": "ACTION", "description": "evidence rather than suspicion" },
+    { "id": "submit_findings", "type": "ACTION", "description": "the review" }
+  ],
+  "edges": [
+    {
+      "from": "Start",
+      "to": "git_diff",
+      "relation": "LEADS_TO",
+      "guidance": "Call git_diff first. Every judgement in this review is about what the diff changed, so reading anything else before it is reading without a question.",
+      "pitfalls": "Do not begin by listing directories or grepping. You do not yet know what you are looking for."
+    },
+    {
+      "from": "git_diff",
+      "to": "read_file",
+      "relation": "PROVIDES_INPUT_FOR",
+      "condition": "a changed file contains code the diff does not show in full",
+      "guidance": "Read each changed file once, in as few calls as the 300-line cap allows, starting at the first changed hunk. The diff shows the change; the file shows what the change is embedded in, and correctness is a property of the second.",
+      "pitfalls": "Never re-read a range you have already read. Every earlier read is still in this conversation above you — scroll rather than call. Reading one file in a series of overlapping windows is the single most common way a review runs out of budget with nothing submitted."
+    },
+    {
+      "from": "git_diff",
+      "to": "run_command",
+      "relation": "LEADS_TO",
+      "condition": "the change claims something about a test, a build or a lint that a command can settle",
+      "guidance": "Run the allowlisted command and attach its real output. A finding backed by a failing command outranks ten arguments.",
+      "pitfalls": "Only the exact allowlisted strings run; a near miss is refused, not approximated. If no command is allowlisted, reason from the code and say so rather than retrying."
+    },
+    {
+      "from": "read_file",
+      "to": "grep",
+      "relation": "LEADS_TO",
+      "condition": "the change alters something other code depends on - a signature, a constant, a schema, an error shape",
+      "guidance": "Grep once for the specific symbol. What you are looking for is a caller the change breaks, or an existing implementation the change duplicates.",
+      "pitfalls": "Do not re-issue a pattern you have already run. If a pattern returned nothing, a slightly reworded version of it will also return nothing; the answer is that the thing is not there."
+    },
+    {
+      "from": "read_file",
+      "to": "run_command",
+      "relation": "LEADS_TO",
+      "condition": "reading the code produced a suspicion a command could confirm",
+      "guidance": "Confirm it before reporting it. An unconfirmed suspicion belongs in the finding's confidence, not in its title."
+    },
+    {
+      "from": "read_file",
+      "to": "submit_findings",
+      "relation": "CONVERGES_TO",
+      "condition": "you have read the changed code and nothing specific is still in question",
+      "guidance": "Submit. Fewer well-supported findings is the expected outcome, and an empty list is a real result.",
+      "pitfalls": "Do not keep reading in the hope that something turns up. If you cannot name the question the next call answers, you are finished."
+    },
+    {
+      "from": "grep",
+      "to": "read_file",
+      "relation": "PROVIDES_INPUT_FOR",
+      "condition": "a hit is in a file you have not read",
+      "guidance": "Read the hit and the lines immediately around it, by line range. You want the one call site, not the file it lives in.",
+      "pitfalls": "Do not read the whole file for one hit, and do not read a file you have already read."
+    },
+    {
+      "from": "grep",
+      "to": "submit_findings",
+      "relation": "CONVERGES_TO",
+      "condition": "the search answered the question, either way",
+      "guidance": "A search that found nothing is an answer. Record what it settled and move on."
+    },
+    {
+      "from": "git_log",
+      "to": "submit_findings",
+      "relation": "CONVERGES_TO",
+      "guidance": "History explains intent; it rarely produces a finding on its own. Return to the diff or submit."
+    },
+    {
+      "from": "git_blame",
+      "to": "read_file",
+      "relation": "PROVIDES_INPUT_FOR",
+      "condition": "blame points at a change you have not read",
+      "guidance": "Read that line's surroundings once."
+    },
+    {
+      "from": "list_dir",
+      "to": "grep",
+      "relation": "LEADS_TO",
+      "guidance": "You now know the layout. Search it for the thing you were looking for rather than listing further.",
+      "pitfalls": "Listing a directory you have already listed tells you nothing new. Two listings of the same path in one review is a sign of being lost — go back to the diff."
+    },
+    {
+      "from": "run_command",
+      "to": "submit_findings",
+      "relation": "CONVERGES_TO",
+      "guidance": "Attach the command's real output as the finding's evidence, including the exit code.",
+      "pitfalls": "If the command failed for an environmental reason rather than because of the change, say so and do not report it as a defect."
+    }
+  ]
+}

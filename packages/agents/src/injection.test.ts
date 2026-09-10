@@ -70,16 +70,33 @@ function systemText(body: unknown): string {
   return "";
 }
 
-/** The first user message, which is where the review request and its evidence live. */
+/** One message's text, whatever shape the wire format put it in. */
+function messageText(m: unknown): string {
+  const content = (m as { content?: unknown })?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((b) => (b as { text?: string }).text ?? "").join("\n");
+  }
+  return "";
+}
+
+/**
+ * EVERY user turn, not only the first.
+ *
+ * This read `messages[0]`, which was true of the whole prompt for as long as the first
+ * user message was the only one Maestro composed. The loop has always inserted synthetic
+ * turns mid-run — the wrap-up nudge, the ask to submit — and now inserts per-step
+ * procedural guidance as well. A fencing assertion that stops at the first message cannot
+ * see any of them, so the suite would have reported a clean bill of health on a prompt
+ * whose later turns carried attacker text unfenced.
+ */
 function userText(body: unknown): string {
   const messages = (body as { messages?: unknown }).messages;
   if (!Array.isArray(messages)) return "";
-  const first = messages[0] as { content?: unknown };
-  if (typeof first?.content === "string") return first.content;
-  if (Array.isArray(first?.content)) {
-    return first.content.map((b) => (b as { text?: string }).text ?? "").join("\n");
-  }
-  return "";
+  return messages
+    .filter((m) => (m as { role?: string }).role !== "assistant")
+    .map(messageText)
+    .join("\n");
 }
 
 const doc = defaultPlaybook();

@@ -498,3 +498,114 @@ describe("what a step keeps", () => {
     expect(trimmed.some((r) => r.output.includes("truncated"))).toBe(true);
   });
 });
+
+describe("per-step guidance", () => {
+  /**
+   * Every user turn the loop sent, across all requests.
+   *
+   * Empties are dropped: the Anthropic wire format carries tool results as a `user`
+   * message of `tool_result` blocks, which have no text of their own.
+   */
+  const userTurns = (t: ReturnType<typeof anthropicTransport>) =>
+    t.requests
+      .flatMap((r) => (r.body.messages as { role: string; content: unknown }[]) ?? [])
+      .filter((m) => m.role === "user")
+      .map((m) =>
+        typeof m.content === "string"
+          ? m.content
+          : (m.content as { text?: string }[]).map((b) => b.text ?? "").join(""),
+      )
+      .filter(Boolean);
+
+  it("is offered on every tool-calling step, not once at the top", () => {
+    // The whole claim of the mechanism this serves: a rule stated once at the start of a
+    // long run is not the same thing as the same rule restated where it applies.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "echo", input: { value: "b" } }] },
+      { toolCalls: [{ id: "3", name: "submit", input: { answer: "ok" } }] },
+    ]);
+    const seen: { index: number; toolNames: string[] }[] = [];
+
+    return runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 10, costCapCents: 100 },
+      guidance: (step) => {
+        seen.push(step);
+        return `GUIDE-${step.index}`;
+      },
+    }).then(() => {
+      // Two tool-calling steps; the terminal call ends the run before a third.
+      expect(seen.map((s) => s.index)).toEqual([0, 1]);
+      expect(seen[0]?.toolNames).toEqual(["echo"]);
+      const turns = userTurns(t);
+      expect(turns.filter((c) => c.includes("GUIDE-0"))).not.toHaveLength(0);
+      expect(turns.filter((c) => c.includes("GUIDE-1"))).not.toHaveLength(0);
+    });
+  });
+
+  it("merges into the wrap-up turn instead of appending a second user message", async () => {
+    // Asserted on the loop's OWN message list, not on the request body: the Anthropic
+    // provider coalesces a tool-result message with the text that follows it, so the wire
+    // format shows one `user` turn either way and cannot tell the two shapes apart. That
+    // coalescing is one provider's behaviour and not a contract — `toModelMessages` maps
+    // Maestro's messages one to one and promises nothing — so the loop is what has to hold
+    // the shape, and the loop is where it has to be checked.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "submit", input: { answer: "ok" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      // One step left after the first, so the wrap-up nudge fires on the same step as
+      // the guidance.
+      budget: { maxSteps: 2, costCapCents: 100 },
+      guidance: () => "GUIDE",
+    });
+
+    const roles = result.messages.map((m) => m.role);
+    expect(roles.some((r, i) => r === "user" && roles[i + 1] === "user")).toBe(false);
+
+    const merged = result.messages.find((m) => m.role === "user" && m.content.includes("GUIDE"));
+    expect(merged?.role === "user" && merged.content).toContain("step left");
+  });
+
+  it("is not offered on a turn that called no tool", async () => {
+    // A prose turn has no action to localize from, and the loop already answers it with
+    // its own ask to submit.
+    const t = anthropicTransport([{ text: "here are my thoughts" }, { text: "still thinking" }]);
+    let calls = 0;
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 4, costCapCents: 100 },
+      guidance: () => {
+        calls++;
+        return "GUIDE";
+      },
+    });
+    expect(calls).toBe(0);
+    expect(userTurns(t).some((c) => c.includes("GUIDE"))).toBe(false);
+  });
+
+  it("sends nothing extra when the hook declines", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "submit", input: { answer: "ok" } }] },
+    ]);
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 10, costCapCents: 100 },
+      guidance: () => undefined,
+    });
+    // Only the opening prompt: an unmatched step gets silence, not an empty turn.
+    expect(userTurns(t).filter((c) => c !== base.prompt)).toEqual([]);
+  });
+});

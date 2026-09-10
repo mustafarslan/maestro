@@ -240,6 +240,48 @@ The false-positive half of an answer key (`forbidden`) is written from what real
 report, not guessed at in advance. A forbidden pattern invented up front scores an agent
 against a prediction about its wording.
 
+## Procedural guidance for an agent (experimental)
+
+An agent node may carry a **procedural graph** in its `config`: a directed graph over that
+agent's tool names, whose edges say which call is admissible after which and carry
+`condition`, `guidance` and `pitfalls` text. At each step Maestro localizes the tools just
+called, takes their two-hop outgoing neighbourhood, and appends it to the same synthetic turn
+that carries the wrap-up nudge. It biases the next action; it does not constrain it — every
+tool stays callable.
+
+```yaml
+# playbook.yaml
+graph:
+  nodes:
+    - id: n-architecture
+      kind: agent
+      agentId: architecture
+      config:
+        proceduralGraph:
+          nodes:
+            - { id: Start, type: STATE, description: nothing has been read yet }
+            - { id: git_diff, description: the change under review }
+            - { id: read_file, description: the code the change lives in }
+          edges:
+            - from: Start
+              to: git_diff
+              guidance: Call git_diff first. Every judgement here is about what changed.
+              pitfalls: Do not begin by listing directories. You do not yet know what you seek.
+```
+
+`docs/procedural-graph-architecture.json` is the graph the experiment below used, ready to
+paste in. A malformed graph degrades to no guidance rather than failing the review, and an
+unmatched step gets silence rather than the whole graph — the paper's own ablation is the
+argument for that, having measured full-graph guidance *below* no graph at all.
+
+**Measured, on eight fixtures, one agent.** It halved the agent's solver steps — 126 to 63,
+output tokens down 43%, input tokens up 3% — and made the held-out reviews slightly worse:
+recall 90% to 80%, precision 67% to 57%. That is one finding out of six on five fixtures, so
+it is a direction rather than a measurement. `docs/STATUS.md` finding 234 has the whole
+account, including the hypothesis it was built on turning out to be false. It is off by
+default, it is not a schema field, and it is worth reaching for today only if you are paying
+per review rather than per finding.
+
 ## Spend caps
 
 A router tier caps one review and a model binding caps one agent. Neither can see that a

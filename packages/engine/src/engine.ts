@@ -1,4 +1,9 @@
-import { type Finding, runReviewAgent, severityAtLeast } from "@maestro/agents";
+import {
+  type Finding,
+  proceduralGraphFrom,
+  runReviewAgent,
+  severityAtLeast,
+} from "@maestro/agents";
 import { logger, type SpanRecorder, type SqlDatabase } from "@maestro/core";
 import type { Provider, ProviderRegistry } from "@maestro/llm";
 import {
@@ -536,6 +541,11 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             comparisons,
             writableWorkdir: spec.writableWorkdir,
             context: req.context,
+            // Off unless this agent's node carries one. Read from `config`, the untyped
+            // bag, rather than from a schema field: an experiment that does not pay for
+            // itself should leave no migration behind, and a malformed one degrades to a
+            // review without guidance rather than a failed review.
+            proceduralGraph: proceduralGraphFrom(node.config),
             // So an agent's log lines can be tied back to the review and the graph node
             // they came from. Three agents run concurrently across several reviews, and
             // `agentId` alone matches lines from all of them.
