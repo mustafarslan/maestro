@@ -11,7 +11,7 @@
  * `exec format error` at review time rather than here.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -63,3 +63,25 @@ execFileSync(
   { stdio: "inherit" },
 );
 console.log(`\n  ${out}`);
+
+// Also placed in the cache the daemon reads, because `dist/` is resolved relative to the
+// working directory: a binary built here would only be found while running Maestro from
+// inside this checkout, which is not how anybody reviews their own projects. The cache is
+// keyed by version for the same reason the download is — an older binary may predate the
+// subcommand it is being asked to run.
+const version = /MAESTRO_VERSION = "([^"]+)"/.exec(
+  readFileSync("packages/core/src/version.ts", "utf8"),
+)?.[1];
+if (version) {
+  const cacheDir = join(process.env.MAESTRO_HOME ?? join(homedir(), ".maestro"), "cache");
+  mkdirSync(cacheDir, { recursive: true });
+  const cached = join(
+    cacheDir,
+    `maestro-linux-${arch === "amd64" || arch === "x86_64" ? "x64" : "arm64"}-${version}`,
+  );
+  copyFileSync(out, cached);
+  chmodSync(cached, 0o755);
+  console.log(`  ${cached}`);
+} else {
+  console.warn("could not read MAESTRO_VERSION; the binary is only in dist/");
+}

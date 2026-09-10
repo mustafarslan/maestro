@@ -2924,6 +2924,12 @@ the server never sends fails it, and removing `live` from the server's response 
     The gate builds its own proxy binary rather than reaching for a published one, so it tests
     the code in the tree. About a second, since the bundle is already built by the typecheck.
 
+    One more thing that only shows up outside a checkout: `dist/maestro-linux-<arch>` is
+    resolved relative to the working directory, so a locally built binary was found only while
+    running Maestro from inside this repository — and reviewing your own projects means running
+    it from somewhere else. `build:proxy-binary` now also installs into the version-keyed cache
+    the daemon reads, and `doctor` from `/tmp` reports `linux binary ready (cache)`.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

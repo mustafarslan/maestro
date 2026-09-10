@@ -318,7 +318,10 @@ The proxy container is a stock Debian image with this same binary copied in, run
 image. Maestro needs a **Linux build of itself for Docker's architecture**, found in this order:
 
 1. `MAESTRO_PROXY_BINARY` — an explicit path, which always wins
-2. `dist/maestro-linux-<arch>` — from `pnpm run build:proxy-binary` in a checkout
+2. `dist/maestro-linux-<arch>` — from `pnpm run build:proxy-binary` in a checkout. That
+   command also copies the result into the cache below, because `dist/` is resolved relative
+   to the working directory and would otherwise only be found while running Maestro from
+   inside the checkout
 3. this process, when it is already a Linux binary of the right architecture (a Linux host, or Compose)
 4. `~/.maestro/cache/maestro-linux-<arch>-<version>`, downloaded from the release once and cached
 
