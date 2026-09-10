@@ -2591,6 +2591,31 @@ the server never sends fails it, and removing `live` from the server's response 
     "driving every agent's acceptance rate to ~100%"; this removes the remaining source of
     that.
 
+194. **Running the test suite destroyed a live review's containers.** Found by having it
+    happen: a self-review of this session's commits was in its analyze phase when the gate
+    ran, and `docker.integration.test.ts` swept every Maestro-labelled container on the
+    machine. Two agents carried on calling a model with no sandbox left to execute anything
+    in, and the review sat in `preparing` until it was killed.
+
+    The offending call is `driver.reap({ protectReviewIds: [REVIEW_ID] })` — no `reviewId`,
+    no age. That is exactly what `maestro reap` does and therefore what has to be tested;
+    the mistake is testing it on a machine that may also be running a review.
+
+    The hazard was already known in that file. The comment above the undated-orphan test,
+    twenty lines earlier, says an unscoped reap "removes every managed container, including
+    the sandbox the other tests in this file share. A test that damages its neighbours is a
+    worse problem than the one it checks." The guard was reasoned out once, applied to one
+    case, and not applied to the case that needed it. That is the same half-fixed shape
+    this file records again and again, and it was written by the person who had just
+    written the warning.
+
+    A destructive sweep now refuses to run when a managed container belongs to anything
+    else, and says which. Verified in both directions against real Docker: with a foreign
+    container planted, the test skips and the container survives; with the guard removed,
+    the same container is destroyed.
+
+    Worth keeping in mind about the review that found it: it found this by dying of it.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

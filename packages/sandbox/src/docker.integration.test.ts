@@ -64,6 +64,52 @@ afterAll(async () => {
   if (sourceDir) rmSync(sourceDir, { recursive: true, force: true });
 }, 300_000);
 
+/**
+ * Managed containers on this machine that this test file did not create.
+ *
+ * A sweep with no `reviewId` and no age destroys every Maestro-labelled container the
+ * daemon can see, which is what `maestro reap` is for and therefore what has to be
+ * tested — but the machine running the tests may also be running a review. It was: this
+ * suite destroyed the containers of a live review mid-run, and the review carried on
+ * calling a model with no sandbox to execute anything in.
+ *
+ * The hazard was already known here. The comment above the undated-orphan test says an
+ * unscoped reap "removes every managed container, including the sandbox the other tests
+ * in this file share. A test that damages its neighbours is a worse problem than the one
+ * it checks" — and the test below then ran one anyway, protecting only its own review.
+ * The guard was written once and not applied to the case that needed it.
+ *
+ * A destructive sweep now refuses to run rather than taking somebody's review with it.
+ */
+async function foreignManagedContainers(): Promise<string[]> {
+  const out = execFileSync("docker", ["ps", "-aq", "--filter", "label=maestro.managed=true"], {
+    encoding: "utf8",
+  })
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const foreign: string[] = [];
+  for (const id of out) {
+    const label = execFileSync(
+      "docker",
+      ["inspect", "--format", '{{index .Config.Labels "maestro.review"}}', id],
+      { encoding: "utf8" },
+    ).trim();
+    if (label !== REVIEW_ID && !label.startsWith(`${REVIEW_ID}-`)) foreign.push(id);
+  }
+  return foreign;
+}
+
+/** Skips a test that would sweep containers it does not own, saying why. */
+async function refuseIfNotAlone(): Promise<string | null> {
+  const foreign = await foreignManagedContainers();
+  return foreign.length
+    ? `skipped: ${foreign.length} Maestro container(s) on this machine belong to something else. ` +
+        "An unscoped sweep would destroy them, and one of them may be a review in progress."
+    : null;
+}
+
 const itDocker = (name: string, fn: () => Promise<void>, timeout = 120_000) =>
   it(
     name,
@@ -157,6 +203,12 @@ describe("analyze phase security posture", () => {
       // exactly that command.
       const sandbox = await driver.analyze(env!, { spec });
       try {
+        const refusal = await refuseIfNotAlone();
+        if (refusal) {
+          console.log(refusal);
+          expect((await sandbox.exec("echo still-here")).stdout).toContain("still-here");
+          return;
+        }
         const result = await driver.reap({ protectReviewIds: [REVIEW_ID] });
         expect(result.protected).toBeGreaterThan(0);
 
