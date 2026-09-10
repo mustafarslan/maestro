@@ -266,3 +266,95 @@ describe("model settings reaching the provider", () => {
     });
   });
 });
+
+/**
+ * The seam between the graph and the loop.
+ *
+ * `guidanceFor` is tested as a pure function and the loop's per-step hook is tested in
+ * `loop.test.ts`; neither notices if `run-agent.ts` stops calling them. That is the bug
+ * class this repository has recorded most often — a capability wired at one end and read
+ * at neither — and it is the whole of the feature here, so it gets its own guard.
+ */
+describe("a procedural graph reaches the model", () => {
+  const graph = {
+    nodes: [
+      { id: "Start", type: "STATE" as const, description: "nothing read yet" },
+      { id: "git_diff", type: "ACTION" as const, description: "the change" },
+      { id: "read_file", type: "ACTION" as const, description: "the code around it" },
+      { id: "grep", type: "ACTION" as const, description: "other callers" },
+    ],
+    edges: [
+      {
+        from: "Start",
+        to: "git_diff",
+        relation: "LEADS_TO" as const,
+        guidance: "OPENING_MARKER: read the diff first.",
+      },
+      {
+        from: "git_diff",
+        to: "read_file",
+        relation: "LEADS_TO" as const,
+        guidance: "TWO_HOPS: read each changed file once.",
+      },
+      // Three hops from Start, so it is NOT in the opening guidance and can only arrive
+      // from the per-step hook. Without a node this far out, the two-hop opening covers
+      // every edge in the graph and deleting the hook leaves the test still passing —
+      // which is how this test first read.
+      {
+        from: "read_file",
+        to: "grep",
+        relation: "LEADS_TO" as const,
+        guidance: "STEP_MARKER: find the other callers.",
+      },
+    ],
+  };
+
+  /** Every user turn the provider actually received, across all requests. */
+  const userText = (t: ReturnType<typeof anthropicTransport>) =>
+    JSON.stringify(
+      t.requests.flatMap((r) =>
+        (r.body.messages as { role: string }[]).filter((m) => m.role !== "assistant"),
+      ),
+    );
+
+  it("puts the Start neighbourhood in the opening prompt and the rest per step", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "read_file", input: { path: "a.ts" } }] },
+      { toolCalls: [{ id: "2", name: "submit_findings", input: { findings: [] } }] },
+    ]);
+
+    await runReviewAgent({
+      ...baseReq,
+      provider: new Provider(fakeConfig(t)),
+      model: "claude-opus-5",
+      proceduralGraph: graph,
+    });
+
+    // Step zero has no prior tool call, so its guidance has nowhere to be appended and
+    // goes into the task prompt instead. Without this the paper's `a_0 = Start` case is
+    // dead code that nothing would report.
+    const opening = JSON.stringify(t.requests[0]?.body.messages);
+    expect(opening).toContain("OPENING_MARKER");
+    // Two hops, which is the whole opening neighbourhood.
+    expect(opening).toContain("TWO_HOPS");
+    // Three hops from Start, so this can only have come from the per-step hook localizing
+    // on the tool that was actually called. Deleting the hook has to fail here.
+    expect(opening).not.toContain("STEP_MARKER");
+    expect(userText(t)).toContain("STEP_MARKER");
+  });
+
+  it("says none of it when the node carries no graph", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "git_diff", input: {} }] },
+      { toolCalls: [{ id: "2", name: "submit_findings", input: { findings: [] } }] },
+    ]);
+
+    await runReviewAgent({
+      ...baseReq,
+      provider: new Provider(fakeConfig(t)),
+      model: "claude-opus-5",
+    });
+
+    expect(userText(t)).not.toContain("Procedural guidance");
+  });
+});
