@@ -3319,6 +3319,23 @@ the server never sends fails it, and removing `live` from the server's response 
     looked correct and was: each step does what it says, in the wrong order. The tags are
     removed before the reap now.
 
+230. **A checked-in generated file was permanently dirty after any build.**
+    `scripts/embed-ui.mjs` emitted `UI_BUILT_AT = <now>` into `ui-assets.generated.ts`. It
+    had one definition, one writer and zero readers — `admin.ts` and the test both import
+    only `UI_ASSETS`. Its sole effect was that rebuilding dirtied a tracked file even when
+    every embedded asset was byte-identical.
+
+    That is worse than cosmetic noise. A generated file that is always modified is where a
+    real change hides: `git status` stops being a signal, and the habit it teaches is to
+    check the file out without reading it — which is exactly what happened here before the
+    diff was looked at.
+
+    Dropped, so the output is a pure function of the built assets: two consecutive runs of
+    the generator now produce an identical file, checked by hash. Two guards keep it that
+    way — one asserts the module's only export is `UI_ASSETS`, so any new non-deterministic
+    value trips it, and one asserts no timestamp appears in the source with the base64
+    bodies masked out. Both mutation-checked by re-adding the line.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

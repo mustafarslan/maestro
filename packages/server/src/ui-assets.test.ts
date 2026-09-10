@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { UI_ASSETS } from "./ui-assets.generated.js";
 
@@ -35,5 +36,25 @@ describe("the embedded admin UI", () => {
     // An index.html with no bundle would satisfy the checks above and serve nothing.
     const scripts = Object.keys(UI_ASSETS).filter((p) => p.endsWith(".js"));
     expect(scripts.length, "no JavaScript embedded").toBeGreaterThan(0);
+  });
+});
+
+describe("the generated file is a pure function of the assets", () => {
+  it("exports nothing but the asset map", async () => {
+    // It used to also emit `UI_BUILT_AT = <now>`, which nothing read: one definition, one
+    // writer, zero consumers. Its only effect was that any local build dirtied a checked-in
+    // generated file even when every embedded asset was byte-identical — so `git status`
+    // permanently showed a modified file that meant nothing, which is exactly where a real
+    // change hides. Anything non-deterministic added here trips this.
+    const generated = await import("./ui-assets.generated.js");
+    expect(Object.keys(generated)).toEqual(["UI_ASSETS"]);
+  });
+
+  it("has no timestamp outside the encoded asset bodies", () => {
+    // The bodies are base64 and may legitimately contain anything, so this checks the
+    // generated source with them removed rather than the file as a whole.
+    const source = readFileSync(new URL("./ui-assets.generated.ts", import.meta.url), "utf8");
+    const withoutBodies = source.replace(/body: "[^"]*"/g, 'body: ""');
+    expect(withoutBodies).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 });
