@@ -3560,6 +3560,16 @@ the server never sends fails it, and removing `live` from the server's response 
     the mechanism was the one already there. Twelve edges over nine nodes, in the architecture
     agent node's `config`.
 
+    > **These numbers no longer describe the shipped mechanism.** They were measured before
+    > finding 238, which found that the guidance accumulated instead of superseding: by step
+    > twenty the prompt carried twenty stacked neighbourhoods, which between them are most of
+    > the graph. That is the whole-graph configuration this finding's own second paragraph
+    > gives as the reason to localize. So the table below measures the stacking variant while
+    > the text around it claims localization, and the halved step count in particular is a
+    > result about a mechanism that has since changed. It is left standing rather than
+    > deleted, because a re-measurement on twenty fixtures is the thing that replaces it and
+    > it has not finished.
+
     **Three runs of the eight fixtures: the same control configuration twice, then the graph.**
     Running the control twice was the whole difference between a result and an anecdote.
 
@@ -3781,6 +3791,30 @@ committed, traced the new config field through three packages, and found that no
 
     The thirty-four rows were moved to `~/.maestro/eval-scores-quota-outage/` rather than
     deleted; they are the record of the outage, and they are not measurements.
+
+238. **The localized guidance was not localized: it accumulated.** The synthetic turn
+    carrying each step's guidance was pushed and never removed. `trimHistory` drops
+    assistant/tool *pairs* — it has to, because removing a tool result alone orphans the call
+    it answered and providers reject the request — so it can never touch a user message. By
+    step twenty the prompt held twenty two-hop neighbourhoods, each describing a step the
+    agent had finished long ago, and between them most of the graph.
+
+    That is not a size problem, which is how it would read from the code. It quietly rebuilds
+    the configuration the mechanism exists to avoid: arXiv:2609.09153's own ablation puts
+    full-graph guidance at 54.48 on ALFWorld against 72.58 for no graph at all, and
+    localization is the only reason the idea is worth having at all. Finding 234's experiment
+    therefore measured the stacking variant while its commit message claimed localization.
+
+    One at a time now, removed by identity — an index would be wrong, because `trimHistory`
+    splices the array between iterations. A step with nothing new to say leaves the previous
+    guidance standing, since "nothing to add" is not "forget what I said", and the opening
+    guidance stays in the task prompt because at step zero there is nothing to append to.
+    Both are stated in the code rather than left for a reader to infer. Mutation-checked.
+
+    Found by reading the plan's own list of traps against what was built. The plan named it —
+    "`trimHistory` never drops injected user messages, so guidance accumulates unboundedly" —
+    and the implementation shipped without it, which makes this a note about the value of
+    re-reading a plan after the work rather than only before it.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion
