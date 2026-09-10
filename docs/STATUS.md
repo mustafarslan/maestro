@@ -2980,6 +2980,29 @@ the server never sends fails it, and removing `live` from the server's response 
 
     It failed closed, which is the one part that behaved. Nothing was published.
 
+216. **The proxy downloader 404'd against a release whose assets were sitting right there.**
+    Found by publishing v0.2.0 and then actually fetching it with the local build and the cache
+    hidden — the only way this could have been found, and the reason to do it.
+
+    A **private** repository's release asset cannot be fetched from the browser download URL at
+    all. That path answers 404 even with a valid token, which reads exactly like "that version
+    was never released" and sends somebody to check their version number rather than their
+    credentials. The asset has to be requested through the API by its own id.
+
+    `install.sh` already knew this — it has a comment saying so and does the two-step
+    resolution. This downloader was written without it. The lesson that did not transfer: a
+    thing this repository has already learned once is not thereby known by the next piece of
+    code that needs it.
+
+    Now resolves the asset id from `/releases/tags/v<version>` and fetches it with
+    `Accept: application/octet-stream`, using `MAESTRO_TOKEN` (or `GITHUB_TOKEN`). Verified end
+    to end against the real private release: resolved, downloaded 81MB, cached by version, and
+    the downloaded binary answers `egress-proxy --help` inside a container. The failure message
+    now names the private-repository case, because a 404 does not.
+
+    Mutation-checked: restoring the browser URL fails the test that asserts which endpoint is
+    used — a test that only checked "a binary arrived" would have passed the broken version.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

@@ -100,7 +100,9 @@ export async function resolveProxyBinary(opts: { version: string }): Promise<Pro
       arch +
       "\n" +
       "  • set egressEnforcement: advisory in the playbook's envSpec, which accepts that a\n" +
-      "    tool ignoring HTTP_PROXY can reach the internet during prepare",
+      "    tool ignoring HTTP_PROXY can reach the internet during prepare\n" +
+      "If the repository is private, set MAESTRO_TOKEN to a token that can read it: a private\n" +
+      "release's assets are not downloadable without one, and answer 404 rather than 403.",
   );
 }
 
@@ -126,13 +128,38 @@ async function downloadReleaseBinary(opts: {
   const repo = process.env.MAESTRO_REPO ?? "mustafarslan/maestro";
   const base = process.env.MAESTRO_BASE_URL?.replace(/\/$/, "");
   const asset = `maestro-linux-${opts.arch}`;
-  const url = base
-    ? `${base}/${asset}`
-    : `https://github.com/${repo}/releases/download/v${opts.version}/${asset}`;
+  // MAESTRO_TOKEN first, because it is the one `install.sh` documents for this; the
+  // GitHub variables are accepted so a machine already configured for the API needs no
+  // second secret.
+  const token =
+    process.env.MAESTRO_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? undefined;
 
   try {
+    let url: string;
+    let headers: Record<string, string> = {};
+    if (base) {
+      url = `${base}/${asset}`;
+      if (token) headers.Authorization = `Bearer ${token}`;
+    } else if (token) {
+      // A PRIVATE repository's release asset cannot be fetched from the browser download
+      // URL at all — that path answers 404 even with a valid token, which reads exactly
+      // like "this version was never released". It has to be requested through the API by
+      // the asset's own id. `install.sh` learned this the same way and says so in a
+      // comment; this downloader was written without it and 404'd against a release whose
+      // assets were sitting right there.
+      const resolved = await resolveAssetUrl({ repo, version: opts.version, asset, token });
+      if (!resolved) {
+        logger.warn({ repo, version: opts.version, asset }, "release asset not found");
+        return undefined;
+      }
+      url = resolved;
+      headers = { Authorization: `Bearer ${token}`, Accept: "application/octet-stream" };
+    } else {
+      url = `https://github.com/${repo}/releases/download/v${opts.version}/${asset}`;
+    }
+
     logger.info({ url }, "fetching the linux binary for the egress proxy");
-    const res = await fetch(url, { redirect: "follow" });
+    const res = await fetch(url, { redirect: "follow", headers });
     if (!res.ok) {
       logger.warn({ url, status: res.status }, "could not fetch the egress proxy binary");
       return undefined;
@@ -154,9 +181,36 @@ async function downloadReleaseBinary(opts: {
     renameSync(tmp, opts.cached);
     return opts.cached;
   } catch (err) {
-    logger.warn({ err, url }, "could not fetch the egress proxy binary");
+    logger.warn({ err, repo, asset }, "could not fetch the egress proxy binary");
     return undefined;
   }
+}
+
+/**
+ * The API URL of one asset on a tagged release.
+ *
+ * Two requests rather than one because the download URL and the asset id are different
+ * things: only the id-addressed API URL serves bytes for a private repository.
+ */
+async function resolveAssetUrl(opts: {
+  repo: string;
+  version: string;
+  asset: string;
+  token: string;
+}): Promise<string | undefined> {
+  const api = `https://api.github.com/repos/${opts.repo}/releases/tags/v${opts.version}`;
+  const res = await fetch(api, {
+    headers: {
+      Authorization: `Bearer ${opts.token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (!res.ok) {
+    logger.warn({ api, status: res.status }, "could not read the release");
+    return undefined;
+  }
+  const body = (await res.json()) as { assets?: { name?: string; url?: string }[] };
+  return body.assets?.find((a) => a.name === opts.asset)?.url;
 }
 
 /** ELF only: this is a Linux binary or it is not the thing we asked for. */

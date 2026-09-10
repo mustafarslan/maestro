@@ -329,7 +329,10 @@ image. Maestro needs a **Linux build of itself for Docker's architecture**, foun
    to the working directory and would otherwise only be found while running Maestro from
    inside the checkout
 3. this process, when it is already a Linux binary of the right architecture (a Linux host, or Compose)
-4. `~/.maestro/cache/maestro-linux-<arch>-<version>`, downloaded from the release once and cached
+4. `~/.maestro/cache/maestro-linux-<arch>-<version>`, downloaded from the release once and
+   cached. A **private** repository needs `MAESTRO_TOKEN` set to a token that can read it —
+   a private release's assets answer 404 rather than 403 on the plain download URL, so without
+   one the failure looks like a missing version rather than a missing credential
 
 Releases are cut with `scripts/release.sh` (`--publish` to create the GitHub release). Bun
 cross-compiles all four targets from one machine, so this needs no CI; the script refuses to
