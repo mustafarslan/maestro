@@ -5,9 +5,9 @@
   "split": "val",
   "expected": [
     {
-      "match": "/(on|at) startup|immediat|first sweep|ten minutes|before the interval|setInterval.*(only|no initial)|initial (sweep|tick|run)|leak.*(restart|crash)/i",
+      "match": "/(?=[\\s\\S]*(reap|sweep))(?=[\\s\\S]*((on|at) startup|first (sweep|run)|immediat|initial (sweep|run|tick)|ten minutes|before the (first )?interval|only on an? interval))/i",
       "file": "packages/server/src/daemon.ts",
-      "description": "nothing sweeps before the first interval fires"
+      "description": "nothing sweeps before the first interval fires - a finding must name both the sweep and its absence at startup"
     }
   ],
   "forbidden": []

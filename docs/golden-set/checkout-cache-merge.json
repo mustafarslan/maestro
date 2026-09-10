@@ -5,9 +5,9 @@
   "split": "val",
   "expected": [
     {
-      "match": "/merge|never (deletes|removes)|left over|stale|previous (checkout|pull request|PR)|not (deleted|removed|cleared)|union|deleted file .*(still|remain)/i",
+      "match": "/(?=[\\s\\S]*(checkout|docker cp|copied|copy|previous (pull request|PR|review|checkout)))(?=[\\s\\S]*(merge|never (deletes|removes)|not (deleted|removed|cleared)|left ?over|stale|union|still (there|present)|deleted file))/i",
       "file": "packages/sandbox/src/docker.ts",
-      "description": "the previous checkout is not removed before the new one is copied in"
+      "description": "the previous checkout is not removed before the new one is copied in - both halves must be said"
     }
   ],
   "forbidden": []
