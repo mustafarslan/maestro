@@ -228,7 +228,13 @@ silently joins the training set is a fixture whose score stops meaning anything,
 would say so. The report never pools the two — the number a change is chosen by and the
 number it is judged by have to be different numbers, or the second one measures nothing.
 
-Fixtures are built by `scripts/make-eval-fixture.sh <name> <fix-commit> <path>...`, which
+`scripts/seed-golden-set.sh` builds the whole set on a fresh checkout: the answer keys are
+committed under `docs/golden-set/`, and the script generates one fixture repository per key
+and installs the keys into `$MAESTRO_HOME/fixtures` with their targets resolved. The numbers
+in `docs/STATUS.md` are measured against those eight, so they are re-runnable rather than
+taken on trust.
+
+Individual fixtures are built by `scripts/make-eval-fixture.sh <name> <fix-commit> <path>...`, which
 takes a commit that fixed a real defect and produces a two-commit repository whose base is
 that commit's tree and whose head is the same tree with the fix reverted. The diff under
 review is then the introduction of a defect this project actually shipped, in the code that

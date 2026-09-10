@@ -1,0 +1,14 @@
+{
+  "name": "unhandled-rejection",
+  "description": "An async handler passed where a sync one is expected: the rejection is unhandled and takes the process with it.",
+  "target": "~/.maestro/fixture-repos/unhandled-rejection",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/unhandled|rejection|floating promise|not awaited|un-?awaited|without await|async .*(callback|handler|listener)/i",
+      "file": "apps/cli/src/commands/serve.ts",
+      "description": "an async shutdown handler rejects with nothing to catch it, terminating the daemon"
+    }
+  ],
+  "forbidden": []
+}

@@ -1,0 +1,14 @@
+{
+  "name": "failure-policy",
+  "description": "failurePolicy stops being honoured anywhere except agent nodes.",
+  "target": "~/.maestro/fixture-repos/failure-policy",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/failurepolicy|skip-with-note|fail-review/i",
+      "file": "packages/engine/src/engine.ts",
+      "description": "a router, gate or triage failure kills the whole review whatever its failurePolicy says"
+    }
+  ],
+  "forbidden": []
+}

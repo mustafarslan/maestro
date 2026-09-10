@@ -1,0 +1,15 @@
+{
+  "name": "fence-closable",
+  "description": "The untrusted-content fence uses a fixed closing tag the pull request author can simply type.",
+  "target": "~/.maestro/fixture-repos/fence-closable",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/prompt.?injection|closing tag|close the fence|escape|nonce|break out/i",
+      "file": "packages/playbook/src/prompt.ts",
+      "severityAtLeast": "medium",
+      "description": "author-controlled text can close the fence early and escape into the trusted prompt"
+    }
+  ],
+  "forbidden": []
+}

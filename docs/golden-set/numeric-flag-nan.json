@@ -1,0 +1,14 @@
+{
+  "name": "numeric-flag-nan",
+  "description": "Numeric flags go through Number() with no validation, so NaN reaches the daemon.",
+  "target": "~/.maestro/fixture-repos/numeric-flag-nan",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/nan|not a number|non-?numeric|number\\(|invalid.*(number|numeric)/i",
+      "file": "apps/cli/src/commands/serve.ts",
+      "description": "a non-numeric flag becomes NaN and is passed downstream instead of refused"
+    }
+  ],
+  "forbidden": []
+}

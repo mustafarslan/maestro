@@ -1,0 +1,14 @@
+{
+  "name": "doctor-first-line",
+  "description": "probe() returns only the first line of stdout, so every leak count is 0 or 1.",
+  "target": "~/.maestro/fixture-repos/doctor-first-line",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/first line|only the first|\\[0\\]|at most one|only ever (be )?(one|1)/i",
+      "file": "apps/cli/src/commands/doctor.ts",
+      "description": "the leak counts can only ever be 0 or 1, because probe() keeps one line"
+    }
+  ],
+  "forbidden": []
+}

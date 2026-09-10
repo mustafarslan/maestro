@@ -1,0 +1,14 @@
+{
+  "name": "reaper-double-count",
+  "description": "docker images -q prints a line per tag, and Maestro tags each snapshot twice.",
+  "target": "~/.maestro/fixture-repos/reaper-double-count",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/duplicate|dedup|twice|per tag|double|same (image )?id/i",
+      "file": "packages/sandbox/src/docker.ts",
+      "description": "image ids arrive once per tag, so everything counted from them is doubled"
+    }
+  ],
+  "forbidden": []
+}

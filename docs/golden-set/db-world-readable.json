@@ -1,0 +1,15 @@
+{
+  "name": "db-world-readable",
+  "description": "The SQLite file is created with the process umask, leaving every review readable by any local account.",
+  "target": "~/.maestro/fixture-repos/db-world-readable",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/world.?readable|0644|umask|file permission|chmod|0600|any (local )?user/i",
+      "file": "packages/core/src/store/db.ts",
+      "severityAtLeast": "medium",
+      "description": "the database holding every private diff and finding is left world-readable"
+    }
+  ],
+  "forbidden": []
+}

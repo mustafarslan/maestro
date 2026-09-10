@@ -21,7 +21,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160), **gate nodes with per-node failure policy** (162) and **rewiring with live port checking** (163), **template variables with the untrusted ones fenced** (164, 165) and **the golden-set findings delta under the persona slot** (168) — every item the phase names | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
-| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified on fixtures; no long-run acceptance history exists yet |
+| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the eight committed fixtures across three runs (findings 232, 234); no long-run acceptance history exists yet |
 | 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
 
 What that leaves, in order of how much it would tell us:
@@ -3419,6 +3419,12 @@ the server never sends fails it, and removing `live` from the server's response 
     writing down *why* alongside every fix meant the first attempt produced diffs whose
     deleted lines described the defect in prose — an answer key the agent could read rather
     than derive, which is the same failure as leaving the fix's tests in.
+
+    The hand-written half — the answer keys — is committed under `docs/golden-set/`, and
+    `scripts/seed-golden-set.sh` rebuilds the repositories from the eight fix commits and
+    installs the keys with their targets resolved. Without that the baseline below, and the
+    experiment in finding 234 measured against the same eight, would be numbers from one
+    machine's home directory that nobody else could re-run.
 
     `changedLines` was `changedFiles.length * 20`. That decides the router's budget tier, so
     eval and production ran the same playbook under different caps and the fixture that a

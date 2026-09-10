@@ -1,0 +1,19 @@
+{
+  "name": "severity-sql-order",
+  "description": "ORDER BY on a TEXT severity column sorts alphabetically, and carried findings lose their cap.",
+  "target": "~/.maestro/fixture-repos/severity-sql-order",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/order by severity|alphabetic|lexicograph|text column|string comparison/i",
+      "file": "packages/core/src/incremental.ts",
+      "description": "ORDER BY severity sorts a TEXT column alphabetically, so medium lands below info"
+    },
+    {
+      "match": "/unbounded|no (upper )?(limit|cap|bound)|without a (limit|cap)|every unresolved/i",
+      "file": "packages/core/src/incremental.ts",
+      "description": "carried findings are no longer capped, so a noisy round grows the next prompt without bound"
+    }
+  ],
+  "forbidden": []
+}
