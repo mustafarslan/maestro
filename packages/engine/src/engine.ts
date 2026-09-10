@@ -545,7 +545,17 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             // bag, rather than from a schema field: an experiment that does not pay for
             // itself should leave no migration behind, and a malformed one degrades to a
             // review without guidance rather than a failed review.
-            proceduralGraph: proceduralGraphFrom(node.config),
+            //
+            // Degrading, though, not vanishing. A graph that fails to parse produces a
+            // review indistinguishable from one that was never meant to have a graph, and
+            // nothing else in the pipeline can notice: `validateGraph` lives in a package
+            // that cannot see this schema. So it is said here, once, with the reason.
+            proceduralGraph: proceduralGraphFrom(node.config, (reason) =>
+              logger.warn(
+                { reviewId: req.reviewId, nodeId: node.id, agentId: agent.id, reason },
+                "ignoring a malformed proceduralGraph; this agent runs without guidance",
+              ),
+            ),
             // So an agent's log lines can be tied back to the review and the graph node
             // they came from. Three agents run concurrently across several reviews, and
             // `agentId` alone matches lines from all of them.

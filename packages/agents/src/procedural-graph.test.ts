@@ -134,6 +134,29 @@ describe("reading a graph out of a node's config", () => {
     ).toBeUndefined();
   });
 
+  it("says why it ignored one, rather than reading as a node that never had one", () => {
+    // The silence is the bug class this repository has recorded most often, and here it
+    // would be worse than usual: the review still succeeds, and looks exactly like a
+    // review of an agent nobody meant to guide. Nothing else can report it — the
+    // playbook's own validator cannot see this schema.
+    const said: string[] = [];
+    expect(
+      proceduralGraphFrom(
+        { proceduralGraph: { nodes: [{ id: "a" }], edges: [{ from: "a" }] } },
+        (r) => said.push(r),
+      ),
+    ).toBeUndefined();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain("edges");
+  });
+
+  it("says nothing when there is no graph, because that is not a mistake", () => {
+    const said: string[] = [];
+    expect(proceduralGraphFrom({}, (r) => said.push(r))).toBeUndefined();
+    expect(proceduralGraphFrom(undefined, (r) => said.push(r))).toBeUndefined();
+    expect(said).toHaveLength(0);
+  });
+
   it("parses a well-formed one and defaults what it may", () => {
     const parsed = proceduralGraphFrom({
       proceduralGraph: {

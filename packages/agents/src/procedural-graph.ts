@@ -65,14 +65,28 @@ export const PG_START = "Start";
  * that is absent: a malformed experiment must degrade to the behaviour without it, not
  * fail a review. `applyGate` treats a malformed gate config the same way, for the same
  * reason.
+ *
+ * `onInvalid` is the difference between degrading and disappearing. Silence here is the
+ * bug class this repository has recorded most often — a configuration written at one end
+ * and honoured at neither — and it would be worse than usual, because the review still
+ * succeeds and looks exactly like a review that was never meant to have a graph. Nothing
+ * else can say so: `validateGraph` is in `@maestro/playbook`, which cannot see this schema
+ * without the schema field the experiment deliberately does not have yet.
+ *
+ * It fires only for a graph that is *present* and wrong. Absent is not a mistake.
  */
 export function proceduralGraphFrom(
   config: Record<string, unknown> | undefined,
+  onInvalid?: (reason: string) => void,
 ): ProceduralGraph | undefined {
   const raw = config?.proceduralGraph;
   if (raw === undefined) return undefined;
   const parsed = ProceduralGraphSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
+  if (parsed.success) return parsed.data;
+  onInvalid?.(
+    parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "),
+  );
+  return undefined;
 }
 
 /**

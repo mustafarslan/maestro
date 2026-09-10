@@ -261,6 +261,11 @@ called, takes their two-hop outgoing neighbourhood, and appends it to the same s
 that carries the wrap-up nudge. It biases the next action; it does not constrain it — every
 tool stays callable.
 
+A graph that fails to parse is ignored and the agent runs without guidance, which is
+the safe direction — a broken experiment costs the guidance, never the review. It is
+logged with the reason, node and agent, because a silently ignored graph produces a
+review indistinguishable from one nobody meant to guide.
+
 ```yaml
 # playbook.yaml
 graph:
