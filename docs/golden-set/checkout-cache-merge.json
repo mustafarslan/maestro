@@ -1,0 +1,14 @@
+{
+  "name": "checkout-cache-merge",
+  "description": "refreshCheckout copies the new checkout into the cached image with `docker cp`, which merges and never deletes, so the analysed tree is previous-union-current.",
+  "target": "~/.maestro/fixture-repos/checkout-cache-merge",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/merge|never (deletes|removes)|left over|stale|previous (checkout|pull request|PR)|not (deleted|removed|cleared)|union|deleted file .*(still|remain)/i",
+      "file": "packages/sandbox/src/docker.ts",
+      "description": "the previous checkout is not removed before the new one is copied in"
+    }
+  ],
+  "forbidden": []
+}

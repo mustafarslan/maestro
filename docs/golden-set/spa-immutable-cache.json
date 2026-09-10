@@ -1,0 +1,14 @@
+{
+  "name": "spa-immutable-cache",
+  "description": "The cache-control branch tests `assetPath === \"/index.html\"`, so every client-side route serves the same HTML under `max-age=31536000, immutable` and a browser keeps a stale index for a year.",
+  "target": "~/.maestro/fixture-repos/spa-immutable-cache",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/immutable|max-?age|31536000|cache.?control|a year|stale|no-?store|index\\.html|client-?side route|SPA/i",
+      "file": "packages/server/src/admin.ts",
+      "description": "only the literal /index.html path gets no-store; every SPA route is cached for a year"
+    }
+  ],
+  "forbidden": []
+}

@@ -231,8 +231,13 @@ number it is judged by have to be different numbers, or the second one measures 
 `scripts/seed-golden-set.sh` builds the whole set on a fresh checkout: the answer keys are
 committed under `docs/golden-set/`, and the script generates one fixture repository per key
 and installs the keys into `$MAESTRO_HOME/fixtures` with their targets resolved. The numbers
-in `docs/STATUS.md` are measured against those eight, so they are re-runnable rather than
+in `docs/STATUS.md` are measured against those twenty, so they are re-runnable rather than
 taken on trust.
+
+A fixture's split is decided by a rule, not per fixture: the parity of its fix commit's last
+hex digit. Choosing one at a time is choosing which half a result lands in. A fixture
+repository also holds source files only — no `package.json`, no tests — so nothing in the
+golden set can exercise `run_command`.
 
 Individual fixtures are built by `scripts/make-eval-fixture.sh <name> <fix-commit> <path>...`, which
 takes a commit that fixed a real defect and produces a two-commit repository whose base is

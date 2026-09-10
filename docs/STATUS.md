@@ -3421,10 +3421,31 @@ the server never sends fails it, and removing `live` from the server's response 
     than derive, which is the same failure as leaving the fix's tests in.
 
     The hand-written half — the answer keys — is committed under `docs/golden-set/`, and
-    `scripts/seed-golden-set.sh` rebuilds the repositories from the eight fix commits and
-    installs the keys with their targets resolved. Without that the baseline below, and the
-    experiment in finding 234 measured against the same eight, would be numbers from one
-    machine's home directory that nobody else could re-run.
+    `scripts/seed-golden-set.sh` rebuilds the repositories from the fix commits and installs
+    the keys with their targets resolved. Without that the baseline below, and the experiment
+    in finding 234 measured against the same eight, would be numbers from one machine's home
+    directory that nobody else could re-run.
+
+    **Grown to twenty**, since eight could not see an effect the size of finding 234's (four
+    of them moved between two runs of an identical configuration). Twelve more real defects
+    from this repository's history: a UTF-8 body split across chunks, a review comment
+    anyone could take over, a check-then-act on the idempotency key, a fallback that retried
+    errors which cannot succeed, `thinkingBudget` dropped on Google, every SPA route cached
+    immutable for a year, a secret store that rewrote all keys in place, a lease nothing
+    renewed, an anti-starvation window that starved, a reaction poll that scaled with comment
+    count, a `docker cp` that merged the previous checkout into the current one, and a reaper
+    with no startup sweep. Ten held out, ten training.
+
+    The splits are assigned by the parity of the fix commit's last hex digit, and the rule is
+    written in the seed script. A split chosen per fixture is a split chosen to make a result
+    look good, and this file already says so about splits invented after the fact; the same
+    applies to splits invented one at a time. The original eight predate the rule and keep
+    what they were authored with.
+
+    What twenty still cannot measure: a fixture repository holds source files and nothing
+    else — no `package.json`, no tests — so `run_command` has nothing to run in any of them.
+    The architecture persona's "confirm a suspicion by running the repository's own tests"
+    is untestable here, and so is any procedural edge that ends in `run_command`.
 
     `changedLines` was `changedFiles.length * 20`. That decides the router's budget tier, so
     eval and production ran the same playbook under different caps and the fixture that a

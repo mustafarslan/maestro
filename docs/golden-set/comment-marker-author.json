@@ -1,0 +1,14 @@
+{
+  "name": "comment-marker-author",
+  "description": "findPreviousComment matches on the marker alone, so anyone who can comment can post the marker and have Maestro write its review into their comment.",
+  "target": "~/.maestro/fixture-repos/comment-marker-author",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/(author|owner|login|who (posted|wrote)|identity|app id|performed_via_github_app)|anyone|attacker|impersonat|spoof|take ?over|not verif/i",
+      "file": "packages/integrations/src/github.ts",
+      "description": "the marker is public, so matching on it alone lets a stranger's comment be updated"
+    }
+  ],
+  "forbidden": []
+}

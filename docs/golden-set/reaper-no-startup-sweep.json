@@ -1,0 +1,14 @@
+{
+  "name": "reaper-no-startup-sweep",
+  "description": "The reaper only runs on an interval - `setInterval` with nothing before it - so the first sweep after a crash is ten minutes away, and its two-hour age filter would skip the containers a crash just left anyway.",
+  "target": "~/.maestro/fixture-repos/reaper-no-startup-sweep",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/(on|at) startup|immediat|first sweep|ten minutes|before the interval|setInterval.*(only|no initial)|initial (sweep|tick|run)|leak.*(restart|crash)/i",
+      "file": "packages/server/src/daemon.ts",
+      "description": "nothing sweeps before the first interval fires"
+    }
+  ],
+  "forbidden": []
+}

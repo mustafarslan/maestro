@@ -1,0 +1,14 @@
+{
+  "name": "thinking-budget-google",
+  "description": "Only the Anthropic branch maps thinkingBudget. The Google branch drops it, so the setting is accepted and silently does nothing.",
+  "target": "~/.maestro/fixture-repos/thinking-budget-google",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/(silently|quietly) (ignor|drop|does nothing|no effect)|never (read|used|passed)|only .*anthropic|not (mapped|wired|forwarded|passed)|dead (config|option|setting)|thinking(_|-)?budget|thinkingConfig/i",
+      "file": "packages/llm/src/provider.ts",
+      "description": "thinkingBudget is accepted and never reaches the Google request"
+    }
+  ],
+  "forbidden": []
+}

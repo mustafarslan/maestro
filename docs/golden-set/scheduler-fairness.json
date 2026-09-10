@@ -1,0 +1,14 @@
+{
+  "name": "scheduler-fairness",
+  "description": "The fairness window keeps the N most recently admitted reviews with N set to the global concurrency limit, so above N concurrent reviews one falls out of the window and takes a second slot before reviews that never ran take a first.",
+  "target": "~/.maestro/fixture-repos/scheduler-fairness",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/starv|fair(ness)?|window|recent|second slot|before .*never|round-?robin|FIFO|priorit|order/i",
+      "file": "packages/server/src/scheduler.ts",
+      "description": "the anti-starvation window itself starves reviews once more than N are in flight"
+    }
+  ],
+  "forbidden": []
+}

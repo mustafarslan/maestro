@@ -1,0 +1,14 @@
+{
+  "name": "reaction-poll-ratelimit",
+  "description": "pollCommentReactions makes one request per posted comment per sweep, uncapped, over a fourteen-day window - enough to exhaust GitHub's hourly rate limit on a busy repository.",
+  "target": "~/.maestro/fixture-repos/reaction-poll-ratelimit",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/rate ?limit|quota|throttl|one request per|per comment|unbounded|no (cap|limit)|N\\+1|exhaust|5000/i",
+      "file": "packages/integrations/src/feedback.ts",
+      "description": "the sweep scales with the number of posted comments and has no cap"
+    }
+  ],
+  "forbidden": []
+}

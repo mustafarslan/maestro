@@ -1,0 +1,13 @@
+{
+  "name": "body-utf8-split",
+  "description": "Both HTTP body readers do `raw += chunk`, so a character whose UTF-8 bytes straddle a chunk boundary is decoded as replacement characters - and on the webhook listener the body then no longer matches what GitHub signed.",
+  "target": "~/.maestro/fixture-repos/body-utf8-split",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/chunk boundar|straddl|multi-?byte|partial (utf-?8|character)|decoded? (per|each) chunk|raw \\+= |Buffer.*(implicit|toString|concat)|replacement character|code units/i",
+      "description": "concatenating Buffer chunks onto a string corrupts characters split across chunks"
+    }
+  ],
+  "forbidden": []
+}

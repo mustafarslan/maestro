@@ -1,0 +1,14 @@
+{
+  "name": "retry-nonhttp",
+  "description": "Anything that is not an APICallError falls into a fallback that retries it, so a refused prompt, an unloadable key or a schema-validation failure is retried and paid for again.",
+  "target": "~/.maestro/fixture-repos/retry-nonhttp",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/retr(y|ies|ied|ying).*(not|non|never|won't|will not) (succeed|help|become)|non-?retryable|should not be retried|validation|permanent|deterministic failure|burn(s|ing)? (budget|tokens|retries)/i",
+      "file": "packages/llm/src/provider.ts",
+      "description": "errors that cannot succeed on a second attempt are retried"
+    }
+  ],
+  "forbidden": []
+}

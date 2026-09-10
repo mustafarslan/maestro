@@ -1,0 +1,14 @@
+{
+  "name": "review-create-race",
+  "description": "ReviewStore.create and ensureRepo are SELECT-then-INSERT with no transaction, so two workers both miss, both insert, and the loser hits the UNIQUE constraint and fails its job.",
+  "target": "~/.maestro/fixture-repos/review-create-race",
+  "split": "train",
+  "expected": [
+    {
+      "match": "/race|check-?then-?act|TOCTOU|not atomic|between the (select|read) and the insert|UNIQUE constraint|ON CONFLICT|concurrent|two workers|transaction/i",
+      "file": "packages/core/src/reviews.ts",
+      "description": "the idempotency key is enforced across two statements with no transaction"
+    }
+  ],
+  "forbidden": []
+}

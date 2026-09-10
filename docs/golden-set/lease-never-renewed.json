@@ -1,0 +1,14 @@
+{
+  "name": "lease-never-renewed",
+  "description": "The job lease is a deadline, not a reservation, and nothing calls heartbeat - so a review that outlives 15 minutes is claimed a second time by another worker.",
+  "target": "~/.maestro/fixture-repos/lease-never-renewed",
+  "split": "val",
+  "expected": [
+    {
+      "match": "/heartbeat|renew|extend|lease (expir|elaps|pass)|deadline|claimed (again|twice)|second worker|another worker|re-?claim|duplicate (run|review)/i",
+      "file": "packages/server/src/daemon.ts",
+      "description": "the lease is never extended while the review is still running"
+    }
+  ],
+  "forbidden": []
+}
