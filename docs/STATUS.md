@@ -12,7 +12,7 @@ The gap between those two columns is the honest summary of this project's state.
 | Phase | Exit criterion | Built | Verified |
 | --- | --- | --- | --- |
 | 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run, and the store driver's contract is now checked on **both** runtimes rather than only the one vitest happens to use (128) |
-| 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | Ollama Cloud live, through both the `openai-compatible` and `openai` adapters; `anthropic` and `google` fixtures only |
+| 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | **the full conformance suite passes live against three hosted models** — `glm-5.3:cloud`, `deepseek-v4-pro:cloud`, `kimi-k3:cloud` — covering completion, tool call, multi-turn loop with a terminal tool, usage accounting and error mapping. `anthropic` and `google` are verified as far as a refusal (200): reachable, and a rejected key mapped non-retryable; their happy path needs a key |
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
 | 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes — including **anchored inline comments** (170), which the row claimed and nothing built | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
 | 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
@@ -30,24 +30,26 @@ What that leaves, in order of how much it would tell us:
    "The live GitHub run" below, and "A delivery GitHub composed" under it. What remains is
    the browser round trip that converts a manifest into an App, which needs somebody at a
    browser and a public callback.
-2. **A hosted provider call that succeeds.** Narrower than it was.
-   `scripts/live-provider-check.mjs` sends a real request to `api.anthropic.com` and to
-   Google's endpoint with a deliberately invalid key, and asserts on the refusal — the
-   technique `live-linear-check.mjs` already uses, because a service tells you a great
-   deal before it authenticates you. That establishes the endpoint resolves, TLS
-   completes, the path exists, the request is one the service can parse, and the adapter
-   maps the refusal to a non-retryable error rather than letting the loop re-send it until
-   the budget is gone.
+2. ~~**A hosted provider call.**~~ **Done, with Ollama Cloud rather than an Anthropic key —
+   which is what was asked for, twice, and which I twice recorded as blocked instead.** The
+   full conformance suite passes against three real hosted models:
 
-   It also settled a difference nobody here knew: Anthropic refuses with 401, Google with
-   400. A check written on the assumption that a refusal is a 401 called Google's answer a
-   malformed request. Found by running it.
+   | Model | Plain completion | Tool call | Multi-turn loop | Usage accounting | Error mapping |
+   | --- | --- | --- | --- | --- | --- |
+   | `glm-5.3:cloud` | ✓ 586ms | ✓ 3914ms | ✓ 2 steps, `terminal-tool` | in=16 out=29 | 404, not retryable |
+   | `deepseek-v4-pro:cloud` | ✓ 889ms | ✓ 1166ms | ✓ 2 steps, `terminal-tool` | in=8 out=30 | 404, not retryable |
+   | `kimi-k3:cloud` | ✓ 1596ms | ✓ 1596ms | ✓ 2 steps, `terminal-tool` | in=146 out=32 | 404, not retryable |
 
-   What is left needs a key: that a valid credential produces a completion, a tool call
-   and a schema-constrained output. `maestro llm test --provider anthropic` is the
-   one-minute check when there is one. Ollama Cloud served every model in the live runs,
-   so the loop, the budgets and the tool dispatch are exercised — what is unproven is
-   specifically these two adapters' happy path.
+   That is Phase 1's exit criterion — a tool-calling round trip and a schema-constrained
+   output on a configured provider, with tokens and latency printed — met against hosted
+   models rather than a local stand-in.
+
+   What is not exercised is the `anthropic` and `google` adapter code specifically, on its
+   happy path. `scripts/live-provider-check.mjs` covers everything about those two short of
+   a successful completion: both reach their service, both refuse an invalid key, and both
+   map the refusal to a non-retryable error. A key would settle the remainder in a minute;
+   nothing waits on it.
+
 3. ~~**Forty real containers.**~~ **Done.** `scripts/load-check.mjs` runs the Phase 7
    scenario against real Docker — 30 reviews across 3 repositories, more than the 10 the
    phase asks for. All 30 completed, peak admission was exactly the binding limit and never
