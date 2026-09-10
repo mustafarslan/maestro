@@ -50,6 +50,16 @@ export interface ReviewAgentResult {
   summary?: string;
   loop: LoopResult;
   commandLog: { command: string; exitCode: number; durationMs: number }[];
+  /**
+   * What this run was actually asked, verbatim.
+   *
+   * Both halves are composed here and were previously unrecoverable afterwards: the
+   * system prompt is rebuilt from a persona that a later publish may have changed, and
+   * the user prompt carries the diff and the ticket, which are not stored anywhere at
+   * all. Returning them is what lets the recorder write a trajectory somebody can read
+   * without re-fetching the pull request at its old head.
+   */
+  prompts: { system: string; user: string };
   /** Set when the agent produced no valid structured output. */
   parseError?: string;
 }
@@ -115,6 +125,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
       findings: [],
       loop,
       commandLog,
+      prompts: { system, user: prompt },
       parseError: `agent stopped with '${loop.stopKind}' before submitting findings`,
     };
   }
@@ -127,6 +138,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
       findings: [],
       loop,
       commandLog,
+      prompts: { system, user: prompt },
       parseError: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
     };
   }
@@ -138,6 +150,7 @@ export async function runReviewAgent(req: ReviewAgentRequest): Promise<ReviewAge
     summary: parsed.data.summary,
     loop,
     commandLog,
+    prompts: { system, user: prompt },
   };
 }
 

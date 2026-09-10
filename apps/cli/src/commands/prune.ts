@@ -12,8 +12,9 @@ import { checkLine, color } from "../ui.js";
  *
  * Narrow by design: reviews, findings and feedback stay for ever — they are the quality
  * history and they are small — and `jobs` stays because its dedupe key is the idempotency
- * record. What goes is `spans` and `llm_calls`, one row per model step, which is the bulk
- * and the part nobody reads once the question has been answered.
+ * record. What goes is `spans`, `llm_calls` and `trajectory_turns` — one row per model
+ * step and per turn of every agent run, which is the bulk and the part nobody reads once
+ * the question has been answered.
  */
 export async function prune(argv: string[]): Promise<number> {
   rejectUnknownFlags(argv, ["--days"]);
@@ -21,14 +22,15 @@ export async function prune(argv: string[]): Promise<number> {
   const db = await openStore();
   try {
     const before = sizeOf(dbPath());
-    const { spans, llmCalls } = pruneTelemetry(db, days * 24 * 60 * 60_000);
+    const { spans, llmCalls, trajectoryTurns } = pruneTelemetry(db, days * 24 * 60 * 60_000);
 
     console.log(color.bold("\nmaestro prune\n"));
     console.log(
       checkLine(
-        spans + llmCalls > 0 ? "ok" : "info",
+        spans + llmCalls + trajectoryTurns > 0 ? "ok" : "info",
         "removed",
-        `${spans} span(s) and ${llmCalls} model call(s) from reviews finished more than ${days} days ago`,
+        `${spans} span(s), ${llmCalls} model call(s) and ${trajectoryTurns} transcript turn(s) ` +
+          `from reviews finished more than ${days} days ago`,
       ),
     );
     console.log(

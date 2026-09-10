@@ -97,6 +97,10 @@ describe("pruning old telemetry", () => {
       `INSERT INTO llm_calls (id, review_id, provider_id, model, cost_cents, created_at)
        VALUES (?,?,?,?,?,?)`,
     ).run(newId("call"), reviewId, "ollama", "m", 1, new Date().toISOString());
+    db.prepare(
+      `INSERT INTO trajectory_turns (id, review_id, task_id, seq, step, role, content_json, created_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    ).run(newId("turn"), reviewId, null, 0, 0, "assistant", "{}", new Date().toISOString());
   };
   const aged = (reviewId: string, days: number) =>
     db
@@ -107,7 +111,11 @@ describe("pruning old telemetry", () => {
     const r = review("acme", "web", 1);
     trace(r);
     aged(r, 90);
-    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 1, llmCalls: 1 });
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({
+      spans: 1,
+      llmCalls: 1,
+      trajectoryTurns: 1,
+    });
   });
 
   it("keeps the review and its findings, which the quality loop is measured from", () => {
@@ -123,7 +131,11 @@ describe("pruning old telemetry", () => {
     const r = review("acme", "web", 3);
     trace(r);
     aged(r, 1);
-    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 0, llmCalls: 0 });
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({
+      spans: 0,
+      llmCalls: 0,
+      trajectoryTurns: 0,
+    });
   });
 
   it("leaves a review that is still running alone, however old its row is", () => {
@@ -134,6 +146,10 @@ describe("pruning old telemetry", () => {
       new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString(),
       r,
     );
-    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({ spans: 0, llmCalls: 0 });
+    expect(pruneTelemetry(db, 30 * 24 * 60 * 60_000)).toEqual({
+      spans: 0,
+      llmCalls: 0,
+      trajectoryTurns: 0,
+    });
   });
 });

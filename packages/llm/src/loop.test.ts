@@ -464,3 +464,37 @@ describe("the wall-clock deadline", () => {
     expect(result.stopKind).toBe("terminal-tool");
   });
 });
+
+describe("what a step keeps", () => {
+  it("keeps the full tool output on the step after trimming truncates the message copy", async () => {
+    // trimHistory's last resort truncates oversized tool outputs in place. Those objects
+    // were shared with the LoopStep, so the step — the thing the recorder builds a
+    // transcript from — silently lost the same bytes the model did. The trimming is
+    // right; a transcript that quietly matches the trimmed prompt rather than what the
+    // tool actually returned is not.
+    const big = "x".repeat(5_000);
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "echo", input: { value: "b" } }] },
+      { toolCalls: [{ id: "3", name: "submit", input: { answer: "ok" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: big }),
+      // Small enough that the second pass has to truncate rather than splice: the loop
+      // never touches index 0 or the last four messages, and there is nothing else here.
+      budget: { maxSteps: 10, costCapCents: 100, maxPromptChars: 2_000 },
+    });
+
+    const firstResult = result.steps[0]?.toolResults[0];
+    expect(firstResult?.output).toHaveLength(5_000);
+    expect(firstResult?.output).not.toContain("truncated");
+
+    // The prompt really was trimmed — otherwise this asserts nothing.
+    const trimmed = result.messages
+      .filter((m) => m.role === "tool")
+      .flatMap((m) => (m.role === "tool" ? m.results : []));
+    expect(trimmed.some((r) => r.output.includes("truncated"))).toBe(true);
+  });
+});

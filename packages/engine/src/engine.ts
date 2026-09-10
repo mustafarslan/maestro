@@ -474,6 +474,14 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
         // reject Promise.all and take the whole review down instead.
         let release: (() => void) | undefined;
         let started = Date.now();
+        // Agent nodes are the only expensive kind, and they were the one kind emitting no
+        // span at all: `timedNode` pushes its own bare NodeOutcome, and an agent node
+        // builds a far richer one itself, so wrapping it would have recorded every agent
+        // twice — once properly and once as a zero-cost anonymous row. The span is opened
+        // here instead. Its status is settled at each exit and ended in the `finally`,
+        // beside the slot release, so no path can leave it open.
+        let spanId: string | undefined;
+        let spanStatus: "ok" | "error" = "error";
 
         try {
           const binding = deps.registry.resolve(agent.model);
@@ -500,6 +508,11 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           // The clock starts after admission, so queueing time is not reported as the
           // agent being slow.
           started = Date.now();
+          spanId = deps.spans?.start(
+            `node:${node.kind}`,
+            { reviewId: req.reviewId },
+            { nodeId: node.id, agentId: agent.id },
+          );
 
           // Each agent gets its OWN container off the shared snapshot: concurrent agents
           // running builds would otherwise clobber one another's working directory.
@@ -577,6 +590,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
               binding.model,
               result.loop,
             );
+            recorder.recordTrajectory(req.reviewId, taskId, result.loop, result.prompts);
           }
           nodes.push({
             nodeId: node.id,
@@ -591,6 +605,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
             stopKind: result.loop.stopKind,
             error: result.parseError,
           });
+          spanStatus = agentState === "done" ? "ok" : "error";
           return { agentId: agent.id, findings: result.findings, summary: result.summary };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -606,6 +621,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
               costCents: 0,
               error: "review cancelled",
             });
+            spanStatus = "ok";
             return null;
           }
           // A per-node failure policy is what stops one flaky agent from killing a review.
@@ -629,6 +645,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           // Must run on every path including a fatal throw, or one failing agent leaks a
           // slot and the pool drains until the daemon stalls.
           release?.();
+          if (spanId) deps.spans?.end(spanId, spanStatus);
         }
       }),
     );

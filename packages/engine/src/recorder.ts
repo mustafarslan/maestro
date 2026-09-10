@@ -147,6 +147,61 @@ export class ReviewRecorder {
   }
 
   /**
+   * The turn-by-turn record of one agent run.
+   *
+   * `recordLoop` above answers "what did this cost"; this answers "what did it do".
+   * They are separate tables because they have separate lifetimes in the reader's head:
+   * a cost row is worth keeping as long as anyone might query spend, a transcript only
+   * as long as anyone is still asking why a particular review said what it said. Both
+   * are swept by `pruneTelemetry`.
+   *
+   * Built from `loop.steps`, not `loop.messages`: `trimHistory` splices old
+   * assistant/tool pairs out of the message array in place to keep the conversation
+   * inside the context window, so on exactly the long runs a transcript is most wanted,
+   * `messages` is the one record guaranteed to be incomplete. The steps are appended to
+   * and never trimmed — and each takes its own copy of its tool results, because trimming's
+   * last resort truncates those objects in place and the two used to share them.
+   */
+  recordTrajectory(
+    reviewId: string,
+    taskId: string,
+    loop: LoopResult,
+    prompts?: { system: string; user: string },
+  ): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO trajectory_turns (id, review_id, task_id, seq, step, role, content_json, created_at)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(task_id, seq) DO UPDATE SET
+         step=excluded.step, role=excluded.role, content_json=excluded.content_json`,
+    );
+    const now = new Date().toISOString();
+    let seq = 0;
+    const write = (step: number | null, role: string, content: unknown) =>
+      stmt.run(newId("turn"), reviewId, taskId, seq++, step, role, JSON.stringify(content), now);
+
+    this.db.transaction(() => {
+      // A re-review reuses the task row, so its turns are replaced rather than merged.
+      // Upserting alone would leave the tail of a longer previous run stranded after a
+      // shorter one, which reads as a transcript that ends twice.
+      this.db.prepare("DELETE FROM trajectory_turns WHERE task_id=?").run(taskId);
+      // The opening prompts have no step index: they precede the first model call.
+      if (prompts) {
+        write(null, "system", { text: prompts.system });
+        write(null, "user", { text: prompts.user });
+      }
+      for (const step of loop.steps) {
+        write(step.index, "assistant", {
+          text: step.response.text,
+          toolCalls: step.response.toolCalls,
+          finishReason: step.response.finishReason,
+        });
+        // A step that called the terminal tool, or answered in prose, has no results.
+        if (step.toolResults.length) write(step.index, "tool", { results: step.toolResults });
+      }
+    });
+  }
+
+  /**
    * @param taskByAgent Which task produced each agent's findings, so a finding can be
    *   traced back to the transcript that produced it.
    */

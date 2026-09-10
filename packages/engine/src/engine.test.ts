@@ -1,6 +1,7 @@
+import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import { anthropicTransport, failingTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
 import type { PlaybookDocument } from "@maestro/playbook";
-import { defaultPlaybook } from "@maestro/playbook";
+import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
 import { describe, expect, it } from "vitest";
 import { runReview } from "./engine.js";
@@ -546,5 +547,86 @@ describe("base-versus-head comparison is refused where commands are refused", ()
       request({ baselinePath: "/tmp/base" }),
     );
     expect(outcome.comparisons).toBeUndefined();
+  });
+});
+
+describe("agent spans", () => {
+  /** A store with a real review row, so a span's foreign key resolves. */
+  async function storeWithReview() {
+    const db = await openStore({ path: ":memory:" });
+    const pb = new PlaybookStore(db).publish(defaultPlaybook());
+    const reviewId = new ReviewStore(db).create({
+      repoOwner: "acme",
+      repoName: "web",
+      prNumber: 1,
+      headSha: "abc",
+      playbookVersionId: pb.id,
+    }).id;
+    return { db, reviewId };
+  }
+
+  it("opens and closes one span per agent that ran", async () => {
+    // Agent nodes were the only kind emitting no span, which meant the waterfall showed
+    // the cheap half of a review and left a blank where the expensive half belongs.
+    const { db, reviewId } = await storeWithReview();
+    await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry(), spans: new SpanRecorder(db) },
+      request({ reviewId }),
+    );
+
+    const rows = db
+      .prepare(
+        "SELECT name, status, ended_at, attrs_json FROM spans WHERE name='node:agent' AND review_id=?",
+      )
+      .all<{ name: string; status: string; ended_at: string | null; attrs_json: string }>(reviewId);
+
+    expect(rows).toHaveLength(2);
+    // An open span is worse than none: the waterfall draws it as work still running.
+    for (const r of rows) {
+      expect(r.ended_at).not.toBeNull();
+      expect(r.status).toBe("ok");
+    }
+    expect(rows.map((r) => JSON.parse(r.attrs_json).agentId).sort()).toEqual([
+      "architecture",
+      "security",
+    ]);
+  });
+
+  it("writes each agent's transcript, not only its cost", async () => {
+    // The recorder's own tests exercise recordTrajectory directly; this is the wire.
+    // A transcript written by a method nothing calls is the exact shape of this
+    // project's most repeated defect, and only the engine's call site closes it.
+    const { db, reviewId } = await storeWithReview();
+    await runReview(
+      { driver: fakeDriver(), registry: fakeRegistry(), spans: new SpanRecorder(db), db },
+      request({ reviewId }),
+    );
+
+    const rows = db
+      .prepare("SELECT role, step FROM trajectory_turns WHERE review_id=? ORDER BY seq")
+      .all<{ role: string; step: number | null }>(reviewId);
+
+    expect(rows.length).toBeGreaterThan(0);
+    // The prompts are the half that cannot be reconstructed afterwards.
+    expect(rows.filter((r) => r.role === "system")).not.toHaveLength(0);
+    expect(rows.filter((r) => r.role === "user")).not.toHaveLength(0);
+    expect(rows.filter((r) => r.role === "assistant")).not.toHaveLength(0);
+  });
+
+  it("closes the span when the agent's provider fails", async () => {
+    const { db, reviewId } = await storeWithReview();
+    const registry = new ProviderRegistry();
+    registry.register(fakeConfig(failingTransport(500), { id: "anthropic" }));
+
+    await runReview(
+      { driver: fakeDriver(), registry, spans: new SpanRecorder(db) },
+      request({ reviewId }),
+    );
+
+    const rows = db
+      .prepare("SELECT status, ended_at FROM spans WHERE name='node:agent' AND review_id=?")
+      .all<{ status: string; ended_at: string | null }>(reviewId);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.ended_at).not.toBeNull();
   });
 });

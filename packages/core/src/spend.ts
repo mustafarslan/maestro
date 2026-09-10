@@ -104,6 +104,11 @@ export function checkSpend(
  * worth reading for about as long as somebody is still asking why a particular review said
  * what it said.
  *
+ * `trajectory_turns` joins the sweep for the same reason and more so: it is one row per
+ * turn of every agent run, carrying the prompts and every tool result verbatim, which
+ * makes it the largest of the three by a wide margin. Exempting it would have quietly
+ * turned the one table that stores repository text into the one table nothing deletes.
+ *
  * Deliberately narrow. `reviews` and `findings` stay for ever, because they carry the
  * accepted/dismissed history the whole quality loop is measured from and they are small.
  * `jobs` stays because its `dedupe_key` is the idempotency record: deleting a row would let
@@ -113,7 +118,7 @@ export function checkSpend(
 export function pruneTelemetry(
   db: SqlDatabase,
   olderThanMs: number,
-): { spans: number; llmCalls: number } {
+): { spans: number; llmCalls: number; trajectoryTurns: number } {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   const old = db
     .prepare(
@@ -122,15 +127,19 @@ export function pruneTelemetry(
           AND COALESCE(finished_at, created_at) < ?`,
     )
     .all<{ id: string }>(...TERMINAL_STATES, cutoff);
-  if (!old.length) return { spans: 0, llmCalls: 0 };
+  if (!old.length) return { spans: 0, llmCalls: 0, trajectoryTurns: 0 };
 
   return db.transaction(() => {
     let spans = 0;
     let llmCalls = 0;
+    let trajectoryTurns = 0;
     for (const { id } of old) {
       spans += db.prepare("DELETE FROM spans WHERE review_id=?").run(id).changes;
       llmCalls += db.prepare("DELETE FROM llm_calls WHERE review_id=?").run(id).changes;
+      trajectoryTurns += db
+        .prepare("DELETE FROM trajectory_turns WHERE review_id=?")
+        .run(id).changes;
     }
-    return { spans, llmCalls };
+    return { spans, llmCalls, trajectoryTurns };
   });
 }

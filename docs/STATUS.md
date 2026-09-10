@@ -1741,7 +1741,8 @@ to answer.
     install: reviews, tasks, environments, findings, feedback, spans, llm_calls, jobs. The only
     `DELETE` statements anywhere removed a provider, refreshed a model catalog, and replaced a
     re-review's findings. At a hundred reviews a day that is roughly four and a half million rows
-    a year, dominated by `spans` and `llm_calls` — one row per model step.
+    a year, dominated by `spans` and `llm_calls` — one row per model step, and now by
+    `trajectory_turns` as well (finding 231), which is larger than either.
 
     Not a crash, and not urgent, which is exactly why it would never have been noticed: the
     database is simply larger every month for ever, and the first person to care is whoever runs
@@ -3335,6 +3336,58 @@ the server never sends fails it, and removing `live` from the server's response 
     way — one asserts the module's only export is `UI_ASSETS`, so any new non-deterministic
     value trips it, and one asserts no timestamp appears in the source with the base64
     bodies masked out. Both mutation-checked by re-adding the line.
+
+231. **An agent run recorded its cost and nothing it did.** `LoopResult` carries the whole
+    conversation back to the engine — every assistant turn, every tool call and every tool
+    result — and the engine wrote a `llm_calls` row per step holding token counts, latency and
+    a finish reason, then dropped the rest on the floor. `tasks.output_json` kept a *count* of
+    findings. So the question people actually ask of a review — "why did the product agent
+    submit nothing" — had no answer anywhere in the database, and `docs/STATUS.md` recorded
+    that behaviour as an observation about model quality because observing it was all anyone
+    could do.
+
+    Agent nodes were also the one node kind emitting no span at all. `timedNode` wraps
+    prepare-env, router, gate and triage; agent nodes bypass it because it pushes its own bare
+    `NodeOutcome` and an agent node builds a far richer one itself, so wrapping would have
+    recorded every agent twice — once properly and once as a zero-cost anonymous row. The
+    result was a waterfall that drew the cheap half of a review and left a blank where the
+    expensive half belongs.
+
+    `trajectory_turns` (migration 002) is one row per turn: the two composed prompts, then each
+    assistant turn and the tool results it produced. Built from `loop.steps` rather than
+    `loop.messages`, because `trimHistory` splices old assistant/tool pairs out of the message
+    array in place — so on exactly the long runs a transcript is most wanted, `messages` is the
+    one record guaranteed to be incomplete.
+
+    That was only half true when first written, and writing it down is what exposed the other
+    half. `trimHistory`'s last resort truncates oversized tool outputs to 4,000 characters, and
+    it did so on the very objects the step held: `messages.push({role:"tool", results})` and the
+    `LoopStep` shared one array, so a step lost exactly the bytes the prompt did and a
+    transcript quietly matched the trimmed prompt rather than the tool's real output. The step
+    now takes its own copy. Caught by writing the test the claim implied, which failed at 4,042
+    characters against an expected 5,000; mutation-checked by removing the copy. `runReviewAgent` now returns the prompts it
+    composed, since the system prompt is otherwise rebuilt from a persona a later publish may
+    have changed and the user prompt carries a diff stored nowhere at all. A re-review deletes
+    the task's turns before rewriting them: upserting alone would strand the tail of a longer
+    previous run and read as a transcript that ends twice. The span is opened where the agent's
+    clock starts and closed in the same `finally` that releases the scheduler slot, so no path
+    can leave it open.
+
+    It is swept by `pruneTelemetry` alongside `spans` and `llm_calls`, and it is the largest of
+    the three: exempting it would have quietly turned the one table holding repository text
+    into the one table nothing deletes.
+
+    Two guards, because a transcript written by a method nothing calls is this project's most
+    repeated defect: the recorder's own tests exercise `recordTrajectory` directly, and an
+    engine test asserts a real `runReview` leaves system, user and assistant turns behind.
+
+    Verified by running a real review — the tiny fixture repository, one agent, `glm-5.3:cloud`
+    through Ollama Cloud, real Docker. It found the injected command injection, and the database
+    then held seven turns: `system`, `user`, and three model steps, two of which issued *two*
+    tool calls at once (`git_diff` + `list_dir`, then `read_file` + `git_log`). The tool output
+    reads back verbatim. Alongside them, a `node:agent` span of 20,483ms carrying
+    `{nodeId, agentId}`, where before there was none. Three mutation checks: removing the span
+    close, the prune sweep, and the re-review delete each fail their own test and nothing else.
 
 ### Found by mechanical sweep, still open
 

@@ -524,9 +524,16 @@ binary. `scripts/gate.sh` is the local equivalent, plus the clean-checkout prope
 free from `actions/checkout`.
 
 Nothing is deleted automatically. `maestro prune [--days 30]` drops the per-step trace —
-`spans` and `llm_calls` — of reviews finished before the cutoff, and keeps reviews, findings and
-feedback, which are the quality history and are small. `doctor` mentions the database size once
-it passes 50MB.
+`spans`, `llm_calls` and `trajectory_turns` — of reviews finished before the cutoff, and keeps
+reviews, findings and feedback, which are the quality history and are small. `doctor` mentions
+the database size once it passes 50MB.
+
+`trajectory_turns` is the largest of the three by a wide margin: one row per turn of every agent
+run, carrying the composed prompts and every tool result verbatim, which is what makes "why did
+this agent submit nothing" answerable after the fact. It holds repository text the agent read —
+no credential, since the analyze sandbox runs with `secrets: none` — and the same text already
+appears in findings as evidence, so it crosses no boundary the database did not already cross.
+Prune is how it is bounded.
 
 The daemon's recurring work and what each costs:
 

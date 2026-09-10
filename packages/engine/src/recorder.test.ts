@@ -1,4 +1,5 @@
 import { openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import type { LoopResult } from "@maestro/llm";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { NodeOutcome } from "./engine.js";
@@ -32,6 +33,43 @@ const finding = (over: Partial<TriagedFinding> = {}): TriagedFinding => ({
   agreementCount: 1,
   ...over,
 });
+
+/** A loop result with `steps` filled in, which is what the trajectory is built from. */
+const loopWith = (
+  steps: {
+    index: number;
+    text?: string;
+    toolCalls?: { id: string; name: string; input: unknown }[];
+    toolResults?: { callId: string; name: string; output: string; isError?: boolean }[];
+  }[],
+): LoopResult => ({
+  steps: steps.map((s) => ({
+    index: s.index,
+    costCents: 1,
+    toolResults: s.toolResults ?? [],
+    response: {
+      text: s.text ?? "",
+      toolCalls: s.toolCalls ?? [],
+      finishReason: "stop",
+      usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      latencyMs: 50,
+      model: "glm-5.3:cloud",
+      providerId: "ollama",
+    },
+  })),
+  usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  costCents: 1,
+  stopKind: "terminal-tool",
+  finalText: "",
+  messages: [],
+});
+
+const turns = (taskId: string) =>
+  db
+    .prepare(
+      "SELECT seq, step, role, content_json FROM trajectory_turns WHERE task_id=? ORDER BY seq",
+    )
+    .all<{ seq: number; step: number | null; role: string; content_json: string }>(taskId);
 
 beforeEach(async () => {
   db = await openStore({ path: ":memory:" });
@@ -239,5 +277,71 @@ describe("environment records", () => {
       .get<{ lease_until: string; ttl_at: string; created_at: string }>("env-3");
     expect(new Date(row!.ttl_at).getTime()).toBeGreaterThan(new Date(row!.created_at).getTime());
     expect(row?.lease_until).toBeTruthy();
+  });
+});
+
+describe("recordTrajectory", () => {
+  it("round-trips the prompts, the assistant turns and the tool results", () => {
+    // The question this table exists to answer is "why did this agent submit nothing",
+    // and answering it needs the tool output verbatim rather than a count of calls.
+    const taskId = recorder.recordNode(reviewId, node());
+    recorder.recordTrajectory(
+      reviewId,
+      taskId,
+      loopWith([
+        {
+          index: 0,
+          text: "looking at the diff",
+          toolCalls: [{ id: "c1", name: "grep", input: { pattern: "exec(" } }],
+          toolResults: [{ callId: "c1", name: "grep", output: "src/run.ts:12: exec(cmd)" }],
+        },
+        {
+          index: 1,
+          toolCalls: [{ id: "c2", name: "submit_findings", input: { findings: [] } }],
+        },
+      ]),
+      { system: "SYSTEM PROMPT", user: "USER PROMPT" },
+    );
+
+    const rows = turns(taskId);
+    expect(rows.map((r) => [r.role, r.step])).toEqual([
+      ["system", null],
+      ["user", null],
+      ["assistant", 0],
+      ["tool", 0],
+      // A terminal call has no results, so it contributes no tool turn.
+      ["assistant", 1],
+    ]);
+    expect(rows.map((r) => r.seq)).toEqual([0, 1, 2, 3, 4]);
+    expect(JSON.parse(rows[1]?.content_json ?? "{}").text).toBe("USER PROMPT");
+    expect(JSON.parse(rows[2]?.content_json ?? "{}").toolCalls[0].input).toEqual({
+      pattern: "exec(",
+    });
+    expect(JSON.parse(rows[3]?.content_json ?? "{}").results[0].output).toContain("exec(cmd)");
+  });
+
+  it("replaces a re-reviewed task's turns rather than leaving the longer run's tail", () => {
+    // `recordNode` upserts and keeps the original task id, so without the delete a
+    // shorter second run would inherit the end of the first and read as a transcript
+    // that finishes twice.
+    const taskId = recorder.recordNode(reviewId, node());
+    recorder.recordTrajectory(
+      reviewId,
+      taskId,
+      loopWith([{ index: 0 }, { index: 1 }, { index: 2 }]),
+    );
+    expect(turns(taskId)).toHaveLength(3);
+
+    recorder.recordTrajectory(reviewId, taskId, loopWith([{ index: 0, text: "second run" }]));
+    const rows = turns(taskId);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]?.content_json ?? "{}").text).toBe("second run");
+  });
+
+  it("records a run with no prompts, because a stopped agent still has a transcript", () => {
+    const taskId = recorder.recordNode(reviewId, node({ state: "failed" }));
+    recorder.recordTrajectory(reviewId, taskId, loopWith([{ index: 0, text: "prose, no call" }]));
+
+    expect(turns(taskId).map((r) => r.role)).toEqual(["assistant"]);
   });
 });

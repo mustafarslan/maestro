@@ -227,7 +227,18 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       });
     }
 
-    const step: LoopStep = { index, response, toolResults, costCents: stepCost };
+    // Copied, not shared. `trimHistory`'s last resort truncates oversized tool outputs
+    // in place on the objects inside `messages` — and those were the very same objects,
+    // so a step quietly lost the same bytes the prompt did. Trimming the prompt is right;
+    // a recorded transcript that matches the trimmed prompt rather than what the tool
+    // actually returned is not, and it is the whole reason the recorder reads steps
+    // instead of messages. The copy is taken here, before the next iteration can trim.
+    const step: LoopStep = {
+      index,
+      response,
+      toolResults: toolResults.map((r) => ({ ...r })),
+      costCents: stepCost,
+    };
     steps.push(step);
     await opts.onStep?.(step);
   }
