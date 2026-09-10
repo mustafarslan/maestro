@@ -150,8 +150,10 @@ describe("finding Maestro's own previous comment", () => {
  * where `line` is null, which is the outdated case that endpoint really does have.
  */
 describe("the ids of the comments a review just left", () => {
-  const withPaginate = (rows: unknown[]): GitHubClient => {
+  /** `pages` is what the listing yields, newest page first, as octokit's iterator does. */
+  const withPages = (pages: unknown[][]): { client: GitHubClient; fetched: () => number } => {
     const client = new GitHubClient({ kind: "token", token: "t" });
+    let fetched = 0;
     Object.assign(client as unknown as { octokit: unknown }, {
       octokit: {
         rest: {
@@ -160,11 +162,22 @@ describe("the ids of the comments a review just left", () => {
             listReviewComments: () => undefined,
           },
         },
-        paginate: async () => rows,
+        paginate: {
+          iterator: () => ({
+            async *[Symbol.asyncIterator]() {
+              for (const data of pages) {
+                fetched++;
+                yield { data };
+              }
+            },
+          }),
+        },
       },
     });
-    return client;
+    return { client, fetched: () => fetched };
   };
+
+  const withPaginate = (rows: unknown[]): GitHubClient => withPages([rows]).client;
 
   const anchors = [{ path: "src/a.ts", line: 4, body: "b", dedupeGroup: "g" }];
   const prRef = { owner: "acme", repo: "web", number: 1, headSha: "abc" } as never;
@@ -207,5 +220,36 @@ describe("the ids of the comments a review just left", () => {
     await expect(client.postInlineComments(prRef, anchors)).resolves.toEqual([
       { id: 7, path: "src/a.ts", line: 4 },
     ]);
+  });
+
+  it("stops paging as soon as it has seen every comment it just posted", () => {
+    // Paginating the whole list is one request per hundred comments on the pull request,
+    // every time a review is posted — the shape that made `pollCommentReactions` able to
+    // exhaust a token's hourly allowance. The comments a review just created are the
+    // newest that exist, so the first page normally ends it.
+    const { client, fetched } = withPages([
+      [{ id: 7, path: "src/a.ts", line: 4, pull_request_review_id: 99 }],
+      [{ id: 8, path: "src/b.ts", line: 5, pull_request_review_id: 99 }],
+    ]);
+    return client.postInlineComments(prRef, anchors).then((out) => {
+      expect(out).toEqual([{ id: 7, path: "src/a.ts", line: 4 }]);
+      expect(fetched()).toBe(1);
+    });
+  });
+
+  it("keeps paging when the first page does not carry them all", () => {
+    const two = [
+      { path: "src/a.ts", line: 4, body: "b", dedupeGroup: "g" },
+      { path: "src/b.ts", line: 5, body: "b", dedupeGroup: "h" },
+    ];
+    const { client, fetched } = withPages([
+      [{ id: 9, path: "src/c.ts", line: 1, pull_request_review_id: 12 }],
+      [{ id: 7, path: "src/a.ts", line: 4, pull_request_review_id: 99 }],
+      [{ id: 8, path: "src/b.ts", line: 5, pull_request_review_id: 99 }],
+    ]);
+    return client.postInlineComments(prRef, two).then((out) => {
+      expect(out.map((c) => c.id)).toEqual([7, 8]);
+      expect(fetched()).toBe(3);
+    });
   });
 });

@@ -480,16 +480,31 @@ export class GitHubClient {
       // `line` is still null here for a comment GitHub considers outdated — the line it
       // points at is no longer in the diff — and `original_line` is the one it was written
       // against, which is the anchor that was asked for.
-      const posted = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
-        owner: pr.owner,
-        repo: pr.repo,
-        pull_number: pr.number,
-        per_page: 100,
-      });
-
-      return posted
-        .filter((c) => c.pull_request_review_id === review.id)
-        .map((c) => ({ id: c.id, path: c.path, line: c.line ?? c.original_line ?? 0 }));
+      // Newest first, and stopped as soon as every comment just posted has been seen.
+      // Paginating the whole list would be one request per hundred comments on the pull
+      // request, every time a review is posted — the shape that made `pollCommentReactions`
+      // able to exhaust a token's hourly allowance, and on the same busy repositories. The
+      // comments this review just created are the newest that exist, so page one almost
+      // always ends it.
+      const mine: PostedInlineComment[] = [];
+      for await (const page of this.octokit.paginate.iterator(
+        this.octokit.rest.pulls.listReviewComments,
+        {
+          owner: pr.owner,
+          repo: pr.repo,
+          pull_number: pr.number,
+          sort: "created",
+          direction: "desc",
+          per_page: 100,
+        },
+      )) {
+        for (const c of page.data) {
+          if (c.pull_request_review_id !== review.id) continue;
+          mine.push({ id: c.id, path: c.path, line: c.line ?? c.original_line ?? 0 });
+        }
+        if (mine.length >= inline.length) break;
+      }
+      return mine;
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err), anchors: inline.length },

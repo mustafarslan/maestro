@@ -3718,13 +3718,21 @@ committed, traced the new config field through three packages, and found that no
     covered every read path a *review* takes and had no reason to look at these two, which
     were added later by a change that could not run it.
 
-    It now lists the pull request's own review comments and filters on
-    `pull_request_review_id`, with `original_line` where `line` is null — which on *that*
+    It now lists the pull request's own review comments newest-first and stops as soon as it
+    has seen every comment it just posted, filtering on `pull_request_review_id`, with
+    `original_line` where `line` is null — which on *that*
     endpoint means what the docs say it means, a comment GitHub considers outdated. The live
     check asserts both halves, including that the review-scoped endpoint carries no line, so
     that a later simplification back to one request fails rather than ships. It also reads a
     real reaction (`+1`) off a real inline comment through `listCommentReactions`, and runs a
     bogus review id first so that "no error" cannot mean "the request was never made".
+
+    The stop is not tidiness. Paginating the whole list is one request per hundred comments
+    on the pull request, every time a review is posted — the same shape as the reaction poll
+    that could have exhausted a token's hourly allowance, on the same busy repositories where
+    it would matter. The comments a review just created are the newest that exist, so the
+    first page normally ends it, and a test pins that it stops after one page and keeps going
+    when one page is not enough.
 
     What this does not verify remains the write half: a review Maestro posted, a thumbs-down
     left on one of its inline comments, and exactly one finding dismissed. That needs a
