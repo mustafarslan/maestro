@@ -3509,6 +3509,14 @@ the server never sends fails it, and removing `live` from the server's response 
     review comment sharing its id, and pairing comments by index swaps two findings on
     adjacent lines. Each fails its own test and nothing else.
 
+    **Not verified against GitHub.** The whole path — post a review, react on one inline
+    comment, sweep, and see exactly one finding dismissed — needs a real pull request and a
+    real reaction, and posting one was not in scope for the session that wrote this. What is
+    asserted is the mapping, the kind isolation and the dismissal path, all against stubs.
+    `listCommentsForReview` and `reactions.listForPullRequestReviewComment` are the two calls
+    that have never been made; both are ordinary reads, and both are exactly the kind of
+    assumption this file exists to stop anyone claiming.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
