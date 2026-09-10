@@ -2616,6 +2616,40 @@ the server never sends fails it, and removing `live` from the server's response 
 
     Worth keeping in mind about the review that found it: it found this by dying of it.
 
+195-197. **Maestro reviewed this session's own work and was right three times out of
+    three.** A local review of 46 files and ~2,900 lines against `6f9220f`, with three
+    agents on Ollama Cloud. Every finding is about code written earlier the same day.
+
+    **195 (high) — the guard I had just added covered one of two unscoped sweeps.**
+    `docker.integration.test.ts` has two sweeps that are not scoped to a review, and 194
+    guarded one of them. The other passes `olderThanMs: 60 * 60_000` — and an hour is not a
+    safe cutoff: the daemon's own periodic sweep uses two hours precisely because reviews
+    outlive one, so a review in progress loses its agent containers and the snapshot image
+    its remaining agents start from. The review also identified why it was missed: the
+    comment I wrote scoped the hazard to "a sweep with no `reviewId` and no age", and the
+    one-hour sweep is the same hazard by a different route. That comment has been corrected
+    along with the code. Third time in one day of fixing one half of something.
+
+    **196 (medium) — `maestro review --base=main` silently reviewed the wrong thing.**
+    `args.ts` opens by promising both spellings, and `arg`/`has`/`numberArg` honour both.
+    `review` had its own repeatable-flag helper matching only the exact token, so
+    `--base=main` collected nothing and the review ran against `HEAD~1`; `--model=x` ran the
+    playbook's model. A different review from the one asked for, with no error.
+
+    And the sharpest part of the finding: `rejectUnknownFlags`, added hours earlier, made
+    this worse rather than better. It splits on `=` before matching, so `--model=gpt-5` was
+    accepted as a recognised flag — the check reported the flag as known while the command
+    ignored it. A false guarantee is worse than a missing one, and it took a reviewer that
+    had not written either piece to see that the two combined badly.
+
+    **197 (low) — an orphaned doc comment.** `containerLabels`' JSDoc stayed behind when the
+    function moved, landing on top of the new `ManagedContainer` interface's own block, so
+    two stacked comments described one thing and the first was wrong about it.
+
+    Worth recording about the run rather than the findings: it is the second attempt. The
+    first died when the gate reaped its containers, which is how 194 was found. This one
+    survived the gate — the same scenario, with the fix in place.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

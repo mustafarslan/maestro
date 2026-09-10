@@ -67,7 +67,9 @@ afterAll(async () => {
 /**
  * Managed containers on this machine that this test file did not create.
  *
- * A sweep with no `reviewId` and no age destroys every Maestro-labelled container the
+ * A sweep that is not scoped to one review destroys containers it does not own. That
+ * means a sweep with no `reviewId` — with or without an age, because an age of one hour
+ * is shorter than the two the daemon's own sweep uses, and reviews outlive an hour.
  * daemon can see, which is what `maestro reap` is for and therefore what has to be
  * tested — but the machine running the tests may also be running a review. It was: this
  * suite destroyed the containers of a live review mid-run, and the review carried on
@@ -157,6 +159,16 @@ describe("analyze phase security posture", () => {
       ]);
 
       try {
+        // Guarded for the same reason the `protectReviewIds` sweep below is, and it was
+        // missed the first time: an hour is not a safe cutoff. The daemon's own periodic
+        // sweep uses TWO hours precisely because reviews routinely outlive one, so a
+        // review in progress on this machine loses its agent containers and the snapshot
+        // image its remaining agents start from. Same hazard, different route.
+        const refusal = await refuseIfNotAlone();
+        if (refusal) {
+          console.log(refusal);
+          return;
+        }
         await driver.reap({ olderThanMs: 60 * 60_000 });
         const still = execFileSync("docker", ["ps", "-aq", "--filter", `name=${orphan}`], {
           encoding: "utf8",
@@ -182,6 +194,12 @@ describe("analyze phase security posture", () => {
       // including the ones its own reviews were using at that moment.
       const sandbox = await driver.analyze(env!, { spec });
       try {
+        const refusal = await refuseIfNotAlone();
+        if (refusal) {
+          console.log(refusal);
+          expect((await sandbox.exec("echo still-here")).stdout).toContain("still-here");
+          return;
+        }
         const result = await driver.reap({ olderThanMs: 60 * 60_000 });
         expect(result.protected).toBeGreaterThan(0);
 

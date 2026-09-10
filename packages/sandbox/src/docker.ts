@@ -562,7 +562,6 @@ async function imageLabels(imageId: string): Promise<{ reviewId?: string; create
   return parseLabelPair(res.stdout);
 }
 
-/** The review a container belongs to and when it was created, from its own labels. */
 /**
  * Every managed container, with the review it belongs to and whether it is running.
  *
@@ -612,6 +611,7 @@ export function classifyContainers(
   return { inFlight: managed.filter(owned), strays: managed.filter((c) => !owned(c)) };
 }
 
+/** The review a container belongs to and when it was created, from its own labels. */
 async function containerLabels(
   containerId: string,
 ): Promise<{ reviewId?: string; createdAt?: number }> {

@@ -306,6 +306,13 @@ What is verified and what is not is recorded in [STATUS.md](./STATUS.md).
 
 ## Checking a change before pushing
 
+> **CI is manual.** `.github/workflows/ci.yml` runs on `workflow_dispatch` only, and both
+> workflows are disabled at the repository level. Every push was starting a run that failed
+> for want of Actions minutes rather than for anything about the code, and a red tick that
+> means "billing" teaches you to ignore red ticks. `scripts/gate.sh` runs the same steps
+> locally — it is what every commit here goes through — so nothing is lost but the second
+> opinion of a clean machine. Re-enable the push trigger when there are minutes to spend.
+
 ```
 scripts/gate.sh /tmp/maestro-gate
 ```

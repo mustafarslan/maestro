@@ -13,7 +13,7 @@ import {
 import { ProviderConfigStore, type ProviderRegistry } from "@maestro/llm";
 import { type PlaybookDocument, PlaybookStore } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
-import { rejectUnknownFlags } from "../args.js";
+import { has, rejectUnknownFlags } from "../args.js";
 import { color } from "../ui.js";
 
 const exec = promisify(execFile);
@@ -36,12 +36,26 @@ agents against it, and prints the consolidated review.
   return 1;
 }
 
-function args(argv: string[], name: string): string[] {
+/**
+ * A flag that may be given more than once — `--agent security --agent product`.
+ *
+ * Both spellings, because `args.ts` opens by promising both and this was the one helper
+ * that never got the memo: `--base=main` matched nothing, so the review silently ran
+ * against `HEAD~1`, and `--model=x` silently ran the playbook's model. A different review
+ * from the one asked for, with no error.
+ *
+ * `rejectUnknownFlags` made that worse rather than better. It splits on `=` before
+ * matching, so `--model=gpt-5` was accepted as a recognised flag — the check said the
+ * flag was known while the command ignored it, which is a false guarantee rather than a
+ * missing one.
+ */
+export function args(argv: string[], name: string): string[] {
   const out: string[] = [];
   argv.forEach((a, i) => {
     if (a === name && argv[i + 1]) out.push(argv[i + 1] as string);
+    else if (a.startsWith(`${name}=`)) out.push(a.slice(name.length + 1));
   });
-  return out;
+  return out.filter(Boolean);
 }
 
 async function git(cwd: string, gitArgs: string[]): Promise<string> {
@@ -105,7 +119,7 @@ export async function review(argv: string[]): Promise<number> {
   const onlyAgents = args(argv, "--agent");
   const providerOverride = args(argv, "--provider")[0];
   const modelOverride = args(argv, "--model")[0];
-  const asJson = argv.includes("--json");
+  const asJson = has(argv, "--json");
 
   const db = await openStore();
   try {
@@ -172,8 +186,8 @@ export async function review(argv: string[]): Promise<number> {
         // Undefined unless LINEAR_API_KEY is set; the review runs either way.
         linear: LinearClient.fromEnv(),
         pr: prRef,
-        dryRun: argv.includes("--dry-run"),
-        force: argv.includes("--force"),
+        dryRun: has(argv, "--dry-run"),
+        force: has(argv, "--force"),
       });
 
       if (result.skipped) {

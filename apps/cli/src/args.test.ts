@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { arg, has, numberArg, rejectUnknownFlags } from "./args.js";
+import { args } from "./commands/review.js";
 
 describe("rejecting a flag no command accepts", () => {
   const serveFlags = ["--admin-host", "--admin-port", "--webhook-port", "--workers"];
@@ -62,5 +63,46 @@ describe("the flag helpers this rests on", () => {
     expect(has(["--force"], "--force")).toBe(true);
     expect(has(["--force=true"], "--force")).toBe(true);
     expect(has([], "--force")).toBe(false);
+  });
+});
+
+describe("a repeatable flag accepts both spellings too", () => {
+  /**
+   * `review` had its own `args()` helper matching only the exact token, while this module
+   * opens by promising both spellings. So `maestro review . --base=main` silently ran
+   * against `HEAD~1`, and `--model=x` silently ran the playbook's model — a different
+   * review from the one asked for, with no error.
+   *
+   * `rejectUnknownFlags` made it worse rather than better: it splits on `=` before
+   * matching, so `--model=gpt-5` was accepted as a recognised flag. The check said the
+   * flag was known while the command ignored it, which is a false guarantee rather than
+   * a missing one. Reported by Maestro reviewing its own commit.
+   */
+  it("reads the space form", () => {
+    expect(args(["--agent", "security", "--agent", "product"], "--agent")).toEqual([
+      "security",
+      "product",
+    ]);
+  });
+
+  it("reads the = form", () => {
+    expect(args(["--base=main"], "--base")).toEqual(["main"]);
+  });
+
+  it("reads both at once, which is what a person actually types", () => {
+    expect(args(["--agent=security", "--agent", "product"], "--agent")).toEqual([
+      "security",
+      "product",
+    ]);
+  });
+
+  it("does not invent a value for a flag given without one", () => {
+    expect(args(["--base="], "--base")).toEqual([]);
+    expect(args(["--base"], "--base")).toEqual([]);
+  });
+
+  it("does not match a different flag that starts the same way", () => {
+    // `--base` must not swallow `--base-ref`.
+    expect(args(["--base-ref=x"], "--base")).toEqual([]);
   });
 });

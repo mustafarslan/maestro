@@ -67,7 +67,19 @@ echo "=== mcp protocol ==="
 node scripts/mcp-protocol-check.mjs ./dist/maestro | grep -E "verified|FAIL" || true
 node scripts/mcp-protocol-check.mjs ./dist/maestro >/dev/null 2>&1
 
-echo "=== smoke ==="    && ./dist/maestro --version && ./dist/maestro doctor 2>&1 | tail -12
+# `init` and `playbook nodes` on a fresh MAESTRO_HOME, which is the first thing any new
+# user runs. They were in CI and not here, so the gate never checked that a clean install
+# works — the one path a broken migration or a missing embedded asset shows up on first.
+echo "=== smoke ==="    && ./dist/maestro --version
+MAESTRO_HOME="$(mktemp -d)" ./dist/maestro init >/dev/null
+MAESTRO_HOME="$(mktemp -d)" ./dist/maestro playbook nodes >/dev/null
+./dist/maestro doctor 2>&1 | tail -12
+
+# Linear owns this schema and can change it without telling us. The check needs no
+# credential — Linear validates a query before it authenticates. Advisory: their
+# availability is not this build's business, so a failure prints and does not stop.
+echo "=== linear query shape (advisory) ==="
+node scripts/live-linear-check.mjs 2>&1 | tail -3 || echo "  (advisory check unavailable)"
 
 # The gate's own verdict, and the only line that means the gate passed.
 #
