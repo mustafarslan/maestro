@@ -477,13 +477,21 @@ describe("dependency cache", () => {
         expect(await ls("packages/a/node_modules/nested-dep-marker")).toBe("yes");
       } finally {
         await box2?.destroy();
-        await driver.reap({ reviewId });
-        // The deps tag outlives the review by design — that is the point of the cache —
-        // so only this test can clean it up. Scoped to tags this test created, never a
-        // blanket sweep of maestro/deps, which would evict a real repo's warm cache.
+        // Untag the cache BEFORE reaping, not after.
+        //
+        // The reaper deliberately skips an image that also carries a deps tag, so that
+        // tearing a review down does not destroy the dependency cache it just warmed —
+        // and both tags point at the same image id. Reaping first therefore skipped the
+        // image, and removing the deps tag afterwards left the snapshot tag behind with
+        // nothing left to collect it: 1.6GB leaked per run of this test. Found by
+        // checking `docker images` after a run rather than by reading the code.
+        //
+        // Scoped to tags this test created, never a blanket sweep of maestro/deps, which
+        // would evict a real repository's warm cache.
         for (const tag of await depsTags()) {
           if (!before.has(tag)) await dockerCommand(["rmi", "-f", tag], { timeoutMs: 60_000 });
         }
+        await driver.reap({ reviewId });
         rmSync(first, { recursive: true, force: true });
         rmSync(second, { recursive: true, force: true });
       }

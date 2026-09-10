@@ -3308,6 +3308,17 @@ the server never sends fails it, and removing `live` from the server's response 
     test strips the field from a stored row, so it will keep catching this for the next
     field too, rather than for this one only.
 
+229. **The new cache test leaked a 1.6GB image on every run.** Its cleanup reaped the review
+    and then removed the `maestro/deps` tag it had created. That order is backwards: the
+    reaper deliberately skips an image that also carries a cache tag — so that tearing down a
+    review cannot destroy the dependency layer it just warmed — and both tags point at the
+    same image id. Reaping first skipped the image; untagging afterwards left the snapshot
+    tag behind with nothing left to collect it.
+
+    Found by listing `docker images` after a run rather than by reading the cleanup, which
+    looked correct and was: each step does what it says, in the wrong order. The tags are
+    removed before the reap now.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:
