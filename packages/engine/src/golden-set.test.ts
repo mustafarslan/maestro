@@ -19,6 +19,12 @@ const root = join(import.meta.dirname, "../../..");
 const dir = join(root, "docs/golden-set");
 const seed = readFileSync(join(root, "scripts/seed-golden-set.sh"), "utf8");
 
+function shaFor(name: string): string {
+  const row = seed.split("\n").find((l) => l.trim().startsWith(`"${name} `));
+  expect(row, `no row for ${name} in scripts/seed-golden-set.sh`).toBeDefined();
+  return row?.trim().split(/\s+/)[1] ?? "";
+}
+
 const keys = readdirSync(dir)
   .filter((f) => f.endsWith(".json"))
   .map((f) => ({
@@ -58,13 +64,35 @@ describe("the committed golden set", () => {
   });
 
   it.each(keys)("$file has a provenance row naming a commit in this history", ({ fixture }) => {
-    const row = seed.split("\n").find((l) => l.trim().startsWith(`"${fixture.name} `));
-    expect(row, `no row for ${fixture.name} in scripts/seed-golden-set.sh`).toBeDefined();
-
-    const sha = row?.trim().split(/\s+/)[1] ?? "";
+    const sha = shaFor(fixture.name);
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
     expect(() =>
       execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root, stdio: "ignore" }),
     ).not.toThrow();
   });
+
+  // The eight the set started with, assigned by hand before the rule existed. They keep
+  // what they were authored with rather than being quietly re-derived, which would move
+  // fixtures between halves and silently change what findings 232 and 234 measured.
+  const PRE_RULE = new Set([
+    "db-world-readable",
+    "doctor-first-line",
+    "failure-policy",
+    "fence-closable",
+    "numeric-flag-nan",
+    "reaper-double-count",
+    "severity-sql-order",
+    "unhandled-rejection",
+  ]);
+
+  it.each(keys.filter((k) => !PRE_RULE.has(k.fixture.name)))(
+    "$file lands in the half the rule puts it in",
+    ({ fixture }) => {
+      // Stated in the seed script and enforced here: the parity of the fix commit's last
+      // hex digit. A split chosen per fixture is a split chosen to make a result look
+      // good, and a rule nothing checks is a preference.
+      const last = Number.parseInt(shaFor(fixture.name).slice(-1), 16);
+      expect(splitOf(fixture)).toBe(last % 2 === 0 ? "val" : "train");
+    },
+  );
 });
