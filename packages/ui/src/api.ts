@@ -230,6 +230,8 @@ export interface FeedbackResponse {
     open: number;
     acceptanceRate?: number;
   }[];
+  /** Findings on a file the author touched afterwards: weaker evidence, kept separate. */
+  lineChanged: { agent_id: string; n: number }[];
 }
 
 /** One container a review started. Kept after teardown, so a leak has a history. */

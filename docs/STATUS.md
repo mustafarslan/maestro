@@ -2571,6 +2571,26 @@ the server never sends fails it, and removing `live` from the server's response 
     was not wrong about what the code did; it was wrong that the code should do it, which
     is the harder kind of wrong test to notice.
 
+193. **I committed the defect I had spent the day cataloguing, and caught it twenty
+    minutes later.** Fixing 192 meant taking `line_changed` out of the verdict, and the
+    comment I wrote said the signal "is not lost — the `feedback` row is still written, and
+    `lineChangedByAgent` reports it." Nothing called `lineChangedByAgent`. The claim in the
+    comment was false at the moment I wrote it, and the function was exactly the
+    declared-and-never-read configuration this file records more than a dozen instances of.
+
+    Caught by asking, before moving on, whether the thing I had just written had a caller —
+    which is the question every one of those instances failed to be asked. It is served at
+    `/api/findings/feedback` now and shown on the Quality page in its own column, beside
+    the verdicts rather than mixed into them.
+
+    Worth stating what the fix does to the acceptance rate, since that number is the
+    quality loop's whole output: it is computed over settled findings only —
+    `accepted / (accepted + dismissed)` — so removing a file-level heuristic from the
+    settling rule does not distort it. It narrows it to human verdicts, which is what the
+    rate was always supposed to mean. `ingestLineChanges` warned in its own comment about
+    "driving every agent's acceptance rate to ~100%"; this removes the remaining source of
+    that.
+
 ### Found by mechanical sweep, still open
 
 Recorded rather than fixed, because each is a decision rather than an oversight:

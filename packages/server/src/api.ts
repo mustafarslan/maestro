@@ -14,7 +14,7 @@ import {
   loadScores,
   scoresDir,
 } from "@maestro/engine";
-import { agentQuality, findingCountsByAgent } from "@maestro/integrations";
+import { agentQuality, findingCountsByAgent, lineChangedByAgent } from "@maestro/integrations";
 import { ModelCatalog, ProviderConfigStore, runConformance } from "@maestro/llm";
 import {
   diffPlaybooks,
@@ -305,6 +305,13 @@ const routes: Route[] = [
       // it — two answers to one question, and the one with the careful "no data is not
       // 0%" handling was the dead one.
       quality: agentQuality(ctx.db),
+      // The weaker half of the signal, reported separately rather than folded into the
+      // acceptance rate. It is file-level — a developer editing a file for an unrelated
+      // reason produces the same evidence as one acting on a finding — and it used to
+      // settle findings as accepted, which both inflated the rate and killed
+      // carry-forward. Shown so that removing it from the verdict did not remove it from
+      // view.
+      lineChanged: lineChangedByAgent(ctx.db).map((r) => ({ agent_id: r.agentId, n: r.n })),
     }),
   },
 ];

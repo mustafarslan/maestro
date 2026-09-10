@@ -43,6 +43,12 @@ export function Quality() {
   // of one number is how they end up disagreeing.
   const rateOf = (agent: string) => data.quality?.find((q) => q.agentId === agent)?.acceptanceRate;
   const judged = (agent: string) => count(agent, "accepted") + count(agent, "dismissed");
+  // Weaker evidence, shown beside the verdicts rather than mixed into them: this counts
+  // findings on a file the author edited afterwards, which a developer working on
+  // something unrelated produces just as readily as one acting on the finding. It used to
+  // settle findings as accepted, which inflated the rate to near 100% and, less visibly,
+  // emptied the carry-forward list on every push.
+  const touched = (agent: string) => data.lineChanged?.find((r) => r.agent_id === agent)?.n ?? 0;
 
   if (!agents.length) {
     return (
@@ -71,6 +77,7 @@ export function Quality() {
                 <th key={s}>{s}</th>
               ))}
               <th>Accepted of judged</th>
+              <th>File touched after</th>
             </tr>
           </thead>
           <tbody>
@@ -97,6 +104,7 @@ export function Quality() {
                       </>
                     )}
                   </td>
+                  <td className={touched(a) ? undefined : "muted"}>{touched(a)}</td>
                 </tr>
               );
             })}
