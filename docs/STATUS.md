@@ -3439,6 +3439,18 @@ the server never sends fails it, and removing `live` from the server's response 
     ceiling doing its job. So there is real headroom in both directions — recall is not
     saturated, and precision ranges from 33% to 100% across the eight.
 
+    Read the denominators before the percentages: 90% held out is five of six findings across
+    five fixtures, so one fixture moves it by fifteen points. Eight is a start, not a golden
+    set.
+
+    **What the failed run did, read out of finding 231's table.** Twenty-one steps and no
+    submission. It read one 700-line file in eight overlapping windows, issued the same
+    `snapshotTag|maestro/deps` grep at steps 4, 6, 8, 12 and 15, re-listed the same two
+    directories four times, and ran out of clock. The wrap-up nudge fired and changed nothing.
+    Until finding 231 there was no way to know any of that — the run recorded 955ms of cost
+    and a `deadline` stop kind, and "the agent found nothing" was the whole of what could be
+    said about it. That is the table earning its place on its first real use.
+
     **Two things this turned up that were not the point.** `/api/eval` and MCP `run_eval` each
     had a test asserting they return empty lists, reading the developer's real
     `~/.maestro/eval-scores`. Both passed for as long as they have existed and failed the
