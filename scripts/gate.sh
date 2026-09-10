@@ -38,6 +38,12 @@ cd "$DST"
 echo "=== install ==="  && pnpm install --frozen-lockfile >/dev/null
 echo "=== lint ==="     && pnpm run lint
 echo "=== typecheck ===" && pnpm run typecheck
+# The Linux binary the egress proxy container runs, built BEFORE the tests because the
+# integration suite prepares real environments and the enforced posture needs one. A clean
+# checkout has no `dist/`, and the alternative — falling back to a published release — would
+# test whatever was released rather than the code in this tree. Costs about a second: the
+# bundle is already built by the typecheck above.
+echo "=== proxy binary ===" && pnpm exec tsc -b >/dev/null && node scripts/build-proxy-binary.mjs 2>&1 | tail -1
 echo "=== test ==="     && pnpm run test 2>&1 | tail -6
 # The suite runs on Node; the binary ships bun:sqlite. Check the driver contract on both,
 # or a divergence between the two builtins is invisible until a user hits it.

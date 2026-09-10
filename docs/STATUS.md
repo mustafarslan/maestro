@@ -1616,7 +1616,9 @@ before a release, and either would catch the other side changing under us.
     `tail`'s status, the identical trap that had just been fixed in the gate script.
 
 
-- **The prepare-phase egress allowlist is advisory, not enforced.** The plan describes prepare as
+- ~~**The prepare-phase egress allowlist is advisory, not enforced.**~~ **Closed — see finding 205.**
+  The description below is what was true, and is kept because the fix is only legible against it.
+  The plan describes prepare as
   running behind an "egress allowlist via proxy", and the proxy itself is correct — probed with
   eleven cases, pinned by tests, mutation-checked. What is not true is that traffic has to go
   through it. The container is told about the proxy with `HTTP_PROXY`/`HTTPS_PROXY` and their
@@ -2801,6 +2803,126 @@ the server never sends fails it, and removing `live` from the server's response 
     than suppress the rule, the row now carries `aria-current`, which is valid on any
     element and says the truer thing: this is the row the detail pane is showing. Plus a
     `<thead>`, matching Environments, Providers and Quality.
+
+205. **The prepare-phase egress allowlist is now a control rather than a request.** The largest
+    known gap in this project, open since it was first written down, and closed by changing
+    where the proxy runs rather than what it does.
+
+    The allowlist was always correct and always bypassable: the sandbox was pointed at the
+    proxy with `HTTP_PROXY` and honoured it by convention. Prepare now runs on a per-review
+    `--internal` Docker network — no default route, no external DNS — with the proxy in a
+    container attached to that network and to the normal bridge. It is the only path out, so
+    the allowlist decides what crosses it. Nothing is asked of the sandbox at all.
+
+    The proxy is this same binary, `docker cp`ed into a stock `debian:bookworm-slim` and run as
+    `maestro egress-proxy`. Nothing is built, published, signed or pulled beyond the base image
+    — a decision recorded in `docs/TODO.md`, taken after measuring that the Maestro image cannot
+    be slimmed (the daemon shells out to `git` and the `docker` CLI, so it is ~450MB and never
+    distroless) and that no image is published anywhere today.
+
+    Proved, not asserted, by a probe that runs as a setup command inside the real prepare
+    container. Node's own `fetch` ignores the proxy variables entirely, which makes it exactly
+    the right instrument: under `advisory` it prints `DIRECT_REACHED_200`, under `enforced` it
+    prints `DIRECT_BLOCKED`. Both are tests, and the pair is the point — if enforcement ever
+    stopped working the first would fail and the second would still pass, and which one broke
+    says what happened. Mutation-checked: removing `--internal` turns the enforced case into
+    `DIRECT_REACHED_200`.
+
+    Fails closed. If enforcement is configured and the proxy cannot start — no Linux binary, no
+    base image, Docker refusing the network — prepare fails and names all three ways to fix it.
+    It never degrades to advisory, because everything downstream would go on reporting that the
+    allowlist applied. Mutation-checked by adding the fallback, which fails that test.
+
+206. **Two hardening flags each broke the thing they were protecting.** Both were mine, added in
+    the same commit, and both were caught by tests rather than by reading.
+
+    `--read-only` on the proxy container is the obvious posture for the one container with
+    network access during prepare — and `docker cp` into a read-only rootfs fails with
+    `container rootfs is marked read-only`, which is how the binary gets in. Bind-mounting it
+    instead would fix that and break Compose: the host daemon cannot see a path inside Maestro's
+    own container, and `docker cp` is the only one of the two that works against a daemon which
+    does not share this filesystem. The flag went; the rest of the posture stayed.
+
+    `--tmpfs /tmp` is the obvious way to bound the egress log and keep it out of the rootfs —
+    and a tmpfs is freed when the container stops, which is precisely when the log is read.
+    `docker cp` from a stopped container is what makes the log survive a hard kill, and mounting
+    a tmpfs there deleted it at the exact moment it was needed. The review reported nothing
+    blocked when four attempts had been.
+
+    Neither is a subtle bug. Both are what happens when a security flag is added because it is
+    generally right, without asking what else in the same file depends on that path.
+
+207. **Networks are a leak class nothing knew about.** Enforcement creates one per review, and
+    `docker ps` does not show them: a review that dies between creating its network and tearing
+    it down leaks one silently, for ever. Swept by the finalizer, by the reaper's label sweep,
+    and reported by `doctor` — the same three places, asking the same question of the same set
+    of live reviews, because doctor recommending a command that destroys what it has just called
+    safe is a failure this project has already had in both directions.
+
+    `reap` returns a network count, which meant widening the `SandboxDriver` contract rather than
+    only the Docker driver: a second driver written faithfully against the interface would
+    otherwise reintroduce the leak, exactly as happened with `protectReviewIds`.
+
+208. **Two real-Docker test files cannot run in parallel.** Adding the enforcement tests as their
+    own file made the whole suite fail in a way neither file failed alone: both sweep by
+    `maestro.managed`, so each sees the other's containers as foreign, and the guard that exists
+    to stop this suite destroying a live review (finding 194) fired against a neighbour instead.
+
+    Merged into one file, because one file is one worker and therefore sequential. Weakening the
+    guard was the alternative and would have been the wrong trade — it is the only thing standing
+    between this suite and somebody's running review.
+
+209. **`maestro review --help` exited 1.** The same shape as 201, one level down, and missed by
+    that fix: `review`'s `usage()` was both the help text and the missing-argument error, so the
+    six commands fixed alongside it exited 0 and this one did not. Printing and exiting are now
+    separate.
+
+210. **The version was a literal in one file.** Fine while only `maestro version` printed it, and
+    not fine once the proxy needed it: it fetches a Linux build of *this* version, and a cached
+    binary from an older one may predate the subcommand it is being asked to run. A second copy
+    would have been a version skew showing up as `unknown command` inside a container nobody is
+    watching. One constant in `@maestro/core` now.
+
+211. **A repository must not be able to switch its own enforcement off, and now cannot by
+    construction — twice.** `.maestro.yaml` is read from the base branch only, so a pull request
+    cannot alter the sandbox it will be analyzed in; but anyone with write access could still
+    weaken their own repo, which is why every field in that file is *intersected* with the
+    playbook rather than replacing it. `egressEnforcement` is not in `RepoConfigSchema` at all,
+    so it never parses, and `narrowEnvSpec` takes the playbook's value regardless.
+
+    Both guards are now pinned by a test, because the change that would open the hole is a
+    single line added to a schema — the sort of edit that looks like completeness. Adding that
+    line, plus the one-line merge that would go with it, fails the test.
+
+212. **`--agent security` reported the other agents as "disabled in playbook".** Noticed while
+    reading the output of a verification review, not by a test. The flag works by flipping
+    `enabled` on the pinned copy of the playbook, so the router's reason is mechanically true
+    and misleading to read: the playbook on disk disables nothing, and somebody debugging with
+    this flag would go looking for a switch that is not there. Now "not selected by --agent",
+    rewritten before the outcome is recorded as well as before it is rendered, so the stored
+    trace and the printed report do not disagree.
+
+213. **Releases could only be cut by a CI job this account cannot run, and enforcement needed
+    one.** `.github/workflows/release.yml` fired on a pushed tag and failed for want of Actions
+    credits, so `install.sh` — which downloads from `releases/latest` — was theoretical, and
+    v0.1.0 was the only release that existed.
+
+    That became load-bearing rather than untidy the moment the egress proxy started fetching a
+    Linux build of itself: every v0.1.0 asset predates the `egress-proxy` subcommand, so on a
+    macOS host the proxy container would have started a binary that answers `unknown command` —
+    inside a container nobody is watching. The clean-checkout gate found it, which is exactly
+    what a clean-checkout gate is for: locally there was a cross-compiled binary in `dist/`, and
+    every test passed on a file a fresh install does not have.
+
+    `scripts/release.sh` cuts a release from one machine — Bun cross-compiles all four targets —
+    and refuses to overwrite an existing tag, because the proxy caches binaries by version and a
+    cache filled from replaced bytes would never refresh. It checks two things rather than
+    assuming them: that the host binary reports the version the release claims, and that the
+    Linux asset really answers `egress-proxy --help`, verified by running it in a container. The
+    workflow is manual-only now and stays for whoever has credits.
+
+    The gate builds its own proxy binary rather than reaching for a published one, so it tests
+    the code in the tree. About a second, since the bundle is already built by the typecheck.
 
 ### Found by mechanical sweep, still open
 

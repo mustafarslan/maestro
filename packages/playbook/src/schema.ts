@@ -30,6 +30,18 @@ export const EnvSpecSchema = z.object({
   egressAllowlist: z
     .array(z.string())
     .default(["registry.npmjs.org", "pypi.org", "proxy.golang.org", "crates.io"]),
+  /**
+   * Whether the allowlist above is a control or a convention.
+   *
+   * "enforced" gives the review its own --internal network and puts the proxy in a
+   * container on it, so the sandbox has no route to the internet at all except through
+   * the allowlist. "advisory" is the older posture: the proxy runs inside the daemon and
+   * is offered through HTTP_PROXY, which a tool that ignores those variables simply
+   * bypasses. Enforced is the default because the gap it closes is the largest one this
+   * project knew about; advisory remains for hosts that cannot supply a Linux binary for
+   * the proxy container, and says so in the review's metrics block rather than quietly.
+   */
+  egressEnforcement: z.enum(["enforced", "advisory"]).default("enforced"),
   secrets: z.literal("none").default("none"),
   trust: TrustLevel.default("trusted"),
   /**
@@ -40,6 +52,7 @@ export const EnvSpecSchema = z.object({
   writableWorkdir: z.boolean().default(false),
 });
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;
+export type EgressEnforcement = EnvSpec["egressEnforcement"];
 
 // ── Model binding ────────────────────────────────────────────────────────────
 export const ModelBindingSchema = z.object({

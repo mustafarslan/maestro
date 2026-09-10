@@ -93,6 +93,18 @@ describe("a repository's own .maestro.yaml", () => {
     expect(out.cpus).toBe(base.cpus);
   });
 
+  it("cannot turn off egress enforcement, however the file asks", () => {
+    // The whole point of enforcement is that the sandbox is not asked to cooperate, so a
+    // repository must not be able to ask for the weaker posture either. Two guards, and
+    // this pins both: `RepoConfigSchema` does not carry the field, so it never parses,
+    // and `narrowEnvSpec` copies the playbook's value rather than the override's.
+    //
+    // Written because adding one line to that schema would silently hand every repo a
+    // switch to disable a supply-chain control on itself, and nothing would have failed.
+    const out = narrowEnvSpec(base, { envSpec: { egressEnforcement: "advisory" } } as never, quiet);
+    expect(out.egressEnforcement).toBe("enforced");
+  });
+
   it("ignores a repo trying to add a command the playbook never permitted", () => {
     // The attack this file exists to prevent: a "test command" that is really a shell.
     const out = narrowEnvSpec(

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EnvSpecSchema } from "@maestro/playbook";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { DockerSandboxDriver, dockerCommand } from "./docker.js";
+import { DockerSandboxDriver, dockerCommand, listManagedNetworks } from "./docker.js";
 import { startEgressProxy } from "./egress-proxy.js";
 import type { PreparedEnvironment, Sandbox } from "./types.js";
 
@@ -517,4 +517,141 @@ describe("compose deployment wiring", () => {
     },
     300_000,
   );
+});
+
+/**
+ * Whether the prepare-phase allowlist is a control or a request.
+ *
+ * Finding 143, made testable. The advisory posture points the sandbox at a proxy with
+ * `HTTP_PROXY` and trusts it to comply; anything ignoring those variables — and Node's
+ * own `fetch` is one such thing, which is what makes it the right probe — reaches the
+ * internet directly. The enforced posture puts the sandbox on an `--internal` network
+ * with no route and no external DNS, so the same call reaches nothing.
+ *
+ * The probe runs as a SETUP COMMAND, inside the real prepare container, because that is
+ * the only place the question can honestly be asked. Reading the flags passed to
+ * `docker create` would assert that the code does what the code says.
+ *
+ * These live in this file rather than beside themselves because two real-Docker files
+ * running in parallel each see the other's containers as foreign, and the guard above —
+ * which exists to stop this suite destroying a live review — then fires against a
+ * neighbour instead. One file is one worker, and therefore sequential.
+ */
+/** Node's fetch ignores HTTP_PROXY entirely, so this is a genuinely direct connection. */
+const DIRECT_PROBE =
+  "node -e \"fetch('https://registry.npmjs.org/',{signal:AbortSignal.timeout(8000)})" +
+  ".then(r=>console.log('DIRECT_REACHED_'+r.status))" +
+  ".catch(()=>console.log('DIRECT_BLOCKED'))\"";
+
+/** curl honours the proxy variables, so this exercises the allowed route. */
+const VIA_PROXY_ALLOWED =
+  "curl -sS -o /dev/null -w 'PROXY_ALLOWED_%{http_code}\\n' -m 25 https://registry.npmjs.org/ || echo PROXY_ALLOWED_FAILED";
+
+const VIA_PROXY_DENIED =
+  "curl -sS -o /dev/null -w 'PROXY_DENIED_%{http_code}\\n' -m 25 https://example.com/ || echo PROXY_DENIED_REFUSED";
+
+function specWith(enforcement: "enforced" | "advisory") {
+  return EnvSpecSchema.parse({
+    image: "node:22-bookworm",
+    cpus: 2,
+    memory: "1GiB",
+    timeouts: { prepareSec: 420, analyzeSec: 120, commandSec: 90 },
+    setup: [DIRECT_PROBE, VIA_PROXY_ALLOWED, VIA_PROXY_DENIED],
+    allowedCommands: [],
+    egressAllowlist: ["registry.npmjs.org"],
+    egressEnforcement: enforcement,
+  });
+}
+
+beforeAll(async () => {
+  dockerUp = await driver.available();
+  if (!dockerUp) return;
+  sourceDir = mkdtempSync(join(tmpdir(), "maestro-egress-src-"));
+  writeFileSync(join(sourceDir, "package.json"), JSON.stringify({ name: "fixture" }));
+  const git = (args: string[]) =>
+    execFileSync("git", ["-C", sourceDir, ...args], { stdio: "ignore" });
+  git(["init", "--quiet"]);
+  git(["config", "user.email", "test@maestro.local"]);
+  git(["config", "user.name", "Maestro Test"]);
+  git(["add", "."]);
+  git(["commit", "--quiet", "-m", "fixture"]);
+}, 120_000);
+
+afterAll(async () => {
+  if (sourceDir) rmSync(sourceDir, { recursive: true, force: true });
+});
+
+async function runPrepare(enforcement: "enforced" | "advisory") {
+  const reviewId = `rv_egress_${enforcement}_${Date.now()}`;
+  const env = await driver.prepare({
+    reviewId,
+    sourcePath: sourceDir,
+    spec: specWith(enforcement),
+  });
+  const output = env.setupResults.map((r) => `${r.stdout}\n${r.stderr}`).join("\n");
+  await driver.reap({ reviewId });
+  return { env, output };
+}
+
+describe("prepare-phase egress enforcement", () => {
+  it("enforced: a direct connection that ignores HTTP_PROXY reaches nothing", async () => {
+    if (!dockerUp) return;
+    const { env, output } = await runPrepare("enforced");
+
+    // The whole point. Under advisory this same line prints DIRECT_REACHED_200.
+    expect(output).toContain("DIRECT_BLOCKED");
+    expect(output).not.toContain("DIRECT_REACHED");
+
+    // And the allowed route still works, or "enforcement" would just mean "broken".
+    expect(output).toContain("PROXY_ALLOWED_200");
+
+    // A host off the allowlist is refused even through the proxy.
+    expect(output).toMatch(/PROXY_DENIED_(REFUSED|000|403)/);
+
+    // The refusal is reported, and reported as enforced.
+    expect(env.egressEnforcement).toBe("enforced");
+    expect(env.egressLog.some((e) => !e.allowed && e.host.includes("example.com"))).toBe(true);
+  }, 900_000);
+
+  it("advisory: the same direct connection reaches the internet, which is the gap", async () => {
+    if (!dockerUp) return;
+    // Not a bug being asserted — a documented posture. This test exists so the two
+    // cannot silently become the same thing: if enforcement ever stopped working, the
+    // test above would fail and this one would still pass, and the pair says which.
+    const { env, output } = await runPrepare("advisory");
+    expect(output).toContain("DIRECT_REACHED_");
+    expect(env.egressEnforcement).toBe("advisory");
+  }, 900_000);
+
+  it("fails the prepare phase rather than quietly falling back to advisory", async () => {
+    if (!dockerUp) return;
+    // The failure mode this must never have. A supply-chain control that stops enforcing
+    // without saying so is worse than one that was never claimed: everything downstream —
+    // the review comment, the metrics block, the egress log — still reports that the
+    // allowlist applied, so nobody finds out.
+    const original = process.env.MAESTRO_PROXY_BINARY;
+    process.env.MAESTRO_PROXY_BINARY = "/nonexistent/maestro-linux";
+    const reviewId = `rv_egress_failclosed_${Date.now()}`;
+    try {
+      await expect(
+        driver.prepare({ reviewId, sourcePath: sourceDir, spec: specWith("enforced") }),
+      ).rejects.toThrow(/MAESTRO_PROXY_BINARY/);
+    } finally {
+      if (original === undefined) delete process.env.MAESTRO_PROXY_BINARY;
+      else process.env.MAESTRO_PROXY_BINARY = original;
+      await driver.reap({ reviewId });
+    }
+
+    // And it left nothing behind on the way out.
+    const nets = await listManagedNetworks();
+    expect(nets.filter((n) => n.reviewId === reviewId)).toEqual([]);
+  }, 300_000);
+
+  it("leaves no network behind", async () => {
+    if (!dockerUp) return;
+    // Networks are invisible in `docker ps`, so a leak here is the kind nobody notices.
+    const leftovers = await listManagedNetworks();
+    const ours = leftovers.filter((n) => n.reviewId?.startsWith("rv_egress_"));
+    expect(ours).toEqual([]);
+  }, 120_000);
 });

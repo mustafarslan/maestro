@@ -48,76 +48,29 @@ as an automatic trigger.
 
 ## Enforcing the prepare-phase egress allowlist
 
-The largest known gap (`docs/STATUS.md` 143): the allowlist is honoured by convention through
-`HTTP_PROXY`, and a tool that ignores those variables reaches the internet directly. The design
-below is not a sketch — every claim in it was measured against the real daemon, so whoever picks
-this up starts from results rather than from the experiments.
+~~The largest known gap.~~ **Done — `docs/STATUS.md` 205.** `egressEnforcement: enforced` is the
+default: prepare runs on a per-review `--internal` network whose only route out is a proxy
+container running this same binary, copied in with `docker cp`. The decisions this section used
+to ask a person to make were settled by measurement and are recorded in the commit and in
+`docs/CONFIGURATION.md`; what is left of the design note lives there rather than here.
 
-**The topology works.** A `--internal` network for the sandbox, and a proxy container attached to
-both that network and a normal one. From inside, measured:
+Two things a future reader should know about the shape that was chosen:
 
-| from a container on the internal network | |
-| --- | --- |
-| direct socket to `1.1.1.1:443` | blocked |
-| external DNS | blocked |
-| the proxy container, by name | reachable |
-| through the proxy, allowlisted host | allowed |
-| through the proxy, denied host | refused by the allowlist |
-
-That is real enforcement: the proxy becomes the only route rather than a suggestion. It also
-rules out the obvious cheaper option — `--internal` cuts off the host gateway too
-(`Network is unreachable`), so the proxy cannot stay in the Maestro process.
-
-**The per-review allowlist is not the obstacle it first looks like.** The allowlist is resolved
-per review, from the playbook and the repository's `.maestro.yaml`, so a shared sidecar would
-need to know which allowlist applies to which connection. A *per-review* proxy container avoids
-that entirely and is symmetric with what already exists: Maestro creates, leases, reaps and
-finalises containers per review today, and the `environments` table already models exactly this.
-
-**The obstacle is what runs the proxy, and it is platform-specific.** The tidy answer — bind-mount
-Maestro's own single static binary into a container and give it an `egress-proxy` subcommand —
-works only where the host binary is a Linux one. Measured on this machine: mounting the macOS
-binary into a Debian container gives `exec /maestro: exec format error`, which is obvious in
-hindsight and would have been discovered late. So a macOS host needs a Linux image carrying the
-proxy: either the published Maestro image, or a small purpose-built one.
-
-**Three further things were measured, and two of the three open questions closed themselves.**
-
-*The Maestro image cannot be slimmed, so "reuse it" is not the cheap option it looks like.* The
-daemon shells out to `git` for the host-side clone (`integrations/src/github.ts`) and to the
-`docker` CLI (`sandbox/src/docker.ts`), so its runtime stage needs `git`, `docker.io`, `curl` and
-`ca-certificates` on top of `debian:bookworm-slim` — around 450MB against the binary's 63MB. It
-can never be distroless. A proxy needs none of those: it does CONNECT tunnelling and plain HTTP
-forwarding, terminating no TLS, so it does not even need `ca-certificates`.
-
-*No Maestro image is published, and Compose builds locally (`build: .`).* Binaries are published —
-`v0.1.0` carries all four, `install.sh` is real — but an image for the proxy would be the first
-container artifact this project has ever pushed, and CI is disabled. That cost falls on
-"reuse the Maestro image" and "publish a small one" equally.
-
-*So neither needs to be paid.* Measured on this machine: `docker create` from a stock
-`debian:bookworm-slim`, `docker cp` the published `maestro-linux-arm64` in, and it runs —
-`maestro --version` prints `0.1.0`. No custom image, no registry, no signing. Only *where the
-Linux binary comes from* is platform-specific, and it is three cases with one code path: on a
-Linux host the installed binary already is one, in Compose it is at `/usr/local/bin/maestro`, and
-on macOS it is the release asset `install.sh` already depends on, downloaded once and cached.
-
-**What is left to decide**, and why it wants a person rather than a default:
-
-- Is the `docker cp` shape acceptable, or is a published proxy image worth the first
-  container-publishing pipeline for the explicitness of a pinned digest? A regulated production
-  environment may want the digest; the `docker cp` shape is materially simpler everywhere else.
-- One proxy container per review matches the existing lifecycle — `environments` already models
-  it, `classifyContainers` already keys on `maestro.review`, the proxy consumes no agent slot,
-  and prepare is short-lived and often a cache hit. The genuinely new leak class is the
-  `--internal` network per review, which the finalizer, the reaper and `doctor` know nothing
-  about: label it and sweep it in all three.
-- If enforcement is configured and the proxy cannot start, prepare must fail with the reason.
-  Never fall back to advisory — a supply-chain control that silently downgrades is worse than
-  one that was never claimed.
-
-Everything else is mechanical: create the network beside the environment, start the proxy, point
-`HTTP_PROXY` at it by container name, and tear both down in the finalizer that already exists.
+- **No image is published.** The proxy is a stock `debian:bookworm-slim` with the binary copied
+  in at review time. Reusing the Maestro image looked cheaper and is not — the daemon shells out
+  to `git` and the `docker` CLI, so its image carries both and is around 450MB against a 63MB
+  binary, and it can never be distroless. Publishing a small one would have been this project's
+  first container artifact, which neither option avoids. `docker cp` avoids both.
+- **A prepare phase with no setup commands needs no network at all.** Fork pull requests
+  downgrade to `trust: untrusted`, which runs no setup — and the clone and the image pull both
+  happen host-side, so nothing in that container ever dials out. It still gets a proxy container
+  and an internal network today. Giving an empty-setup prepare `--network none` outright would
+  be both faster and stricter than the proxy, on exactly the path that matters most. Small, and
+  deliberately not bundled into the change that introduced enforcement.
+- **A registry would buy one thing: a pinned digest.** If a deployment needs an auditable
+  immutable artifact for the component enforcing a supply-chain control, that is the argument
+  for publishing a proxy image, and it is the only one. `MAESTRO_PROXY_BINARY` covers the
+  air-gapped case today.
 
 ## Other
 

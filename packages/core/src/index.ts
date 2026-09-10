@@ -14,3 +14,4 @@ export * from "./store/db.js";
 export * from "./store/driver.js";
 export * from "./store/migrate.js";
 export { migrations } from "./store/migrations/index.js";
+export * from "./version.js";

@@ -76,11 +76,17 @@ webhook / poll → Review(repo, pr, head_sha, playbook_version)
 ## Design notes
 
 **Two security postures, asserted rather than assumed.** `prepare` is the only phase with a
-network, and it goes through an allowlist proxy that blocks CONNECT *and* plain HTTP, because npm
-and pip use both. `analyze` runs with `--network none`, a read-only rootfs, all capabilities
-dropped, no secrets and no Docker socket. `packages/sandbox/src/docker.integration.test.ts`
-asserts every one of those against real containers — a typo in a `docker run` flag is otherwise
-completely silent.
+network, and it runs on a per-review `--internal` Docker network whose only route out is an
+allowlist proxy container — no default route, no external DNS, so the allowlist is a control
+rather than a request. The proxy blocks CONNECT *and* plain HTTP, because npm and pip use both.
+`analyze` runs with `--network none`, a read-only rootfs, all capabilities dropped, no secrets
+and no Docker socket. `packages/sandbox/src/docker.integration.test.ts` asserts every one of
+those against real containers — a typo in a `docker run` flag is otherwise completely silent.
+
+The prepare-phase claim is asserted the only way it can honestly be: a probe running inside the
+real prepare container, using Node's `fetch`, which ignores `HTTP_PROXY` entirely. Under the
+older advisory posture it reaches the internet; under the enforced default it reaches nothing.
+Both are tests, so the two can never quietly become the same thing.
 
 **Agents have no capability to act.** They get read-only tools, no network, and no GitHub
 credential; `run_command` matches the allowlist by exact string, never by prefix, so

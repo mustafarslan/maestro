@@ -44,6 +44,12 @@ services:
       #
       # Only the prepare phase joins this network. Analyze still runs with
       # `--network none`, so the isolation the whole design rests on is unchanged.
+      #
+      # Needed only under `egressEnforcement: advisory`. The enforced default does not
+      # use it at all: the review gets its own --internal network, the proxy runs in a
+      # container on it, and the sandbox reaches that proxy by name through Docker's
+      # embedded DNS — none of which involves Maestro's own network or address. Left set
+      # so switching an install to advisory keeps working without editing this file.
       MAESTRO_SANDBOX_NETWORK: ${COMPOSE_PROJECT_NAME:-maestro}_default
     volumes:
       - maestro-data:/data

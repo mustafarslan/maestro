@@ -7,6 +7,7 @@ import {
   dbPath,
   detectRuntime,
   IN_FLIGHT_STATES,
+  MAESTRO_VERSION,
   maestroHome,
   migrationState,
   openStore,
@@ -15,7 +16,12 @@ import {
 import { GitHubClient, LinearClient, storedGitHubApp } from "@maestro/integrations";
 import { PRICING_FETCHED_AT } from "@maestro/llm";
 import { PlaybookStore, validateGraph } from "@maestro/playbook";
-import { classifyContainers, listManagedContainers } from "@maestro/sandbox";
+import {
+  classifyContainers,
+  listManagedContainers,
+  listManagedNetworks,
+  resolveProxyBinary,
+} from "@maestro/sandbox";
 import { checkLine, color } from "../ui.js";
 
 const exec = promisify(execFile);
@@ -162,6 +168,46 @@ export async function doctor(): Promise<number> {
               ` - run 'maestro reap'` +
               (inFlight.length ? `; ${inFlight.length} in flight will be left alone` : ""),
       });
+
+      // Whether the enforced posture can actually start. Checked here because the
+      // alternative is finding out at the first review: the prepare phase fails closed,
+      // which is right, but "your first review failed" is a worse way to learn that this
+      // host has no Linux binary than a line in `doctor`.
+      try {
+        const binary = await resolveProxyBinary({ version: MAESTRO_VERSION });
+        checks.push({
+          status: "ok",
+          label: "egress proxy",
+          detail: `linux binary ready (${binary.source})`,
+        });
+      } catch (err) {
+        checks.push({
+          status: "warn",
+          label: "egress proxy",
+          detail:
+            `cannot enforce the prepare-phase allowlist: ${err instanceof Error ? err.message.split("\n")[0] : String(err)}` +
+            " - run 'pnpm run build:proxy-binary', set MAESTRO_PROXY_BINARY, or set" +
+            " egressEnforcement: advisory in the playbook",
+        });
+      }
+
+      // Networks arrived with enforced egress and are invisible in `docker ps`, so a
+      // leaked one is the kind of stray nobody notices until `docker network ls` is
+      // hundreds of lines long. Same question as the containers above, asked of the same
+      // set of live reviews, so doctor and the reaper cannot disagree about what is
+      // garbage.
+      const networks = await listManagedNetworks().catch(() => []);
+      const strayNetworks = networks.filter((n) => !n.reviewId || !live.has(n.reviewId));
+      if (networks.length > 0) {
+        checks.push({
+          status: strayNetworks.length === 0 ? "ok" : "warn",
+          label: "review networks",
+          detail:
+            strayNetworks.length === 0
+              ? `no strays (${networks.length} in flight)`
+              : `${strayNetworks.length} network(s) belong to no running review - run 'maestro reap'`,
+        });
+      }
     }
 
     if (state.current > 0) {

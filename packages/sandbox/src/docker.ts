@@ -1,8 +1,17 @@
 import { spawn } from "node:child_process";
-import { logger, newId } from "@maestro/core";
-import type { EnvSpec } from "@maestro/playbook";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type Logger, logger, MAESTRO_VERSION, newId } from "@maestro/core";
+import type { EgressEnforcement, EnvSpec } from "@maestro/playbook";
 import { dependencyCacheKey, mayWriteCache, snapshotTag } from "./cache.js";
-import { runningInContainer, startEgressProxy } from "./egress-proxy.js";
+import {
+  PROXY_LOG_PATH,
+  PROXY_READY_PATH,
+  runningInContainer,
+  startEgressProxy,
+} from "./egress-proxy.js";
+import { resolveProxyBinary } from "./proxy-binary.js";
 import { detectedCommands, detectToolchain, expandAuto } from "./toolchain.js";
 import type {
   ExecResult,
@@ -186,46 +195,11 @@ export class DockerSandboxDriver implements SandboxDriver {
     }
 
     // Network for the prepare phase goes through an allowlist proxy — nothing else.
-    const proxy = await startEgressProxy(spec.egressAllowlist);
+    const proxy = await startPreparePhaseProxy({ spec, reviewId, id, log });
     const containerId = `maestro-prep-${id}`;
 
     try {
-      // Sandboxes must dial an address they can actually reach, and how depends on
-      // whether Maestro is a process on the host or a container beside them.
-      //
-      // On a host, host.docker.internal works. In a container it does not: it resolves to
-      // the host, not to us. The first attempt at fixing that published the proxy on the
-      // docker bridge gateway, which is wrong twice over — it is a real interface only on
-      // Linux, so `docker run -p 172.17.0.1:...` fails outright on Docker Desktop with
-      // "can't assign requested address" and the container never starts; and it routes
-      // container-to-container traffic out to the host and back for no reason.
-      //
-      // Joining the sandbox to Maestro's own network removes the problem rather than
-      // working around it: Docker's embedded DNS resolves the service name, the traffic
-      // never leaves the daemon, nothing is published to any host interface, and it
-      // behaves identically on every platform. Only the PREPARE phase joins — analyze
-      // still runs with `--network none`, so the isolation posture is untouched.
-      const sandboxNetwork = process.env.MAESTRO_SANDBOX_NETWORK?.trim();
-      const proxyHost =
-        process.env.MAESTRO_PROXY_HOST?.trim() ||
-        (sandboxNetwork ? await ownContainerName() : undefined) ||
-        "host.docker.internal";
-
-      if (!sandboxNetwork && !process.env.MAESTRO_PROXY_HOST && runningInContainer()) {
-        log.warn(
-          "Maestro is running inside a container but neither MAESTRO_SANDBOX_NETWORK nor " +
-            "MAESTRO_PROXY_HOST is set; sandboxes will dial host.docker.internal, which " +
-            "does not resolve to this container, so every dependency install will fail. " +
-            "Set MAESTRO_SANDBOX_NETWORK to the network this container is on.",
-        );
-      }
-
-      const networkArgs = sandboxNetwork ? ["--network", sandboxNetwork] : [];
-      const hostGateway =
-        !sandboxNetwork && process.platform === "linux"
-          ? ["--add-host", "host.docker.internal:host-gateway"]
-          : [];
-      const proxyUrl = `http://${proxyHost}:${proxy.port}`;
+      const proxyUrl = proxy.url;
 
       const create = await docker(
         [
@@ -238,8 +212,7 @@ export class DockerSandboxDriver implements SandboxDriver {
           `${LABEL_REVIEW}=${reviewId}`,
           "--label",
           `${LABEL_CREATED}=${new Date().toISOString()}`,
-          ...networkArgs,
-          ...hostGateway,
+          ...proxy.containerArgs,
           "--memory",
           parseMemory(spec.memory),
           "--cpus",
@@ -349,6 +322,12 @@ export class DockerSandboxDriver implements SandboxDriver {
         log.info({ cachedTag }, "dependency snapshot cached");
       }
 
+      // Closed here rather than only in `finally`: the containerised proxy's log lives
+      // inside its container, so it has to be stopped and read before the value that
+      // reports it is built. `close()` is idempotent, and `finally` still runs it on
+      // every path that does not reach here.
+      await proxy.close();
+
       return {
         id,
         reviewId,
@@ -356,7 +335,8 @@ export class DockerSandboxDriver implements SandboxDriver {
         toolchain,
         allowedCommands,
         setupResults,
-        egressLog: proxy.log.map((e) => ({ host: e.host, allowed: e.allowed, count: e.count })),
+        egressLog: proxy.log(),
+        egressEnforcement: proxy.enforcement,
         cacheHit: false,
       };
     } finally {
@@ -479,6 +459,7 @@ export class DockerSandboxDriver implements SandboxDriver {
   ): Promise<{
     containers: number;
     images: number;
+    networks: number;
     protected: number;
   }> {
     const filters = [`label=${LABEL_MANAGED}=true`];
@@ -543,8 +524,77 @@ export class DockerSandboxDriver implements SandboxDriver {
     }
     for (const i of images) await docker(["rmi", "-f", i], { timeoutMs: 60_000 });
 
-    return { containers: containers.length, images: images.length, protected: skipped };
+    // Networks are the leak class enforcement introduced, and the one nothing else here
+    // knew about: a review that dies between creating its --internal network and tearing
+    // it down leaves it behind, and `docker network ls` fills up with them. They go last
+    // because a network with anything still attached cannot be removed — the containers
+    // above had to be gone first.
+    //
+    // Same two guards as everything else: a live review's network is not garbage, and
+    // neither is one too young to date.
+    const networks: string[] = [];
+    for (const n of await listManagedNetworks()) {
+      if (n.reviewId && protectedIds.has(n.reviewId)) {
+        skipped++;
+        continue;
+      }
+      if (opts.reviewId && n.reviewId !== opts.reviewId) continue;
+      if (cutoff !== undefined && (n.createdAt === undefined || n.createdAt > cutoff)) {
+        skipped++;
+        continue;
+      }
+      networks.push(n.name);
+    }
+    for (const n of networks) await docker(["network", "rm", n], { timeoutMs: 30_000 });
+
+    return {
+      containers: containers.length,
+      images: images.length,
+      networks: networks.length,
+      protected: skipped,
+    };
   }
+}
+
+/** A review network, with the same labels every other managed resource carries. */
+export interface ManagedNetwork {
+  name: string;
+  reviewId?: string;
+  createdAt?: number;
+}
+
+/**
+ * The review networks Maestro created.
+ *
+ * Exported for the same reason `listManagedContainers` is: `doctor` reports strays and
+ * the reaper removes them, and if those two ever disagree about what a stray is, doctor
+ * recommends a command that destroys what it has just called safe.
+ */
+export async function listManagedNetworks(): Promise<ManagedNetwork[]> {
+  const res = await docker(
+    ["network", "ls", "--filter", `label=${LABEL_MANAGED}=true`, "--format", "{{.Name}}"],
+    { timeoutMs: 20_000 },
+  );
+  const names = res.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const out: ManagedNetwork[] = [];
+  for (const name of names) {
+    const labels = await docker(
+      [
+        "network",
+        "inspect",
+        "--format",
+        `{{index .Labels "${LABEL_REVIEW}"}}|{{index .Labels "${LABEL_CREATED}"}}`,
+        name,
+      ],
+      { timeoutMs: 20_000 },
+    );
+    out.push({ name, ...parseLabelPair(labels.stdout) });
+  }
+  return out;
 }
 
 /** The same labels, read from an image rather than a container. */
@@ -764,5 +814,333 @@ async function ownContainerName(): Promise<string | undefined> {
     return hostname();
   } catch {
     return undefined;
+  }
+}
+
+// ── The prepare-phase proxy, in either posture ───────────────────────────────
+
+/** Where the sandbox is pointed, and what it costs to tear down. */
+interface PreparePhaseProxy {
+  /** What HTTP_PROXY is set to inside the prepare container. */
+  url: string;
+  /** Networking arguments the prepare container must be created with. */
+  containerArgs: string[];
+  enforcement: EgressEnforcement;
+  /** Aggregated egress log. Only complete after `close()`. */
+  log(): { host: string; allowed: boolean; count: number }[];
+  /** Idempotent: prepare closes explicitly to harvest the log, and again in `finally`. */
+  close(): Promise<void>;
+}
+
+const PROXY_PORT = 8080;
+
+/** A stock glibc image; the proxy binary is copied in, so nothing is built or published. */
+function proxyBaseImage(): string {
+  return process.env.MAESTRO_PROXY_BASE_IMAGE?.trim() || "debian:bookworm-slim";
+}
+
+/**
+ * Starts the proxy in whichever posture the spec asks for.
+ *
+ * Fails CLOSED. If enforcement is configured and the proxy cannot be started — no Linux
+ * binary, no base image, Docker refusing the network — this throws and the prepare phase
+ * fails with the reason. It must never quietly fall back to advisory: a supply-chain
+ * control that stops enforcing without saying so is worse than one that was never
+ * claimed, because everything downstream still reports that the allowlist applied.
+ */
+async function startPreparePhaseProxy(opts: {
+  spec: EnvSpec;
+  reviewId: string;
+  id: string;
+  log: Logger;
+}): Promise<PreparePhaseProxy> {
+  if (opts.spec.egressEnforcement === "advisory") return startAdvisoryProxy(opts);
+  return startEnforcedProxy(opts);
+}
+
+/**
+ * The older posture: the proxy runs in this process and is offered through HTTP_PROXY.
+ *
+ * Kept because a host that cannot supply a Linux binary for the proxy container should
+ * still get the allowlist as a default, and because it is what Compose deployments with
+ * a shared sandbox network already use. What it cannot do is stop a tool that ignores
+ * the proxy variables, which is why it is no longer the default.
+ */
+async function startAdvisoryProxy(opts: {
+  spec: EnvSpec;
+  log: Logger;
+}): Promise<PreparePhaseProxy> {
+  const proxy = await startEgressProxy(opts.spec.egressAllowlist);
+
+  // Sandboxes must dial an address they can actually reach, and how depends on whether
+  // Maestro is a process on the host or a container beside them.
+  //
+  // On a host, host.docker.internal works. In a container it does not: it resolves to
+  // the host, not to us. The first attempt at fixing that published the proxy on the
+  // docker bridge gateway, which is wrong twice over — it is a real interface only on
+  // Linux, so `docker run -p 172.17.0.1:...` fails outright on Docker Desktop with
+  // "can't assign requested address" and the container never starts; and it routes
+  // container-to-container traffic out to the host and back for no reason.
+  //
+  // Joining the sandbox to Maestro's own network removes the problem rather than working
+  // around it: Docker's embedded DNS resolves the service name, the traffic never leaves
+  // the daemon, nothing is published to any host interface, and it behaves identically
+  // on every platform.
+  const sandboxNetwork = process.env.MAESTRO_SANDBOX_NETWORK?.trim();
+  const proxyHost =
+    process.env.MAESTRO_PROXY_HOST?.trim() ||
+    (sandboxNetwork ? await ownContainerName() : undefined) ||
+    "host.docker.internal";
+
+  if (!sandboxNetwork && !process.env.MAESTRO_PROXY_HOST && runningInContainer()) {
+    opts.log.warn(
+      "Maestro is running inside a container but neither MAESTRO_SANDBOX_NETWORK nor " +
+        "MAESTRO_PROXY_HOST is set; sandboxes will dial host.docker.internal, which " +
+        "does not resolve to this container, so every dependency install will fail. " +
+        "Set MAESTRO_SANDBOX_NETWORK to the network this container is on.",
+    );
+  }
+
+  const containerArgs = [
+    ...(sandboxNetwork ? ["--network", sandboxNetwork] : []),
+    ...(!sandboxNetwork && process.platform === "linux"
+      ? ["--add-host", "host.docker.internal:host-gateway"]
+      : []),
+  ];
+
+  let closed = false;
+  return {
+    url: `http://${proxyHost}:${proxy.port}`,
+    containerArgs,
+    enforcement: "advisory",
+    log: () => proxy.log.map((e) => ({ host: e.host, allowed: e.allowed, count: e.count })),
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      await proxy.close();
+    },
+  };
+}
+
+/**
+ * The enforced posture: an --internal network whose only route out is a proxy container.
+ *
+ * The topology is what makes the allowlist a control. A container on an `--internal`
+ * network has no default route and no external DNS — measured, not assumed: a direct
+ * socket to 1.1.1.1 and an external lookup both fail from inside. The proxy container
+ * sits on that network AND on the normal bridge, so it is the only path, and the
+ * allowlist decides what crosses it.
+ *
+ * Attach order matters. The proxy is created on `bridge` so that is its default route —
+ * an `--internal` network has no gateway, and creating it there first would leave the
+ * proxy itself unable to reach anything.
+ */
+async function startEnforcedProxy(opts: {
+  spec: EnvSpec;
+  reviewId: string;
+  id: string;
+  log: Logger;
+}): Promise<PreparePhaseProxy> {
+  const { spec, reviewId, id, log } = opts;
+  const networkName = `maestro-net-${id}`;
+  const proxyName = `maestro-proxy-${id}`;
+  const created = new Date().toISOString();
+  const labels = [
+    "--label",
+    `${LABEL_MANAGED}=true`,
+    "--label",
+    `${LABEL_REVIEW}=${reviewId}`,
+    "--label",
+    `${LABEL_CREATED}=${created}`,
+  ];
+
+  const binary = await resolveProxyBinary({ version: MAESTRO_VERSION });
+  log.info({ source: binary.source, path: binary.path }, "egress proxy binary");
+
+  const image = proxyBaseImage();
+  const pull = await docker(["pull", image], { timeoutMs: 300_000 });
+  if (pull.exitCode !== 0 && !pull.stderr.includes("up to date")) {
+    log.warn({ image, stderr: pull.stderr.slice(0, 300) }, "proxy image pull failed; trying local");
+  }
+
+  let harvested: { host: string; allowed: boolean; count: number }[] = [];
+  let closed = false;
+
+  const teardown = async () => {
+    await docker(["rm", "-f", proxyName], { timeoutMs: 60_000 });
+    // The network cannot be removed while anything is attached, so it goes last.
+    await docker(["network", "rm", networkName], { timeoutMs: 30_000 });
+  };
+
+  const net = await docker(["network", "create", "--internal", ...labels, networkName], {
+    timeoutMs: 30_000,
+  });
+  if (net.exitCode !== 0) {
+    throw new Error(
+      `Could not create the review's isolated network: ${net.stderr.trim()}\n` +
+        "The prepare-phase egress allowlist cannot be enforced without it. Set " +
+        "egressEnforcement: advisory in the playbook's envSpec to accept the weaker posture.",
+    );
+  }
+
+  try {
+    const create = await docker(
+      [
+        "create",
+        "--name",
+        proxyName,
+        ...labels,
+        // bridge FIRST, so it is the default route: --internal networks have no gateway.
+        "--network",
+        "bridge",
+        // The one container with network during prepare, so it gets the same posture as
+        // the sandbox: no capabilities, no privilege escalation, nothing writable but
+        // the tmpfs its own log lives on, and an unprivileged uid — binding 8080 needs
+        // no root.
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "128",
+        "--memory",
+        "256m",
+        "--user",
+        "65534:65534",
+        // No --read-only, and the integration suite is why: `docker cp` into a container
+        // with a read-only rootfs fails with "container rootfs is marked read-only", and
+        // copying the binary in is how it gets there. Bind-mounting it instead would fix
+        // that and break the Compose deployment — the host daemon cannot see a path
+        // inside Maestro's own container, and `docker cp` is the only one of the two that
+        // works against a daemon that does not share this filesystem.
+        //
+        // No --tmpfs on /tmp either, for a reason the integration test found: a tmpfs is
+        // freed when the container stops, and the egress log is read AFTER the stop —
+        // `docker cp` from a stopped container is what makes the log survive a hard kill.
+        // Mounting one there deleted the log at the exact moment it was needed, and the
+        // review reported nothing blocked when four attempts had been. The log is
+        // aggregated per host, so it is a few hundred bytes on a writable rootfs.
+        //
+        // Everything else in this posture stands: no capabilities, no privilege
+        // escalation, an unprivileged uid (binding 8080 needs no root), a pid ceiling and
+        // a memory cap.
+        "--entrypoint",
+        "/usr/local/bin/maestro",
+        image,
+        "egress-proxy",
+        "--port",
+        String(PROXY_PORT),
+        "--allowlist",
+        spec.egressAllowlist.join(","),
+      ],
+      { timeoutMs: 60_000 },
+    );
+    if (create.exitCode !== 0) {
+      throw new Error(`Could not create the egress proxy container: ${create.stderr.trim()}`);
+    }
+
+    const cp = await docker(["cp", binary.path, `${proxyName}:/usr/local/bin/maestro`], {
+      timeoutMs: 120_000,
+    });
+    if (cp.exitCode !== 0) {
+      throw new Error(`Could not copy the proxy binary into the container: ${cp.stderr.trim()}`);
+    }
+
+    const connect = await docker(["network", "connect", networkName, proxyName], {
+      timeoutMs: 30_000,
+    });
+    if (connect.exitCode !== 0) {
+      throw new Error(`Could not attach the proxy to the review network: ${connect.stderr.trim()}`);
+    }
+
+    const start = await docker(["start", proxyName], { timeoutMs: 60_000 });
+    if (start.exitCode !== 0) {
+      throw new Error(`The egress proxy container did not start: ${start.stderr.trim()}`);
+    }
+
+    await waitForProxyReady(proxyName, log);
+
+    return {
+      url: `http://${proxyName}:${PROXY_PORT}`,
+      // Only the internal network. No host gateway, no bridge: the proxy is the route.
+      containerArgs: ["--network", networkName],
+      enforcement: "enforced",
+      log: () => harvested,
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        // SIGTERM, so the proxy writes its final snapshot before the container exits.
+        await docker(["stop", "-t", "5", proxyName], { timeoutMs: 60_000 });
+        harvested = await harvestEgressLog(proxyName, log);
+        await teardown();
+      },
+    };
+  } catch (err) {
+    await teardown();
+    throw err;
+  }
+}
+
+/**
+ * Waits for the proxy to accept connections.
+ *
+ * Not optional: a package manager that starts first gets ECONNREFUSED, and most do not
+ * retry it — so the review fails with a network error that looks nothing like an
+ * allowlist and points at the wrong thing entirely.
+ */
+async function waitForProxyReady(proxyName: string, log: Logger): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const probe = await docker(["exec", proxyName, "test", "-f", PROXY_READY_PATH], {
+      timeoutMs: 10_000,
+    });
+    if (probe.exitCode === 0) return;
+
+    // If the container has already exited there is nothing to wait for, and its logs are
+    // the only thing that explains why.
+    const alive = await docker(["inspect", "-f", "{{.State.Running}}", proxyName], {
+      timeoutMs: 10_000,
+    });
+    if (alive.stdout.trim() !== "true") {
+      const why = await docker(["logs", "--tail", "20", proxyName], { timeoutMs: 10_000 });
+      throw new Error(
+        `The egress proxy exited before it was ready:\n${why.stdout.trim()}\n${why.stderr.trim()}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  log.error({ proxyName }, "egress proxy never became ready");
+  throw new Error(
+    "The egress proxy did not start listening within 60s, so the prepare phase has no " +
+      "allowed route to the network. Nothing was run.",
+  );
+}
+
+/** Copies the aggregated log out of the (stopped) proxy container. */
+async function harvestEgressLog(
+  proxyName: string,
+  log: Logger,
+): Promise<{ host: string; allowed: boolean; count: number }[]> {
+  const dir = mkdtempSync(join(tmpdir(), "maestro-egress-"));
+  const dest = join(dir, "egress.json");
+  try {
+    const cp = await docker(["cp", `${proxyName}:${PROXY_LOG_PATH}`, dest], { timeoutMs: 30_000 });
+    if (cp.exitCode !== 0) {
+      log.warn({ stderr: cp.stderr.slice(0, 300) }, "could not read the proxy's egress log");
+      return [];
+    }
+    const parsed = JSON.parse(readFileSync(dest, "utf8")) as {
+      host: string;
+      allowed: boolean;
+      count: number;
+    }[];
+    return parsed.map((e) => ({ host: e.host, allowed: e.allowed, count: e.count }));
+  } catch (err) {
+    // A missing log must not fail an otherwise successful review: the review comment
+    // loses a line, which is not worth throwing away the findings for.
+    log.warn({ err }, "could not read the proxy's egress log");
+    return [];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }

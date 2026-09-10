@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { logger } from "@maestro/core";
+import { logger, MAESTRO_VERSION } from "@maestro/core";
 import { doctor } from "./commands/doctor.js";
 import { egressProxy } from "./commands/egress-proxy.js";
 import { evaluate } from "./commands/evaluate.js";
@@ -13,8 +13,6 @@ import { reap } from "./commands/reap.js";
 import { review } from "./commands/review.js";
 import { serve } from "./commands/serve.js";
 import { color } from "./ui.js";
-
-const VERSION = "0.1.0";
 
 function usage(): number {
   console.log(`
@@ -55,7 +53,7 @@ async function main(): Promise<number> {
     case "version":
     case "--version":
     case "-v":
-      console.log(VERSION);
+      console.log(MAESTRO_VERSION);
       return 0;
     case "egress-proxy":
       return egressProxy(rest);

@@ -1,4 +1,4 @@
-import type { EnvSpec } from "@maestro/playbook";
+import type { EgressEnforcement, EnvSpec } from "@maestro/playbook";
 import type { Toolchain } from "./toolchain.js";
 
 export interface ExecResult {
@@ -36,6 +36,14 @@ export interface PreparedEnvironment {
   allowedCommands: string[];
   setupResults: ExecResult[];
   egressLog: { host: string; allowed: boolean; count: number }[];
+  /**
+   * Whether that log records a control or a convention.
+   *
+   * The review comment says which. An "advisory" run means a tool ignoring HTTP_PROXY
+   * could have reached anything, so reporting the two identically would overstate what
+   * the allowlist proved.
+   */
+  egressEnforcement?: EgressEnforcement;
   /** True when the dependency layer was reused instead of reinstalled. */
   cacheHit?: boolean;
 }
@@ -57,7 +65,13 @@ export interface SandboxDriver {
   /** Each agent gets its own container off the shared snapshot, so concurrent agents
    *  running builds cannot clobber one another's working directory. */
   analyze(env: PreparedEnvironment, opts: { agentId?: string; spec: EnvSpec }): Promise<Sandbox>;
-  /** Destroys containers, volumes AND snapshot images — images are where disk goes. */
+  /**
+   * Destroys containers, volumes, snapshot images AND review networks.
+   *
+   * Images are where disk goes; networks are what enforcement added. A driver that
+   * sweeps only containers leaves both behind, and a review that dies between creating
+   * its isolated network and tearing it down leaks one every time.
+   */
   reap(opts?: {
     reviewId?: string;
     olderThanMs?: number;
@@ -72,5 +86,5 @@ export interface SandboxDriver {
      * would have reintroduced the bug, and the conformance suite could not have known.
      */
     protectReviewIds?: string[];
-  }): Promise<{ containers: number; images: number }>;
+  }): Promise<{ containers: number; images: number; networks: number }>;
 }

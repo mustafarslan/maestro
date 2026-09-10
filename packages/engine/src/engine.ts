@@ -195,6 +195,8 @@ export interface ReviewOutcome {
   cacheHit?: boolean;
   allowedCommands: string[];
   egressLog: { host: string; allowed: boolean; count: number }[];
+  /** Which posture produced that log; the review comment must not report the two alike. */
+  egressEnforcement?: "enforced" | "advisory";
   error?: string;
 }
 
@@ -265,6 +267,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
     cacheHit: prepared?.cacheHit,
     allowedCommands: prepared?.allowedCommands ?? [],
     egressLog: prepared?.egressLog ?? [],
+    egressEnforcement: prepared?.egressEnforcement,
     ...over,
   });
 

@@ -300,14 +300,50 @@ are swept by the startup reap unless they belong to a review still inside that w
 
 ## Sandbox networking
 
-> **The prepare-phase allowlist is advisory.** The container is pointed at the proxy with
-> `HTTP_PROXY` and friends, which well-behaved tools honour; nothing forces traffic through it,
-> and a direct socket from inside the container reaches the internet. `analyze` is different —
-> it runs with `--network none` and that is enforced. See finding 143 in `docs/STATUS.md` for
-> what this does and does not expose, and why the fix is not a one-line change.
+Only the `prepare` phase has any network, and only through an allowlist proxy. `analyze` runs
+with `--network none` regardless of everything below.
 
-Only the `prepare` phase has any network, and only through an allowlist proxy. `analyze` runs with
-`--network none` regardless of everything below.
+There are two postures, chosen with `egressEnforcement` in the playbook's `envSpec`.
+
+### `enforced` (the default)
+
+The review gets its own `--internal` Docker network. A container on one has no default route
+and no external DNS — a direct socket to `1.1.1.1` and an external lookup both fail. The proxy
+runs in a container of its own, attached to that network *and* to the normal bridge, so it is
+the only path out and the allowlist decides what crosses it. That is enforcement rather than
+convention: a tool that ignores `HTTP_PROXY` does not reach the internet, it reaches nothing.
+
+The proxy container is a stock Debian image with this same binary copied in, running
+`maestro egress-proxy`. Nothing is built, published or pulled from a registry beyond the base
+image. Maestro needs a **Linux build of itself for Docker's architecture**, found in this order:
+
+1. `MAESTRO_PROXY_BINARY` — an explicit path, which always wins
+2. `dist/maestro-linux-<arch>` — from `pnpm run build:proxy-binary` in a checkout
+3. this process, when it is already a Linux binary of the right architecture (a Linux host, or Compose)
+4. `~/.maestro/cache/maestro-linux-<arch>-<version>`, downloaded from the release once and cached
+
+Releases are cut with `scripts/release.sh` (`--publish` to create the GitHub release). Bun
+cross-compiles all four targets from one machine, so this needs no CI; the script refuses to
+overwrite an existing tag, because the proxy caches by version and a cache filled from replaced
+bytes would never refresh.
+
+If none of those work, the prepare phase **fails** and names all three ways to fix it. It does
+not fall back to advisory: a supply-chain control that stops enforcing without saying so is
+worse than one that was never claimed, because everything downstream still reports that the
+allowlist applied.
+
+| Variable | When you need it |
+| --- | --- |
+| `MAESTRO_PROXY_BINARY` | Path to a Linux build of `maestro` for the proxy container. Set this on a host that cannot cross-compile and cannot reach the release |
+| `MAESTRO_PROXY_BASE_IMAGE` | The image the proxy binary is copied into. Defaults to `debian:bookworm-slim`; any glibc base works, musl (Alpine) does not |
+
+### `advisory`
+
+The older posture, and what to set if a host cannot supply a Linux binary. The proxy runs
+inside the daemon and is offered to the sandbox through `HTTP_PROXY` and friends, which
+well-behaved tools honour. Nothing forces traffic through it, and a direct socket from inside
+the container reaches the internet. The review comment says which posture ran, so an advisory
+run is never reported as if it had sealed the phase.
 
 The one question these settings answer is: *how does a sandbox container reach the proxy?*
 

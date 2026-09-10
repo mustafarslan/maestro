@@ -245,7 +245,7 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
       // "analyzed with no network access" is the strong, enforced claim — `--network none`
       // on the analyze container, asserted in the integration suite by dialling an address
       // rather than by reading a flag. It is deliberately stated separately from anything
-      // about the prepare phase, whose allowlist is advisory.
+      // about the prepare phase, whose posture is reported below and can be either.
       `${outcome.allowedCommands.length} allowlisted command(s), analyzed with no network access.` +
       // Whether the dependency layer was reused. It is the difference between a review
       // that starts in seconds and one that reinstalls the world, and it was measured
@@ -256,18 +256,27 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
         : outcome.cacheHit
           ? " Dependency cache hit."
           : " Dependency cache miss — dependencies were installed from scratch.") +
+      // What the prepare phase's allowlist is worth depends entirely on which posture ran,
+      // and the two must not read alike.
+      //
+      // Enforced: the phase ran on an --internal network whose only route out is the
+      // proxy container, so the log IS the traffic. Advisory: the proxy is offered through
+      // HTTP_PROXY and honoured by convention, so anything ignoring those variables never
+      // appears in the log at all — "blocked N attempts" would then invite the reader to
+      // conclude the phase was sealed, which is a stronger claim than the evidence
+      // supports. The parenthetical is the difference, and it is the whole point.
+      //
+      // Attempts, not distinct hosts. The log is aggregated per host, so counting entries
+      // would have quietly turned "3000 blocked attempts" into "1" the moment aggregation
+      // landed — a number that got smaller because the storage changed.
       (blocked.length
-        ? // "blocked" is true; "the only attempts" would not be. The proxy sees what the
-          // installing tools chose to send through it — they are pointed at it with
-          // HTTP_PROXY and honour it by convention — and traffic that ignores those
-          // variables never appears in this log at all. Saying "blocked N attempts" and
-          // stopping there invites the reader to conclude the phase was sealed, which is a
-          // stronger claim than the evidence supports.
-          // Attempts, not distinct hosts. The log is aggregated per host now, so counting
-          // entries would have quietly turned "3000 blocked attempts" into "1" the moment
-          // aggregation landed — a number that got smaller because the storage changed.
-          ` ${blocked.reduce((n, e) => n + e.count, 0)} egress attempt(s) to ${blocked.length} host(s) blocked by the allowlist proxy during dependency install (proxy-routed traffic only).`
-        : ""),
+        ? ` ${blocked.reduce((n, e) => n + e.count, 0)} egress attempt(s) to ${blocked.length} host(s) blocked by the allowlist proxy during dependency install` +
+          (outcome.egressEnforcement === "enforced"
+            ? " (the only route out of the prepare network)."
+            : " (proxy-routed traffic only).")
+        : outcome.egressEnforcement === "enforced"
+          ? " Dependency install ran on an isolated network whose only route out was the allowlist proxy."
+          : ""),
     "",
     `**Total** — ${outcome.costKnown === false ? "cost unpriced for this provider" : `${outcome.costCents.toFixed(2)}¢`}` +
       ` across ${agentRows.filter((n) => n.state === "done").length} agent(s) in ${(outcome.durationMs / 1000).toFixed(1)}s.`,

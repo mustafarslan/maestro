@@ -20,9 +20,9 @@ ${color.bold("maestro reap")} [options]
   --all            also remove cached dependency layers (maestro/deps:*)
   --force          include containers belonging to reviews still in flight
 
-Removes Maestro's containers and snapshot images. Cached dependency layers are kept
-by default because they are what makes later reviews fast, and containers belonging to
-reviews that are still running are left alone unless --force is given.
+Removes Maestro's containers, snapshot images and review networks. Cached dependency
+layers are kept because they are what makes later reviews fast, and containers
+belonging to reviews that are still running are left alone unless --force is given.
 `);
     return 0;
   }
@@ -71,13 +71,13 @@ reviews that are still running are left alone unless --force is given.
       ),
     );
   }
-  const sweptAnything = swept.containers > 0 || swept.images > 0;
+  const sweptAnything = swept.containers > 0 || swept.images > 0 || swept.networks > 0;
   console.log(
     checkLine(
       sweptAnything ? "ok" : "info",
       "swept",
       sweptAnything
-        ? `${swept.containers} container(s), ${swept.images} image(s)`
+        ? `${swept.containers} container(s), ${swept.images} image(s), ${swept.networks} network(s)`
         : "nothing to sweep",
     ),
   );

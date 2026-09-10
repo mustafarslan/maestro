@@ -328,6 +328,9 @@ and is far better than inventing filler.`,
       setup: ["auto"],
       allowedCommands: ["auto"],
       egressAllowlist: ["registry.npmjs.org", "pypi.org", "proxy.golang.org", "crates.io"],
+      // The allowlist above is a control rather than a request: prepare runs on an
+      // --internal network whose only route out is the proxy container.
+      egressEnforcement: "enforced",
       secrets: "none",
       trust: "trusted",
       writableWorkdir: false,

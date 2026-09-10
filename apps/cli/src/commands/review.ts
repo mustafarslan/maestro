@@ -203,6 +203,15 @@ export async function review(argv: string[]): Promise<number> {
       }
       for (const a of playbook.agents) a.enabled = onlyAgents.includes(a.id);
     }
+    // `--agent` works by disabling the others on the pinned copy, so the router reports
+    // them as "disabled in playbook" — mechanically true and misleading to read, because
+    // the playbook on disk disables nothing. Someone debugging with this flag would go
+    // looking for a switch that is not there.
+    const filteredOut = new Set(
+      onlyAgents.length
+        ? playbookRecord.doc.agents.filter((a) => !onlyAgents.includes(a.id)).map((a) => a.id)
+        : [],
+    );
     for (const a of playbook.agents) {
       if (providerOverride) a.model.providerId = providerOverride;
       if (modelOverride) a.model.model = modelOverride;
@@ -336,6 +345,14 @@ export async function review(argv: string[]): Promise<number> {
         signal: interrupt.signal,
       },
     );
+
+    // Said before it is recorded as well as before it is rendered, so the stored trace
+    // and the printed report agree about why an agent did not run.
+    for (const node of outcome.nodes) {
+      if (node.state === "skipped" && node.agentId && filteredOut.has(node.agentId)) {
+        node.error = "not selected by --agent";
+      }
+    }
 
     new ReviewRecorder(db).recordOutcome(reviewId, outcome);
     reviews.setState(reviewId, outcome.state, {
