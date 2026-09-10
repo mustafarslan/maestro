@@ -23,7 +23,7 @@ export interface EgressProxy {
   /** Address the proxy is bound to; containers must reach it at this host. */
   host: string;
   /**
-   *每 host asked for, allowed or not, with how many times — attached to the review.
+   * Every host asked for, allowed or not, with how many times — attached to the review.
    *
    * Aggregated rather than appended. One entry per request meant a dependency install
    * produced thousands: `npm ci` fetches nearly everything from one host, so a project

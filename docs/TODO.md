@@ -81,16 +81,40 @@ binary into a Debian container gives `exec /maestro: exec format error`, which i
 hindsight and would have been discovered late. So a macOS host needs a Linux image carrying the
 proxy: either the published Maestro image, or a small purpose-built one.
 
+**Three further things were measured, and two of the three open questions closed themselves.**
+
+*The Maestro image cannot be slimmed, so "reuse it" is not the cheap option it looks like.* The
+daemon shells out to `git` for the host-side clone (`integrations/src/github.ts`) and to the
+`docker` CLI (`sandbox/src/docker.ts`), so its runtime stage needs `git`, `docker.io`, `curl` and
+`ca-certificates` on top of `debian:bookworm-slim` — around 450MB against the binary's 63MB. It
+can never be distroless. A proxy needs none of those: it does CONNECT tunnelling and plain HTTP
+forwarding, terminating no TLS, so it does not even need `ca-certificates`.
+
+*No Maestro image is published, and Compose builds locally (`build: .`).* Binaries are published —
+`v0.1.0` carries all four, `install.sh` is real — but an image for the proxy would be the first
+container artifact this project has ever pushed, and CI is disabled. That cost falls on
+"reuse the Maestro image" and "publish a small one" equally.
+
+*So neither needs to be paid.* Measured on this machine: `docker create` from a stock
+`debian:bookworm-slim`, `docker cp` the published `maestro-linux-arm64` in, and it runs —
+`maestro --version` prints `0.1.0`. No custom image, no registry, no signing. Only *where the
+Linux binary comes from* is platform-specific, and it is three cases with one code path: on a
+Linux host the installed binary already is one, in Compose it is at `/usr/local/bin/maestro`, and
+on macOS it is the release asset `install.sh` already depends on, downloaded once and cached.
+
 **What is left to decide**, and why it wants a person rather than a default:
 
-- Publish a small proxy image, or reuse the Maestro image? The second adds no new artifact to
-  build and sign; the first is a few megabytes instead of several hundred, and a sandbox host
-  pulling the whole Maestro image to run a proxy is a strange shape.
-- One proxy container per review is simplest and matches the existing lifecycle, but it doubles
-  container count per review, which interacts with the scheduler's concurrency limits and with
-  how the reaper counts strays.
-- The host path on Linux could bind-mount the binary and skip the image entirely — worth having,
-  or is one code path better than two that differ by platform?
+- Is the `docker cp` shape acceptable, or is a published proxy image worth the first
+  container-publishing pipeline for the explicitness of a pinned digest? A regulated production
+  environment may want the digest; the `docker cp` shape is materially simpler everywhere else.
+- One proxy container per review matches the existing lifecycle — `environments` already models
+  it, `classifyContainers` already keys on `maestro.review`, the proxy consumes no agent slot,
+  and prepare is short-lived and often a cache hit. The genuinely new leak class is the
+  `--internal` network per review, which the finalizer, the reaper and `doctor` know nothing
+  about: label it and sweep it in all three.
+- If enforcement is configured and the proxy cannot start, prepare must fail with the reason.
+  Never fall back to advisory — a supply-chain control that silently downgrades is worse than
+  one that was never claimed.
 
 Everything else is mechanical: create the network beside the environment, start the proxy, point
 `HTTP_PROXY` at it by container name, and tear both down in the finalizer that already exists.
