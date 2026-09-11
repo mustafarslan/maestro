@@ -21,7 +21,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160), **gate nodes with per-node failure policy** (162) and **rewiring with live port checking** (163), **template variables with the untrusted ones fenced** (164, 165) and **the golden-set findings delta under the persona slot** (168) — every item the phase names | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
-| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the eight committed fixtures across three runs (findings 232, 234); no long-run acceptance history exists yet |
+| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the twenty committed fixtures, one complete control arm, with the run-to-run noise floor measured (findings 232, 239); no long-run acceptance history exists yet |
 | 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
 
 What that leaves, in order of how much it would tell us:
@@ -3863,6 +3863,26 @@ committed, traced the new config field through three packages, and found that no
     What it cost to learn that: two aborted attempts, one of which ran against a binary four
     hours stale (the open-list entry above), and thirty-four scores of an outage that
     `saveScore` now refuses (finding 237).
+
+    **To finish it**, once the provider answers again. Rebuild the binary first — `dist/maestro`
+    does not follow a package rebuild, and both aborted attempts were that. Then, from a
+    checkout with `scripts/seed-golden-set.sh` already run:
+
+    ```
+    maestro eval run --playbook pv_d42e24cdeccc48f6898de641          # guided, all twenty
+    for f in checkout-cache-merge comment-marker-author numeric-flag-nan \
+             reaction-poll-ratelimit reaper-double-count retry-nonhttp \
+             scheduler-fairness secrets-atomic-write spa-immutable-cache \
+             thinking-budget-google; do
+      maestro eval run --playbook pv_e160b0e63df746f784ca78a5 --fixture "$f"   # control, run 2
+    done
+    ```
+
+    `--playbook` means neither arm activates anything, so the default playbook is left alone
+    and a run that dies halfway leaves no wrong pointer behind. A quota death mid-arm now
+    leaves nothing to clean up either: `saveScore` refuses a fixture whose agent never
+    completed, so the arm simply comes back short and the shortfall is the list to re-run.
+    Arm membership is by time, so run each arm in one sitting where the quota allows it.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion
