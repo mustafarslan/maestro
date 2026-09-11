@@ -1342,6 +1342,18 @@ Its first version reported two failures that were not real: it matched `pnpm` in
 pnpm then refuses to remove"), not just in commands. Scoped to fenced code blocks now. A checker
 that cries wolf gets ignored, which is the same end state as not having one.
 
+And then it checked nothing at all, for the whole life of this file. Fenced blocks were found by
+pairing markers with `matchAll(/```[\s\S]*?```/g)`, which is only correct if every marker in the
+document opens or closes a block. The table above shows a literal fence as inline code inside a
+cell, so this file's marker count was **odd**: no complete pair matched, the search ran against an
+empty string, and every `pnpm` reference in it was checked against nothing. Adding one real code
+block made the count even, paired that inline marker with the new block's opener, and swept the
+paragraphs in between as though they were code — four false failures, which is how five months of
+silence got noticed. Fences are found by line now: a delimiter is a line whose only content is the
+marker and an optional info string, which an inline `` ``` `` in a sentence cannot become by being
+counted. Verified by putting a broken reference inside a real block in this file and watching it
+fail, and mutation-checked by restoring the pairing.
+
 ### The Compose healthcheck, and proving it catches a hang
 
 142. **A running daemon and a wedged one looked identical.** Compose had no healthcheck, so

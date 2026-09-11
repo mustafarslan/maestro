@@ -74,14 +74,41 @@ for (const cmd of mentioned) {
     fail(`docs mention 'maestro ${cmd}', which the CLI does not accept`);
 }
 
+/**
+ * The contents of every fenced code block, found by line rather than by regex pair.
+ *
+ * `matchAll(/```[\s\S]*?```/g)` pairs the first marker with the second, the third with the
+ * fourth, and so on — which is correct only if every marker in the file opens or closes a
+ * block. `docs/STATUS.md` shows a literal fence as inline code inside a table row, so its
+ * marker count was ODD: the regex found no complete pair, returned nothing, and this check
+ * silently examined an empty string for the entire life of the file. Adding one real code
+ * block to that document made the count even again and paired the inline marker with the
+ * new block's opener, sweeping every paragraph in between as though it were code — which is
+ * how the silence was finally noticed, four false failures at a time.
+ *
+ * A fence delimiter is a line whose only content is the marker plus an optional info
+ * string. An inline `` ``` `` inside a sentence or a table cell is not one, and cannot
+ * become one by being counted.
+ */
+function fencedBlocks(text) {
+  const out = [];
+  let inside = false;
+  for (const line of text.split("\n")) {
+    if (/^\s*```[\w-]*\s*$/.test(line)) {
+      inside = !inside;
+      continue;
+    }
+    if (inside) out.push(line);
+  }
+  return out.join("\n");
+}
+
 // 4. Every pnpm script mentioned exists in package.json.
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 for (const doc of docs) {
   // Only inside fenced code blocks: prose mentions pnpm in sentences ("which pnpm then
   // refuses"), and matching those made the check report failures that were not real.
-  const fenced = [...readFileSync(doc, "utf8").matchAll(/```[\s\S]*?```/g)]
-    .map((f) => f[0])
-    .join("\n");
+  const fenced = fencedBlocks(readFileSync(doc, "utf8"));
   for (const m of fenced.matchAll(/pnpm (?:run )?([\w:]+)/g)) {
     const s = m[1];
     if (["install", "add", "exec", "dlx", "i"].includes(s)) continue;

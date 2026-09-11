@@ -19,6 +19,22 @@ const root = join(import.meta.dirname, "../../..");
 const dir = join(root, "docs/golden-set");
 const seed = readFileSync(join(root, "scripts/seed-golden-set.sh"), "utf8");
 
+/**
+ * Whether this tree has a git history at all.
+ *
+ * Not every legitimate checkout does: the clean-checkout gate copies tracked files through
+ * tar and a released tarball carries no repository either. Checked once rather than caught
+ * per assertion, so "no history here" and "this commit is gone" stay different answers.
+ */
+const hasGitHistory = (() => {
+  try {
+    execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 function shaFor(name: string): string {
   const row = seed.split("\n").find((l) => l.trim().startsWith(`"${name} `));
   expect(row, `no row for ${name} in scripts/seed-golden-set.sh`).toBeDefined();
@@ -66,6 +82,13 @@ describe("the committed golden set", () => {
   it.each(keys)("$file has a provenance row naming a commit in this history", ({ fixture }) => {
     const sha = shaFor(fixture.name);
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    // Reachability only where there is a history to reach into. `scripts/gate.sh` builds
+    // its checkout by piping `git ls-files` through tar, so it has every tracked file and
+    // no `.git` at all — and a released tarball is the same shape. This assertion read as
+    // a defect in twenty fixtures there, which is the opposite of what it is for. The
+    // format and the row's existence are still checked unconditionally; those are what a
+    // key without provenance actually violates.
+    if (!hasGitHistory) return;
     expect(() =>
       execFileSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root, stdio: "ignore" }),
     ).not.toThrow();
