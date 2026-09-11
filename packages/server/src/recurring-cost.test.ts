@@ -37,7 +37,9 @@ const RECURRING = [
   },
   {
     what: "reaction sweep",
-    bound: "capped at 50 GitHub requests per sweep, 6 sweeps an hour — 300/hour maximum",
+    bound:
+      "capped at 50 comment reads plus 20 pull requests of at most 3 GraphQL pages each per " +
+      "sweep, 6 sweeps an hour — 660/hour maximum",
   },
   {
     what: "pull request poller",
@@ -68,6 +70,16 @@ describe("recurring work states its cost", () => {
       /LIMIT \?/,
     );
     expect(feedback).toMatch(/maxComments/);
+    // The resolved-thread half rides the same sweep, so it needs its own two bounds: how
+    // many pull requests one pass touches, and how far it walks each one's thread list.
+    expect(
+      feedback,
+      "the resolved-thread sweep must cap how many pull requests it asks about",
+    ).toMatch(/maxPullRequests/);
+    expect(
+      read("packages/integrations/src/github.ts"),
+      "walking review threads must stop at a page cap, not at the end of the list",
+    ).toMatch(/maxPages/);
 
     const daemon = read("packages/server/src/daemon.ts");
     expect(

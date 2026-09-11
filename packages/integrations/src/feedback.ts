@@ -25,21 +25,23 @@ export interface IngestResult {
   dismissed: number;
 }
 
+/** Returns whether a row was written, so a caller counting them can count truthfully. */
 function recordFeedback(
   db: SqlDatabase,
   findingId: string,
   signal: FeedbackSignal,
   actor?: string,
-): void {
+): boolean {
   // One signal per (finding, kind, actor): re-ingesting must not inflate the counts.
   const existing = db
     .prepare("SELECT id FROM feedback WHERE finding_id=? AND signal=? AND COALESCE(actor,'')=?")
     .get<{ id: string }>(findingId, signal, actor ?? "");
-  if (existing) return;
+  if (existing) return false;
 
   db.prepare(
     "INSERT INTO feedback (id, finding_id, signal, actor, created_at) VALUES (?,?,?,?,?)",
   ).run(newId("fb"), findingId, signal, actor ?? null, new Date().toISOString());
+  return true;
 }
 
 /**
@@ -198,6 +200,79 @@ export function signalFromReaction(content: string): FeedbackSignal | null {
  * Scoped to comments from reviews finished recently, because a reaction arriving a month
  * later is not worth a request per daemon tick for ever.
  */
+/**
+ * Records `resolved` for findings whose review thread a maintainer has marked resolved.
+ *
+ * The middle of this file's own three signals, and the one nothing has ever written. It
+ * could not be written before finding 235: every finding carried the summary comment's id,
+ * so there was no thread that belonged to a finding. Now that inline ids are attributed per
+ * finding, "somebody ticked this thread" is a verdict on that finding alone.
+ *
+ * One GraphQL request per pull request rather than per comment, capped, and run inside the
+ * reaction sweep rather than on a timer of its own — the two questions are asked of the same
+ * pull requests in the same window, and a second interval would be a second thing to bound.
+ *
+ * Only inline comments have threads. A summary comment is an issue comment and cannot be
+ * resolved, so those findings are not asked about.
+ */
+export async function pollResolvedThreads(
+  db: SqlDatabase,
+  client: {
+    resolvedThreadCommentIds(
+      pr: { owner: string; repo: string; number: number },
+      opts?: { maxPages?: number },
+    ): Promise<{ commentId: number; by?: string }[]>;
+  },
+  opts: { sinceMs?: number; maxPullRequests?: number } = {},
+): Promise<{ pullRequests: number; recorded: number }> {
+  const since = new Date(Date.now() - (opts.sinceMs ?? 14 * 24 * 60 * 60_000)).toISOString();
+
+  const prs = db
+    .prepare(
+      `SELECT DISTINCT r.pr_number AS number, repos.owner AS owner, repos.name AS repo,
+              MAX(COALESCE(r.finished_at, r.created_at)) AS at
+         FROM findings f
+         JOIN reviews r ON r.id = f.review_id
+         JOIN repos ON repos.id = r.repo_id
+        WHERE f.posted_comment_id IS NOT NULL
+          AND f.posted_comment_kind = 'inline'
+          AND COALESCE(r.finished_at, r.created_at) >= ?
+        GROUP BY repos.owner, repos.name, r.pr_number
+        ORDER BY at DESC
+        LIMIT ?`,
+    )
+    .all<{ number: number; owner: string; repo: string }>(since, opts.maxPullRequests ?? 20);
+
+  let recorded = 0;
+  for (const pr of prs) {
+    try {
+      const resolved = await client.resolvedThreadCommentIds(pr);
+      for (const { commentId, by } of resolved) {
+        const findings = db
+          .prepare(
+            `SELECT f.id FROM findings f
+               JOIN reviews r ON r.id = f.review_id
+               JOIN repos ON repos.id = r.repo_id
+              WHERE f.posted_comment_id = ? AND f.posted_comment_kind = 'inline'
+                AND repos.owner = ? AND repos.name = ? AND r.pr_number = ?`,
+          )
+          .all<{ id: string }>(String(commentId), pr.owner, pr.repo, pr.number);
+        // Counted only when a row is actually written. A thread stays resolved for ever,
+        // so every sweep for a fortnight sees it again; reporting those as newly recorded
+        // would make a log line that people read as activity say the same thing 2000 times.
+        for (const f of findings) if (recordFeedback(db, f.id, "resolved", by)) recorded++;
+      }
+    } catch (err) {
+      // One unreachable pull request must not stop the sweep, exactly as for reactions.
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err), pr: pr.number },
+        "resolved-thread sweep failed for one pull request",
+      );
+    }
+  }
+  return { pullRequests: prs.length, recorded };
+}
+
 export async function pollCommentReactions(
   db: SqlDatabase,
   client: {

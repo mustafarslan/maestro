@@ -263,6 +263,26 @@ if (cm) {
     return `comment ${sample.id}: ${rx.length} reaction(s)${seen ? ` — ${seen}` : ""}`;
   });
 
+  // Thread resolution, which REST does not expose at all — `isResolved` exists only on
+  // GraphQL's `PullRequestReviewThread`. This is the `resolved` feedback signal: declared
+  // in `FeedbackSignal`, honoured by `settleStatus`, and written by nothing until now.
+  await check("resolvedThreadCommentIds", async () => {
+    const resolved = await client.resolvedThreadCommentIds(cref);
+    for (const r of resolved) {
+      if (typeof r.commentId !== "number")
+        throw new Error(`a resolved thread came back with commentId ${typeof r.commentId}`);
+    }
+    // The ids must be ones the REST listing also knows, or nothing can be matched to a
+    // finding: `posted_comment_id` is written from REST and read back against these.
+    const known = new Set((allComments ?? []).map((c) => c.id));
+    const stray = resolved.filter((r) => !known.has(r.commentId));
+    if (stray.length)
+      throw new Error(`${stray.length} resolved thread id(s) are not REST comment ids`);
+    return resolved.length
+      ? `${resolved.length} resolved — ${resolved.map((r) => `${r.commentId} by ${r.by ?? "?"}`).join(", ")}`
+      : "none resolved on this pull request";
+  });
+
   // The control, as in the Linear check: without it "no error" cannot be told apart from
   // "the request was never made". A review id that cannot exist has to be refused.
   await check("control: a review id that does not exist is refused", async () => {

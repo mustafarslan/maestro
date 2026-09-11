@@ -25,6 +25,7 @@ import {
   newPollState,
   type PullRequestRef,
   pollCommentReactions,
+  pollResolvedThreads,
   type ReviewTrigger,
   reviewPullRequest,
   verifySignature,
@@ -610,6 +611,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (result.recorded) {
       logger.info(result, "reactions ingested");
       notify("feedback", result);
+    }
+    // Asked of the same pull requests in the same window, so it rides this sweep rather
+    // than starting a second interval — one more thing to bound, for the same question.
+    const resolved = await pollResolvedThreads(db, client);
+    if (resolved.recorded) {
+      logger.info(resolved, "resolved threads ingested");
+      notify("feedback", resolved);
     }
   };
   const reactionTimer = setInterval(() => {

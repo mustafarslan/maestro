@@ -3883,6 +3883,38 @@ committed, traced the new config field through three packages, and found that no
     leaves nothing to clean up either: `saveScore` refuses a fixture whose agent never
     completed, so the arm simply comes back short and the shortfall is the list to re-run.
     Arm membership is by time, so run each arm in one sitting where the quota allows it.
+
+240. **The `resolved` feedback signal existed everywhere except where it is written.** It is
+    named in `FeedbackSignal`, described in `feedback.ts`'s own header as the middle of three
+    signals in increasing order of reliability, and honoured by `settleStatus` — where a
+    `resolved` row accepts a finding exactly as a thumbs-up does. Nothing had ever written
+    one, so that branch had never executed outside a test.
+
+    It could not have been written before finding 235. Every finding carried the summary
+    comment's id, so there was no thread that belonged to a particular finding; "somebody
+    ticked a thread" could only ever have been a verdict on the whole review, which is the
+    thing finding 233 exists to stop.
+
+    REST does not expose thread resolution at all — `isResolved` lives only on GraphQL's
+    `PullRequestReviewThread` — so this is the first GraphQL call in the project. Checked
+    against the real API before being built against, which is the habit finding 235 bought:
+    on `nodejs/node#65945` one thread is resolved, its opening comment is `3971223354`, and
+    `resolvedBy.login` is `panva`. The live check now asserts that those ids are ones the
+    REST listing also returns, because that identity is the whole mechanism — the id is
+    written from REST when the comment is posted and read back from GraphQL here.
+
+    It rides the reaction sweep rather than starting a timer of its own: the same pull
+    requests, the same window, the same question, and a second interval would be a second
+    thing to bound. Bounded twice — 20 pull requests a sweep, 3 pages of threads each — and
+    `recurring-cost.test.ts` now fails if either cap disappears, which is what that test is
+    for. The stated hourly cost goes from 300 to 660.
+
+    `recordFeedback` returns whether it wrote a row, and the sweep counts only writes. A
+    thread stays resolved for ever, so a fortnight of ten-minute sweeps sees the same one
+    about two thousand times; counting sightings would make a log line people read as
+    activity repeat itself that many times over one tick of real news. Mutation-checked,
+    along with the inline-only filter — a summary comment is an issue comment and has no
+    thread, so asking about one is a request that can only ever answer nothing.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion

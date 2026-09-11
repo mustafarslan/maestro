@@ -6,6 +6,7 @@ import {
   ingestReaction,
   lineChangedByAgent,
   pollCommentReactions,
+  pollResolvedThreads,
   recordDismissal,
   signalFromReaction,
 } from "./feedback.js";
@@ -510,5 +511,72 @@ describe("a dismissal typed by a person", () => {
 
   it("says so rather than reporting a dismissal that landed nowhere", () => {
     expect(recordDismissal(db, "fd_does_not_exist")).toBe(false);
+  });
+});
+
+/**
+ * The signal this file has always described and never gathered.
+ *
+ * `resolved` is the middle of the three signals named at the top of `feedback.ts` and
+ * `settleStatus` has honoured it since it was written; nothing has ever written one. It
+ * could not: before finding 235 every finding carried the summary comment's id, so no
+ * thread belonged to a finding. Now one does.
+ */
+describe("a maintainer ticking a thread is a verdict on the finding in it", () => {
+  const inline = (id: string) =>
+    db.prepare("UPDATE findings SET posted_comment_kind='inline' WHERE id=?").run(id);
+
+  it("records a resolution against the finding whose thread it is", async () => {
+    const a = seedFinding("security", 501);
+    const b = seedFinding("architecture", 502);
+    inline(a);
+    inline(b);
+
+    const res = await pollResolvedThreads(db, {
+      resolvedThreadCommentIds: async () => [{ commentId: 501, by: "maintainer" }],
+    });
+
+    expect(res).toEqual({ pullRequests: 1, recorded: 1 });
+    const rows = db
+      .prepare("SELECT finding_id, signal, actor FROM feedback")
+      .all<{ finding_id: string; signal: string; actor: string }>();
+    expect(rows).toEqual([{ finding_id: a, signal: "resolved", actor: "maintainer" }]);
+    // The other finding's thread was not ticked, and nothing says it was.
+    expect(rows.find((r) => r.finding_id === b)).toBeUndefined();
+  });
+
+  it("counts only what it wrote, however often the sweep sees the same thread", async () => {
+    // A thread stays resolved for ever, so every sweep for a fortnight sees it again.
+    // Counting sightings would make a log line people read as activity repeat itself
+    // hundreds of times over one tick of real news.
+    inline(seedFinding("security", 503));
+    const client = { resolvedThreadCommentIds: async () => [{ commentId: 503, by: "m" }] };
+
+    expect((await pollResolvedThreads(db, client)).recorded).toBe(1);
+    expect((await pollResolvedThreads(db, client)).recorded).toBe(0);
+    expect(db.prepare("SELECT count(*) n FROM feedback").get<{ n: number }>()?.n).toBe(1);
+  });
+
+  it("does not ask about summary comments, which have no thread to resolve", async () => {
+    seedFinding("security", 504); // left as the default 'summary' kind
+    let asked = 0;
+    const res = await pollResolvedThreads(db, {
+      resolvedThreadCommentIds: async () => {
+        asked++;
+        return [];
+      },
+    });
+    expect(asked).toBe(0);
+    expect(res.pullRequests).toBe(0);
+  });
+
+  it("keeps sweeping when one pull request cannot be read", async () => {
+    inline(seedFinding("security", 505));
+    const res = await pollResolvedThreads(db, {
+      resolvedThreadCommentIds: async () => {
+        throw new Error("410 Gone");
+      },
+    });
+    expect(res).toEqual({ pullRequests: 1, recorded: 0 });
   });
 });

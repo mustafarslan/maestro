@@ -639,7 +639,7 @@ The daemon's recurring work and what each costs:
 | --- | --- |
 | job queue poll | local SQLite only |
 | lease heartbeat | local SQLite only, per in-flight review |
-| reaction sweep, every 10 min | at most 50 GitHub requests per sweep — 300/hour |
+| reaction sweep, every 10 min | at most 50 comment reads, plus 20 pull requests of at most 3 GraphQL pages each — 660/hour |
 | pull request poller, every `--poll-interval` | one GitHub request per repository per tick |
 
 `recurring-cost.test.ts` fails if a new recurring job appears without a line here, because the two

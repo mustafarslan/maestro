@@ -83,6 +83,39 @@ export interface AppInstallation {
   repositorySelection: "all" | "selected";
 }
 
+/** Only what `resolvedThreadCommentIds` reads. `resolvedBy` is null on an open thread. */
+interface ReviewThreadPage {
+  repository?: {
+    pullRequest?: {
+      reviewThreads?: {
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        nodes?: ({
+          isResolved?: boolean;
+          resolvedBy?: { login?: string } | null;
+          comments?: { nodes?: ({ databaseId?: number } | null)[] };
+        } | null)[];
+      };
+    };
+  };
+}
+
+const REVIEW_THREADS_QUERY = `
+  query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            isResolved
+            resolvedBy { login }
+            comments(first: 1) { nodes { databaseId } }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export class GitHubClient {
   private readonly octokit: Octokit;
   /** Which credential this client holds. The two have different permissions. */
@@ -652,6 +685,53 @@ export class GitHubClient {
       per_page: 100,
     });
     return data.map((r) => ({ content: r.content, login: r.user?.login ?? undefined }));
+  }
+
+  /**
+   * The review threads a maintainer has marked resolved, by the id of the comment that
+   * opened each one.
+   *
+   * "A maintainer acted on it" is the middle of this project's three feedback signals and
+   * the only one that was never gathered: `resolved` has been in `FeedbackSignal` and
+   * honoured by `settleStatus` since the feature was written, and nothing has ever written
+   * it. It could not be — until finding 235 every finding shared the summary comment's id,
+   * so there was no thread to attribute a resolution to.
+   *
+   * GraphQL because REST does not expose thread resolution at all: `isResolved` exists
+   * only on `PullRequestReviewThread`. The comment that opens a thread is Maestro's own,
+   * which is why one comment is enough to identify it.
+   *
+   * Paginated with a page cap rather than to exhaustion. This runs inside the reaction
+   * sweep, every ten minutes, for ever, and an unbounded walk over a pull request with
+   * hundreds of threads is the rate-limit shape this project has already been bitten by
+   * twice. Threads come back oldest-first and Maestro's are among the newest on any pull
+   * request it reviews, so the cap costs a resolution on a very long thread list and
+   * nothing else.
+   */
+  async resolvedThreadCommentIds(
+    pr: PullRequestRef,
+    opts: { maxPages?: number } = {},
+  ): Promise<{ commentId: number; by?: string }[]> {
+    const out: { commentId: number; by?: string }[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < (opts.maxPages ?? 3); page++) {
+      const data: ReviewThreadPage = await this.octokit.graphql(REVIEW_THREADS_QUERY, {
+        owner: pr.owner,
+        repo: pr.repo,
+        number: pr.number,
+        cursor,
+      });
+      const threads = data?.repository?.pullRequest?.reviewThreads;
+      if (!threads) break;
+      for (const t of threads.nodes ?? []) {
+        const id = t?.comments?.nodes?.[0]?.databaseId;
+        if (!t?.isResolved || typeof id !== "number") continue;
+        out.push({ commentId: id, by: t.resolvedBy?.login ?? undefined });
+      }
+      if (!threads.pageInfo?.hasNextPage) break;
+      cursor = threads.pageInfo.endCursor ?? null;
+    }
+    return out;
   }
 
   async updateComment(pr: PullRequestRef, commentId: number, body: string): Promise<void> {
