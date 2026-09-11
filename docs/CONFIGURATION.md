@@ -221,6 +221,7 @@ maestro eval add my-case ./repo --split train    # a case a change may be tuned 
 maestro eval add my-case ./repo                  # held out; this is the default
 maestro eval run --split val                     # score only the held-out half
 maestro eval run --playbook pv_1234...           # score a version without activating it
+maestro eval gate pv_old pv_new                  # would the candidate replace the current playbook?
 maestro eval report                              # both halves, reported separately
 ```
 
@@ -234,6 +235,18 @@ committed under `docs/golden-set/`, and the script generates one fixture reposit
 and installs the keys into `$MAESTRO_HOME/fixtures` with their targets resolved. The numbers
 in `docs/STATUS.md` are measured against those twenty, so they are re-runnable rather than
 taken on trust.
+
+`maestro eval gate <from> <candidate>` answers the question a refinement loop has to ask:
+does the candidate hold up on the **held-out** half? It compares per-fixture recall between
+two explicitly named versions — never inferred, because two runs of one configuration share
+a version id — counts only fixtures both sides actually ran, and requires a net gain of two
+fixtures. That margin is measured, not chosen: one control configuration run twice moved
+recall on one fixture in ten, so a candidate that moves one is indistinguishable from the
+same playbook run again. It prints the decision and takes no action; exit status is 0 for
+accept and 1 for reject.
+
+Recall decides, not precision. The same pair of runs moved precision on four fixtures in
+ten, because that number counts every finding the answer key says nothing about.
 
 A fixture's split is decided by a rule, not per fixture: the parity of its fix commit's last
 hex digit. Choosing one at a time is choosing which half a result lands in. A fixture

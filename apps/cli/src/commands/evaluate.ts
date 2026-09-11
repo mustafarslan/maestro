@@ -8,6 +8,7 @@ import {
   type EvalSplit,
   type Fixture,
   fixturesDir,
+  gateCandidate,
   loadFixtures,
   loadScores,
   ReviewRecorder,
@@ -56,6 +57,8 @@ ${color.bold("maestro eval")} <subcommand>
     --split train|val        run only that half
     --playbook <version-id>  score that version instead of the active default
   report                     precision and recall per playbook version and split
+  gate <from-version> <candidate-version>
+                             would the candidate replace the current playbook?
 
 A fixture is a repository state with a known answer key. Scoring against it turns
 "this persona feels better" into a number, and groups results by playbook version so
@@ -186,6 +189,30 @@ export async function evaluate(argv: string[]): Promise<number> {
     }
     console.log();
     return 0;
+  }
+
+  if (sub === "gate") {
+    // The decision, printed rather than taken. A refiner that publishes and activates on
+    // its own is a bigger step than a gate, and the gate is the part that was missing:
+    // `compareVersions` and the train/val split have existed for a while with nothing
+    // reading them and acting.
+    const [from, candidate] = [argv[1], argv[2]];
+    if (!from || !candidate) return usage();
+    const scores = loadScores(scoresDir(maestroHome()));
+    if (!scores.length) {
+      console.error("no scores yet - run 'maestro eval run' for both versions first");
+      return 1;
+    }
+    const d = gateCandidate(scores, from, candidate);
+    console.log(color.bold(`\n${d.accepted ? "would accept" : "would reject"}: ${d.reason}\n`));
+    for (const [label, list] of [
+      ["gained", d.gained],
+      ["lost", d.lost],
+    ] as const) {
+      if (list.length) console.log(`  ${label}: ${list.join(", ")}`);
+    }
+    console.log(color.dim(`  unchanged: ${d.unchanged.length} of ${d.compared} held out\n`));
+    return d.accepted ? 0 : 1;
   }
 
   if (sub !== "run") return usage();

@@ -14,6 +14,8 @@ export interface PlaybookVersionRecord {
   schemaVersion: number;
   doc: PlaybookDocument;
   notes?: string;
+  /** Who published it: `undefined` for a human, a marker such as `"refiner"` otherwise. */
+  createdBy?: string;
   createdAt: string;
 }
 
@@ -24,6 +26,7 @@ interface VersionRow {
   schema_version: number;
   document: string;
   notes: string | null;
+  created_by: string | null;
   created_at: string;
 }
 
@@ -52,6 +55,10 @@ function hydrate(row: VersionRow): PlaybookVersionRecord {
     schemaVersion: row.schema_version,
     doc: parsed.success ? parsed.data : raw,
     notes: row.notes ?? undefined,
+    // Read as well as written. A column populated at one end and surfaced at neither is
+    // the defect this repository has recorded most often, and `created_by` sat unwritten
+    // through every migration until a refiner had something to say with it.
+    createdBy: row.created_by ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -64,9 +71,19 @@ function hydrate(row: VersionRow): PlaybookVersionRecord {
 export class PlaybookStore {
   constructor(private readonly db: SqlDatabase) {}
 
+  /**
+   * `createdBy` marks where a version came from.
+   *
+   * The column has been in the schema since the first migration and nothing has ever
+   * written it, so every version looks hand-made. That matters now that a refiner can
+   * publish one: "who wrote this playbook" is the difference between a human decision and
+   * a candidate that passed a validation gate, and nobody reading a review's pinned
+   * version afterwards could tell them apart. Left null for a human publish, which is
+   * what every existing row already means.
+   */
   publish(
     doc: PlaybookDocument,
-    opts: { name?: string; notes?: string; activate?: boolean } = {},
+    opts: { name?: string; notes?: string; activate?: boolean; createdBy?: string } = {},
   ): PlaybookVersionRecord {
     const validated = parsePlaybook(doc);
     const name = opts.name ?? validated.name;
@@ -90,8 +107,8 @@ export class PlaybookStore {
 
       this.db
         .prepare(
-          `INSERT INTO playbook_versions (id, playbook_id, version, schema_version, document, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO playbook_versions (id, playbook_id, version, schema_version, document, notes, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           versionId,
@@ -100,6 +117,7 @@ export class PlaybookStore {
           PLAYBOOK_SCHEMA_VERSION,
           JSON.stringify(validated),
           opts.notes ?? null,
+          opts.createdBy ?? null,
           now,
         );
 
@@ -116,6 +134,7 @@ export class PlaybookStore {
         schemaVersion: PLAYBOOK_SCHEMA_VERSION,
         doc: validated,
         notes: opts.notes,
+        createdBy: opts.createdBy,
         createdAt: now,
       };
     });

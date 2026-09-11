@@ -3927,6 +3927,61 @@ committed, traced the new config field through three packages, and found that no
     activity repeat itself that many times over one tick of real news. Mutation-checked,
     along with the inline-only filter — a summary comment is an issue comment and has no
     thread, so asking about one is a request that can only ever answer nothing.
+
+241. **The validation gate exists; nothing has been refined.** The plan for arXiv:2609.09153
+    set one condition on this — grow the golden set first, because a gate whose decisions turn
+    on one fixture is a coin toss with a procedure. Finding 232 grew it to twenty and finding
+    239 measured what it can see, so the condition is met and this is the half of the paper's
+    self-evolution loop that does not need a provider.
+
+    `gateCandidate` takes the scores, two **explicit** version ids, and answers whether the
+    candidate may replace the current playbook. Explicit because `fixtureDeltas` infers its
+    baseline as the most recent *other* version, which is right for a report and wrong here:
+    two runs of one configuration live under one version id, so an inferred baseline compares
+    an arm against itself. That mistake cost a night of measurement this week, and a gate is
+    the last place to repeat it.
+
+    Three decisions in it, each measured rather than chosen:
+
+    - **Net two fixtures.** Finding 239 ran one control configuration twice and recall moved
+      on one of the ten fixtures both runs scored, so a candidate that moves one is
+      indistinguishable from the same playbook run again. Two is the smallest margin clearing
+      a measured ±1. The paper calls its own decisions "a search trace rather than
+      significance tests" at twenty per split; this is ten, and the margin is what keeps that
+      honest.
+    - **Recall, not precision.** The same pair of runs moved precision on four of ten, because
+      that quantity counts every finding the answer key says nothing about. Gating on it would
+      gate on how talkative the model felt.
+    - **Only fixtures both sides ran.** A provider dying halfway through the candidate's arm
+      leaves it short, and counting the missing ones either way would let a half-finished run
+      read as progress. This week produced that exact data twice.
+
+    Rejection memory is the paper's third contribution and the cheapest: `refinement_attempts`
+    keeps every attempt with the edit as proposed and the gate's own account of why, and
+    `priorRejections` hands back the failures so a later round is not told to discover them
+    again — four of the paper's ten rounds committed nothing. Ordered by timestamp **and
+    rowid**, because several edits proposed in one round are written inside the same
+    millisecond and a promise of "newest first" that holds only when the writes are slow is
+    not one. A test found that, not a review.
+
+    `playbook_versions.created_by` is written at last. It has been in the schema since the
+    first migration with nothing populating it — five rows, zero values — and it is what
+    separates a human decision from a candidate that passed a gate. Surfaced on
+    `PlaybookVersionRecord` as well as written, because a column populated at one end and read
+    at neither is this file's most-recorded defect and writing it alone would have been the
+    same mistake facing the other way.
+
+    **What is deliberately absent: the proposer.** Generating a candidate edit is a model
+    call, and building it against a stub would be a claim about something untested. So the
+    loop is: gate built and tested against synthetic scores, nothing proposed, nothing
+    refined, no playbook derived. `maestro eval gate pv_e160… pv_d42e…` on the two arms this
+    week produced answers "nothing to compare: no held-out fixture was scored under both",
+    which is correct — the guided arm never ran.
+
+    Five mutations checked, and the first three passes of that were worthless: a backtick
+    inside a SQL comment closed the template literal, so the module did not parse and vitest
+    reported "no tests" — which `grep "Tests "` read as a pass. A mutation check that does not
+    confirm the tests ran is not a mutation check.
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion
