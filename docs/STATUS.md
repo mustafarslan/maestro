@@ -3567,8 +3567,10 @@ the server never sends fails it, and removing `live` from the server's response 
     > gives as the reason to localize. So the table below measures the stacking variant while
     > the text around it claims localization, and the halved step count in particular is a
     > result about a mechanism that has since changed. It is left standing rather than
-    > deleted, because a re-measurement on twenty fixtures is the thing that replaces it and
-    > it has not finished.
+    > deleted, because a re-measurement on twenty fixtures is the thing that replaces it.
+    > That re-measurement is finding 239: its control arm completed and its guided arm did
+    > not, because the provider quota ran out. So nothing yet replaces the table below, and
+    > nothing here should be read as if something did.
 
     **Three runs of the eight fixtures: the same control configuration twice, then the graph.**
     Running the control twice was the whole difference between a result and an anecdote.
@@ -3815,6 +3817,52 @@ committed, traced the new config field through three packages, and found that no
     "`trimHistory` never drops injected user messages, so guidance accumulates unboundedly" —
     and the implementation shipped without it, which makes this a note about the value of
     re-reading a plan after the work rather than only before it.
+
+239. **The golden set at twenty: a full control arm, a measured noise floor, and no guided
+    arm yet.** Finding 232 grew the set to twenty fixtures with the split decided by a rule
+    (finding 238 fixed the mechanism the earlier experiment had actually measured), and the
+    re-measurement was three arms: the control twice, then the procedural graph.
+
+    **One control arm completed.** All twenty fixtures, architecture agent alone on
+    `deepseek-v4-pro:cloud`, real Docker, playbook v4:
+
+    | | fixtures | recall, pooled | recall, per-fixture mean | caught / expected |
+    | --- | --- | --- | --- | --- |
+    | held out (val) | 10 | 90.9% | 95.0% | 10 of 11 |
+    | training (train) | 10 | 90.0% | 90.0% | 9 of 10 |
+
+    Two numbers for recall because `compareVersions` averages the per-fixture ratios and a
+    pooled count does not, and reporting one under the other's name is how a measurement
+    stops being checkable against `maestro eval report`. The second column is what the CLI
+    prints. Missed: `severity-sql-order` still finds the alphabetic `ORDER BY` and not the
+    carried-findings cap, and `reaper-double-count` still hits the 900-second ceiling with
+    nothing submitted.
+
+    **The noise floor, which is the point of running the control twice.** Ten fixtures were
+    scored in both control runs. **Recall moved on one of the ten**; on four more only the
+    share of reported findings that were on the answer key moved, and that quantity counts
+    every finding the key says nothing about, so it shifts whenever the agent mentions one
+    extra thing. Against the eight-fixture set, where four of eight moved, this is the
+    difference between a set a validation gate could run on and one it could not — for
+    recall. Not for precision, which at this size is still a coin.
+
+    Every hit was read rather than counted. Each names the defect: "`raw += c` corrupts
+    multi-byte UTF-8 characters split across chunk boundaries", "Removing the author check
+    lets any commenter hijack Maestro's comment", "Removing the LIMIT removes the only cap on
+    per-tick API requests". None rested on a generic word matching in the right file.
+
+    **The guided arm has not run.** The account's Ollama Cloud quota ran out mid-measurement,
+    first as a session limit that reset after forty minutes and then as a weekly one. There is
+    no second provider on this machine: no local models are pulled and no hosted key is
+    configured. So the question this phase exists to answer — does localized procedural
+    guidance change what a review finds, measured against a noise floor that can now see an
+    effect of about one fixture in ten — is answered by nothing here. Finding 234's numbers
+    do not stand in for it: they were measured on eight fixtures and on the stacking variant
+    finding 238 corrected.
+
+    What it cost to learn that: two aborted attempts, one of which ran against a binary four
+    hours stale (the open-list entry above), and thirty-four scores of an outage that
+    `saveScore` now refuses (finding 237).
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion
