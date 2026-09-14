@@ -268,10 +268,92 @@ describe("the evidence a round is shown", () => {
         versionId: "pv_x",
       });
       expect(evidence.fixtures[0]?.trajectory).toBe('security: read_file {"path":"src/a.ts"}');
+      // This task row carries no output, so how the run ended is unknown, and it says so.
+      expect(evidence.fixtures[0]?.runs).toEqual([
+        "security ended, how is not recorded, after 1 step(s)",
+      ]);
       const prompt = proposerPrompt(doc, evidence, [], fixtures);
       expect(prompt.user).toMatch(
         new RegExp(`<untrusted-content source="trajectory-${train.name}"`),
       );
+    });
+
+    it("says how a missed run ended, and what triage held back, so a miss is not misread", () => {
+      const pb = new PlaybookStore(db).publish(defaultPlaybook());
+      const reviewId = new ReviewStore(db).create({
+        repoOwner: "eval",
+        repoName: "x",
+        prNumber: 0,
+        headSha: "h",
+        playbookVersionId: pb.id,
+      }).id;
+      const taskId = newId("tk");
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO tasks (id, review_id, node_id, kind, agent_id, state, attempt, output_json, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+      ).run(
+        taskId,
+        reviewId,
+        "n-architecture",
+        "agent",
+        "architecture",
+        "done",
+        1,
+        JSON.stringify({ findings: 1, stopKind: "deadline" }),
+        now,
+      );
+      const turn = (seq: number, step: number, role: string, content: unknown) =>
+        db
+          .prepare(
+            `INSERT INTO trajectory_turns (id, review_id, task_id, seq, step, role, content_json, created_at)
+             VALUES (?,?,?,?,?,?,?,?)`,
+          )
+          .run(newId("turn"), reviewId, taskId, seq, step, role, JSON.stringify(content), now);
+      turn(0, 24, "assistant", { text: "", toolCalls: [{ id: "1", name: "grep", input: {} }] });
+      turn(1, 24, "user", {
+        text: "You have 5 steps left and are almost out of time.",
+        synthetic: true,
+      });
+      turn(2, 25, "assistant", { text: "", toolCalls: [] });
+      db.prepare(
+        `INSERT INTO findings (id, review_id, task_id, agent_id, file, line_start, category, severity,
+                               confidence, title, body, agreement_count, status, suppressed_reason, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ).run(
+        newId("fd"),
+        reviewId,
+        taskId,
+        "architecture",
+        "src/reap.ts",
+        10,
+        "double-count",
+        "low",
+        0.5,
+        "Removing dedup double-counts multi-tag images",
+        "b",
+        1,
+        "suppressed",
+        "confidence 0.50 below threshold 0.6",
+        now,
+      );
+
+      const train = fixtures.find((f) => splitOf(f) === "train") as Fixture;
+      const evidence = buildEvidence({
+        db,
+        scores: [scoreFor(train, { reviewId })],
+        fixtures: [train],
+        versionId: "pv_x",
+      });
+      expect(evidence.fixtures[0]?.runs).toEqual([
+        "architecture ran out of time before submitting after 26 step(s), having been told it was almost out of time",
+      ]);
+      const prompt = proposerPrompt(doc, evidence, [], fixtures);
+      expect(prompt.user).toContain("  run: architecture ran out of time before submitting");
+      expect(prompt.user).toContain(`<untrusted-content source="suppressed-${train.name}"`);
+      expect(prompt.user).toContain("Removing dedup double-counts multi-tag images");
+      expect(prompt.user).toContain("confidence 0.50 below threshold 0.6");
+      expect(prompt.leaks).toEqual([]);
     });
   });
 });

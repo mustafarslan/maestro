@@ -178,6 +178,16 @@ export interface FixtureEvidence {
   falsePositives: string[];
   /** What the agents did on that run, reduced to tool calls. Repository-derived. */
   trajectory?: string;
+  /**
+   * How each agent's run ended, in Maestro's words: submitted, out of time, out of steps. Without
+   * it a miss reads as a gap in what an agent knows when it was a run that never finished.
+   */
+  runs?: string[];
+  /**
+   * Findings triage held back on that run, with the confidence and reason. A right answer said
+   * too quietly is a different lesson from no answer. Model-written, so repository-derived.
+   */
+  suppressed?: string[];
 }
 
 export interface RefinementEvidence {
@@ -220,6 +230,63 @@ function trajectorySummary(
   return text.length > maxChars ? `${text.slice(0, maxChars)}\n... (truncated)` : text;
 }
 
+const STOP_WORDS: Record<string, string> = {
+  "terminal-tool": "submitted its findings",
+  deadline: "ran out of time before submitting",
+  "max-steps": "ran out of steps before submitting",
+  "cost-cap": "hit its cost cap before submitting",
+  "token-cap": "hit its token cap before submitting",
+  "context-limit": "outgrew the context window before submitting",
+  "no-tool-calls": "answered in prose and never submitted",
+  aborted: "was cancelled",
+};
+
+const MAX_SUPPRESSED = 5;
+
+/** How each agent's run on a review ended, and what it was warned about on the way. */
+function runSummaries(db: SqlDatabase, reviewId: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT t.agent_id AS agent, t.output_json AS output,
+              (SELECT MAX(step) FROM trajectory_turns tt WHERE tt.task_id = t.id) AS steps,
+              (SELECT COUNT(*) FROM trajectory_turns tt WHERE tt.task_id = t.id
+                 AND tt.role = 'user' AND tt.content_json LIKE '%almost out of time%') AS warned
+         FROM tasks t WHERE t.review_id = ? AND t.kind = 'agent' AND t.state != 'skipped'
+        ORDER BY t.agent_id`,
+    )
+    .all<{ agent: string | null; output: string | null; steps: number | null; warned: number }>(
+      reviewId,
+    );
+  return rows.map((r) => {
+    let stopKind: string | undefined;
+    try {
+      stopKind = (JSON.parse(r.output ?? "{}") as { stopKind?: string }).stopKind;
+    } catch {
+      stopKind = undefined;
+    }
+    const how = stopKind
+      ? (STOP_WORDS[stopKind] ?? `stopped with '${stopKind}'`)
+      : "ended, how is not recorded,";
+    const steps = r.steps === null ? "" : ` after ${r.steps + 1} step(s)`;
+    return `${r.agent ?? "agent"} ${how}${steps}${r.warned ? ", having been told it was almost out of time" : ""}`;
+  });
+}
+
+/** Findings triage held back on a review, most confident first. */
+function suppressedSummaries(db: SqlDatabase, reviewId: string): string[] {
+  return db
+    .prepare(
+      `SELECT agent_id AS agent, title, confidence, suppressed_reason AS reason
+         FROM findings WHERE review_id = ? AND status = 'suppressed'
+        ORDER BY confidence DESC LIMIT ?`,
+    )
+    .all<{ agent: string; title: string; confidence: number; reason: string | null }>(
+      reviewId,
+      MAX_SUPPRESSED,
+    )
+    .map((f) => `${f.agent}: "${f.title}" (${f.reason ?? `confidence ${f.confidence}`})`);
+}
+
 /**
  * What one refinement round is shown: the training fixtures this version was scored on, what
  * it missed or wrongly reported, and what its agents did on those runs.
@@ -244,19 +311,19 @@ export function buildEvidence(opts: {
           splitOf(s) === "train",
       );
     if (!score) continue;
+    const wrong = score.misses.length > 0 || score.falsePositives.length > 0;
+    const traced = opts.db && score.reviewId && wrong ? { db: opts.db, id: score.reviewId } : null;
+    const suppressed = traced ? suppressedSummaries(traced.db, traced.id) : [];
     fixtures.push({
       name: fixture.name,
       recall: score.recall,
       misses: score.misses,
       falsePositives: score.falsePositives.map((f) => f.title),
-      trajectory:
-        opts.db && score.reviewId && (score.misses.length || score.falsePositives.length)
-          ? trajectorySummary(
-              opts.db,
-              score.reviewId,
-              opts.maxTrajectoryChars ?? MAX_TRAJECTORY_CHARS,
-            )
-          : undefined,
+      trajectory: traced
+        ? trajectorySummary(traced.db, traced.id, opts.maxTrajectoryChars ?? MAX_TRAJECTORY_CHARS)
+        : undefined,
+      ...(traced ? { runs: runSummaries(traced.db, traced.id) } : {}),
+      ...(suppressed.length ? { suppressed } : {}),
     });
   }
   return { versionId: opts.versionId, fixtures };
@@ -319,7 +386,18 @@ export function proposerPrompt(
       `- ${f.name}: recall ${f.recall === undefined ? "n/a" : `${Math.round(f.recall * 100)}%`}`,
       ...f.misses.map((m) => `  missed: ${m}`),
       ...f.falsePositives.map((t) => `  wrongly reported: ${t}`),
+      // Maestro's own account of how the run ended, so a miss that never finished is not read as
+      // a miss that did not know.
+      ...(f.runs ?? []).map((r) => `  run: ${r}`),
     );
+    if (f.suppressed?.length) {
+      parts.push(
+        wrapUntrusted(
+          `suppressed-${f.name}`,
+          `Found but held back by triage, so not scored:\n${f.suppressed.join("\n")}`,
+        ),
+      );
+    }
     if (f.trajectory) parts.push(wrapUntrusted(`trajectory-${f.name}`, f.trajectory));
   }
 

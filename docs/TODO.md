@@ -139,7 +139,7 @@ open:** whether a net-two margin over ten held-out fixtures lets
 through anything but large changes — if nothing ever clears it, that is the golden set asking to
 grow, not the margin asking to shrink.
 
-**Before step 6: the evidence says what was missed, not why.** The first live proposal (247) read
+~~**Before step 6: the evidence says what was missed, not why.**~~ **Done — 250.** The first live proposal (247) read
 `reaper-double-count`'s miss as a knowledge gap and wrote the answer key's own words into the
 architecture persona. That miss was a run that ran out of time, and later a right finding suppressed
 by `minConfidence`. `buildEvidence` should carry each missed fixture's `stopKind` and any

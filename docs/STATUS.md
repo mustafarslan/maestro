@@ -4249,3 +4249,18 @@ harness exists to measure per playbook version.
     Ollama bound to `127.0.0.1` on the host is still reachable from the container through
     `host.docker.internal` on Docker Desktop; on a Linux host it would need `OLLAMA_HOST=0.0.0.0` on
     the Ollama side, which has not been tried.
+
+250. **A proposer is told how a missed run ended, and what triage held back.** The first live
+    proposal (247) read `reaper-double-count`'s miss as a gap in what the agent knew and wrote the
+    answer key's words into a persona, when the run had hit its deadline and a later one had found
+    the defect and been suppressed. The evidence could not have said otherwise: it carried what was
+    missed and the tool calls, not the ending. Now each missed or wrongly-reporting training fixture
+    carries, per agent, how the run ended — submitted, out of time, out of steps, cost cap, context
+    window, prose — its step count, and whether it was told it was almost out of time, all read from
+    `tasks.output_json` and the recorded synthetic turns (245); and up to five findings triage
+    suppressed on that run, most confident first, with the reason. The ending is Maestro's own text
+    and goes into the prompt plainly; the suppressed titles are model-written from repository
+    content and go inside an untrusted-content fence. A task row with no recorded ending says so
+    rather than guessing. Tested on a run that hit its deadline after 26 steps having been warned,
+    with a finding suppressed at 0.50; with the change reverted, that test fails.
+
