@@ -22,7 +22,7 @@ The gap between those two columns is the honest summary of this project's state.
 | 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency, and `scripts/load-check.mjs` runs 30 reviews across 3 repositories against real Docker, with `scripts/crash-recovery-check.mjs` for kill and restart |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
 | 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the twenty committed fixtures: two control arms and a guided arm, with the run-to-run noise floor measured (findings 232, 239, 244); no long-run acceptance history exists yet |
-| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
+| 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally, and a full model review has been driven through it against host Ollama (249) |
 
 What that leaves, in order of how much it would tell us:
 
@@ -144,7 +144,7 @@ written and never checked, and a module nothing imports. Four findings, four rea
 | **Four-platform release build** | All four targets cross-compiled locally with `bun --target`, and both Linux ELF binaries *run* in real Linux containers (`--version`, `init`, `playbook nodes`, `doctor`) — not merely compiled |
 | Webhook authentication is mandatory | The daemon refuses to start a listener without a secret, asserted in tests, rather than warning and starting anyway |
 | **Webhook deliveries** | A correctly HMAC-signed GitHub `pull_request` payload returns 202 and enqueues one job with the right dedupe key; a tampered body and an unsigned body both return 401; redelivery of the same event still leaves exactly one job |
-| **The Compose deployment, end to end** | `docker compose up` starts, both listeners bind and are reachable through their published ports, the admin API is 200 with a token and 401 without, a correctly signed webhook returns 202 and is logged as a review trigger while an unsigned one returns 401, and a sibling container on the sandbox network reaches Maestro **by hostname** — the exact path a sandbox uses to reach the egress proxy. Only driving a full model review through it is outstanding, which needs provider credentials |
+| **The Compose deployment, end to end** | `docker compose up` starts, both listeners bind and are reachable through their published ports, the admin API is 200 with a token and 401 without, a correctly signed webhook returns 202 and is logged as a review trigger while an unsigned one returns 401, and a sibling container on the sandbox network reaches Maestro **by hostname** — the exact path a sandbox uses to reach the egress proxy. A full model review through it has since run too, against host Ollama (249) |
 | **Linear's query against the live schema** | Linear validates GraphQL *before* authentication: a query naming a nonexistent field returns 400 `GRAPHQL_VALIDATION_FAILED` unauthenticated, while Maestro's query returns 401. Every field it selects therefore provably exists on the live `Issue` type. Its real 401 and 400 bodies are now the test fixtures |
 | Compose sandbox-to-proxy routing | A sibling container on a shared network reaches another by name (HTTP 200) and a container off that network cannot (unreachable). An integration test then drives the real driver: the prepare sandbox joins a named network, and the analyze container still has no default route |
 | **Extended thinking on the wire** | Asserted against the actual request body: `{type:"adaptive"}` for models that reject an explicit budget, `budget_tokens` only for models that require it |
@@ -224,9 +224,10 @@ insecure neighbour, so it was not pattern-matching on "API route".
   keeps it checkable before each release. The three foreign-architecture binaries are verified
   as correct artifacts, not as working programs; that needs those machines.
 
-- **No full model review has been driven through Compose.** Everything up to that point is
-  verified against a running deployment, including the sandbox-network path the egress proxy
-  depends on. What has not run is a review that actually calls a model, which needs credentials.
+- ~~**No full model review has been driven through Compose.**~~ **Done (249).** `docker compose up`
+  with `OLLAMA_HOST` pointed at the host, a fixture repository copied into the volume, and
+  `maestro review` inside the container: the security agent ran on `glm-5.3:cloud` through host
+  Ollama in a sibling sandbox and reported the planted defect.
 - ~~**The load scenario is simulated, not run against real Docker.**~~ **Done.**
   `scripts/load-check.mjs` runs 30 reviews across 3 repositories against real Docker, and
   `scripts/crash-recovery-check.mjs` covers the kill-and-restart half; see the open list above.
@@ -4228,3 +4229,23 @@ harness exists to measure per playbook version.
 
 
 
+
+
+249. **A full model review through Docker Compose, and the variable that stopped it three times.**
+    `docker compose up` under its own project name with throwaway secrets, `OLLAMA_HOST` set to
+    `http://host.docker.internal:11434`, the `comment-marker-author` fixture copied into the volume,
+    and `maestro review --agent security` inside the container. The agent ran on `glm-5.3:cloud`
+    through the host's Ollama, in a sandbox the container created as a sibling through the socket,
+    and in 122.6 seconds reported the planted defect — `findPreviousComment` matching on the marker
+    alone, so a commenter can capture Maestro's comment — at high severity and 90% confidence.
+    Everything was removed afterwards: containers, volume, image, and the Ollama it started.
+
+    Two things had to change first. **Compose did not pass `OLLAMA_HOST` at all**: its environment
+    names each variable, and without it the provider is seeded with `localhost:11434`, which inside
+    the container is the container. It is listed now. And **exporting it breaks Ollama on the host**,
+    which is what made the first three attempts fail before they reached the container: Ollama reads
+    `OLLAMA_HOST` as the address it listens on, and started from a shell with that value it exits
+    with `lookup host.docker.internal: no such host`. The compose file now says to put it in `.env`.
+    Ollama bound to `127.0.0.1` on the host is still reachable from the container through
+    `host.docker.internal` on Docker Desktop; on a Linux host it would need `OLLAMA_HOST=0.0.0.0` on
+    the Ollama side, which has not been tried.

@@ -16,6 +16,14 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_GENERATIVE_AI_API_KEY: ${GOOGLE_GENERATIVE_AI_API_KEY:-}
+      # Ollama on the host, for local or Ollama Cloud models without a hosted key. Inside the
+      # container `localhost` is the container, so point it at the host:
+      # OLLAMA_HOST=http://host.docker.internal:11434. Read when the database is first created,
+      # so set it before the first `docker compose up`. Put it in a `.env` file beside this one
+      # rather than exporting it in your shell: Ollama reads the same variable as the address it
+      # listens on, and on the host `host.docker.internal` does not resolve, so an Ollama started
+      # from that shell fails with "lookup host.docker.internal: no such host".
+      OLLAMA_HOST: ${OLLAMA_HOST:-}
       # Linear, optional: lets the product agent check the diff against the issue's
       # acceptance criteria instead of only the author's own PR description.
       LINEAR_API_KEY: ${LINEAR_API_KEY:-}
