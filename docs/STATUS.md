@@ -4206,6 +4206,25 @@ harness exists to measure per playbook version.
     not have said so, because it carries what was missed and not how the run ended. That is the next
     thing to build before a live round (`docs/TODO.md`).
 
+248. **The deadline warning ends lost runs, not missed findings.** `reaper-double-count` three more
+    times on the current build, control playbook, `deepseek-v4-pro:cloud`, one at a time:
+
+    | run | warned | submitted at | findings | recall |
+    | --- | --- | --- | --- | --- |
+    | 1 | yes | step 21, 963 s | one, confidence 0.30, suppressed | 0% |
+    | 2 | yes | step 17, 801 s | none | 0% |
+    | 3 | yes | step 18, 777 s | none | 0% |
+
+    With 245's recorded run, four of four warned runs reached `submit_findings` — the outcome the
+    warning exists for, where five runs before it had ended at the deadline with nothing — and four
+    of four scored zero: two findings of the right defect rated below `minConfidence`, two empty
+    lists. The warning's own text says fewer well-supported findings are expected and an empty list
+    is valid, and a hurried agent appears to take it at its word. Observational, one fixture, no
+    control arm for the wording; what it rules out is reading 245's one earlier pass as the fix
+    raising recall. The wording test it calls for is in `docs/TODO.md`. Thermal pressure stayed
+    nominal throughout.
+
+
 
 
 

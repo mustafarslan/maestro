@@ -171,11 +171,13 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
 
 ## Other
 
-- **Does the wrap-up warning lower the confidence an agent reports?** On `reaper-double-count`
-  (`docs/STATUS.md` 245) a warned agent submitted the right defect at 0.50 and triage suppressed it
-  under `minConfidence` 0.6; an unwarned run of the same defect reported 0.65. One pair is not an
-  effect. Measuring it wants the fixture run several times with the current wording and with a
-  sentence asking the agent to keep each confidence its honest estimate, compared on recall.
+- **The wrap-up warning's wording.** Four warned runs of `reaper-double-count` (`docs/STATUS.md` 245,
+  248) all submitted in time and all scored zero: two findings at 0.50 and 0.30, suppressed under
+  `minConfidence` 0.6, and two empty lists. The warning says "reporting fewer, well-supported
+  findings is the expected outcome; an empty list is valid", which may be exactly what it gets.
+  A wording test — that text against one asking the agent to report what it has at its honest
+  confidence — wants about ten runs per arm on this fixture to clear run-to-run noise; three
+  would only say "inconclusive".
 
 - ~~**A live hosted-provider call has never been made.**~~ Done: the conformance suite passes
   against `glm-5.3:cloud`, `deepseek-v4-pro:cloud` and `kimi-k3:cloud` — completion, tool call,
