@@ -144,8 +144,8 @@ grow, not the margin asking to shrink.
 Built (`docs/STATUS.md` 242): scoring, battery 2.2, the active profile, the triage agent, the
 review state on GitHub, the Profiles tab, recorded dispositions. Left, each with its reason:
 
-- **A live triage agent run.** Every model reply in its tests is scripted. The first real run
-  waits for a provider; until then the rules' fallback is what any profiled review would use.
+- ~~**A live triage agent run.**~~ Done 2026-09-14 on `glm-5.3:cloud`: `comment-marker-author`
+  reviewed as a conservative profile, the agent's answer used, the finding blocked and reworded.
 - **A live review-state check.** `scripts/live-github-check.mjs --write-review-state` requests
   changes on a real pull request and dismisses the block. A submitted review cannot be deleted, so
   it runs on the user's word, against a pull request they choose. Run it under GitHub App auth

@@ -4062,6 +4062,15 @@ committed, traced the new config field through three packages, and found that no
     block in the same process. Migration 005 had been applied to a real database in an earlier
     form; it is frozen as applied and the later columns are 006.
 
+    **Live on a real model.** `maestro review` of the `comment-marker-author` fixture, security agent
+    only, as a profile imported from the conservative answer sheet, with `triage.model` on
+    `glm-5.3:cloud`: the specialist found the missing author check, the triage agent answered in
+    84 seconds, its answer was used, and the comment requested changes in two sentences. The
+    `gpt-oss` models the default playbook fell back to could not have done it — they are reasoning
+    models that spent `maestro llm test`'s 64- and 256-token budgets thinking and returned no text
+    and no tool call — so every fallback is now `glm-5.3:cloud`, and the conformance suite gives a
+    reasoning model 1024 tokens before calling it unusable.
+
 243. **The refinement proposer, up to the model call.** Steps 0–4 of the plan in `docs/TODO.md`.
     A score now carries the review that produced it, so a training miss can be traced to what the
     agents did. `proposer.ts` holds the rest: an allowlist of fields a candidate may change

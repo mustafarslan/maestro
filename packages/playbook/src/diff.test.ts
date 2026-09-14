@@ -29,10 +29,10 @@ describe("what changed between two playbook versions", () => {
   it("reports a rebound model", () => {
     const after = clone();
     const agent = after.agents.find((a) => a.id === "security");
-    if (agent) agent.model = { ...agent.model, model: "gpt-oss:120b-cloud" };
+    if (agent) agent.model = { ...agent.model, model: "kimi-k3:cloud" };
 
     const change = diffPlaybooks(clone(), after).find((c) => c.path === "agents.security.model");
-    expect(change?.after).toContain("gpt-oss:120b-cloud");
+    expect(change?.after).toContain("kimi-k3:cloud");
   });
 
   it("reports an agent added and an agent removed", () => {

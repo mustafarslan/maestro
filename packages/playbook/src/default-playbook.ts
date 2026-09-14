@@ -13,13 +13,15 @@ const SONNET = "claude-sonnet-5";
  * configured provider". That was real friction: the shipped default bound every agent to
  * Anthropic, so `maestro review` on a fresh machine did nothing until a key was set.
  *
- * Deliberately different models per agent. Two copies of one model agreeing is one
- * opinion stated twice, and triage's cross-agent agreement boost only means something
- * when the agents can actually disagree.
+ * Every fallback is `glm-5.3:cloud`. The `gpt-oss` models these used to name are reasoning
+ * models that spend a small output budget thinking and return no text and no tool call, which
+ * made the triage agent unusable on them; `glm-5.3:cloud` passes `maestro llm test`. One model
+ * for every agent weakens triage's cross-agent agreement boost — two copies of a model agreeing
+ * is closer to one opinion — which is the trade for a fallback that answers.
  */
 const OLLAMA_STRONG = { providerId: "ollama", model: "glm-5.3:cloud" };
-const OLLAMA_MID = { providerId: "ollama", model: "gpt-oss:120b-cloud" };
-const OLLAMA_LIGHT = { providerId: "ollama", model: "gpt-oss:20b-cloud" };
+const OLLAMA_MID = OLLAMA_STRONG;
+const OLLAMA_LIGHT = OLLAMA_STRONG;
 
 /**
  * The shipped template. These four agents are a DEFAULT, not a hardcoded set — the

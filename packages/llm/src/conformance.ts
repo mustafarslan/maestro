@@ -80,7 +80,9 @@ export async function runConformance(
         model,
         system: "Answer with a single word.",
         messages: [{ role: "user", content: "What is the capital of France?" }],
-        maxTokens: 64,
+        // Room for a reasoning model to think first; a budget it spends entirely on thinking
+        // reads as "no text", which is a verdict on the test, not the model.
+        maxTokens: 1024,
       });
       if (!res.text.trim()) throw new Error("empty response text");
       return res.text.trim().slice(0, 60);
@@ -93,7 +95,7 @@ export async function runConformance(
       system: "You must use the echo tool.",
       messages: [{ role: "user", content: "Echo the word 'maestro'." }],
       tools: [ECHO_TOOL],
-      maxTokens: 256,
+      maxTokens: 1024,
     });
     if (!res.toolCalls.length) throw new Error("model returned no tool calls");
     const call = res.toolCalls[0];
