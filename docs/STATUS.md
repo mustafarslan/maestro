@@ -4102,3 +4102,35 @@ Numbers above are from the self-review of commit `86212d9` (22 files, ~825 lines
 The `product` row is the honest one: the smaller model stops early and submits an empty list rather
 than digging. That is a model-quality difference, not a bug, and it is the kind of thing the eval
 harness exists to measure per playbook version.
+
+244. **Finding 239 finished under the concise contract: the procedural graph changes nothing
+    the noise floor can see.** Three arms over all twenty fixtures on 2026-09-14, architecture agent
+    alone on `deepseek-v4-pro:cloud`, real Docker, one fixture at a time: the control (v4) twice,
+    then the guided playbook (v5).
+
+    | arm | held out (val), full recall | val, per-fixture mean | training, full recall | training mean |
+    | --- | --- | --- | --- | --- |
+    | control, run 1 | 9 of 10 | 90.0% | 9 of 10 | 90.0% |
+    | control, run 2 | 8 of 10 | 80.0% | 9 of 10 | 90.0% |
+    | guided | 8 of 10 | 85.0% | 9 of 10 | 90.0% |
+
+    **The noise floor held.** Between the two control runs recall moved on one fixture of twenty
+    (`unhandled-rejection`, a hit then a miss in which the agent reported something else), the same
+    one-in-ten-to-twenty the earlier pair measured.
+
+    **The guided arm moved one fixture each way.** Against control run 2 it gained
+    `unhandled-rejection` and lost half of `severity-sql-order` (found the alphabetic `ORDER BY`,
+    missed the carried-findings cap, which both control runs caught). `maestro eval gate v4 v5`:
+    *would reject — net +0 on 10 held out, short of the 2-fixture margin*. So the answer to the
+    question this phase exists for is no measurable effect at this set size, not a regression.
+
+    **Missed in every arm:** `reaper-double-count` (26 steps, then the 900-second deadline with
+    nothing submitted — unchanged since 239) and `reaper-no-startup-sweep`, which 239's control
+    caught and all three arms here missed; the agent reports two real but unkeyed `daemon.ts` issues
+    instead. That fixture is the one consistent difference from the pre-contract measurement, and
+    one fixture is inside the floor, so it is noted rather than attributed to the concise contract.
+
+    Precision is not reported: as 239 found, it moves with how many unkeyed things an agent
+    mentions, and a shorter contract changes exactly that. Thermal pressure stayed nominal
+    throughout; the runner paused once for sixty seconds on a load spike from Spotlight.
+
