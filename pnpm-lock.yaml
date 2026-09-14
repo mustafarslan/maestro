@@ -78,6 +78,9 @@ importers:
       '@maestro/playbook':
         specifier: workspace:*
         version: link:../../packages/playbook
+      '@maestro/profile':
+        specifier: workspace:*
+        version: link:../../packages/profile
       '@maestro/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
@@ -126,12 +129,18 @@ importers:
       '@maestro/playbook':
         specifier: workspace:*
         version: link:../playbook
+      '@maestro/profile':
+        specifier: workspace:*
+        version: link:../profile
       '@maestro/sandbox':
         specifier: workspace:*
         version: link:../sandbox
       picomatch:
         specifier: 4.0.4
         version: 4.0.4
+      zod:
+        specifier: ^4.1.5
+        version: 4.5.4
 
   packages/integrations:
     dependencies:
@@ -220,6 +229,18 @@ importers:
         specifier: ^4.1.5
         version: 4.5.4
 
+  packages/profile:
+    dependencies:
+      '@maestro/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@maestro/core':
+        specifier: workspace:*
+        version: link:../core
+      '@maestro/playbook':
+        specifier: workspace:*
+        version: link:../playbook
+
   packages/sandbox:
     dependencies:
       '@maestro/core':
@@ -246,6 +267,9 @@ importers:
       '@maestro/playbook':
         specifier: workspace:*
         version: link:../playbook
+      '@maestro/profile':
+        specifier: workspace:*
+        version: link:../profile
       '@maestro/sandbox':
         specifier: workspace:*
         version: link:../sandbox

@@ -116,6 +116,18 @@ const REVIEW_THREADS_QUERY = `
   }
 `;
 
+/** Marks a review Maestro submitted to set the pull request's state. */
+export const REVIEW_STATE_MARKER = "<!-- maestro-review-state -->";
+
+export interface ReviewStateResult {
+  /** `requested`: a blocking review was submitted. `none`: no block is in place from Maestro. */
+  outcome: "requested" | "refused" | "none";
+  reviewId?: number;
+  /** Maestro's own earlier blocking reviews that were dismissed. */
+  dismissed: number[];
+  reason?: string;
+}
+
 export class GitHubClient {
   private readonly octokit: Octokit;
   /** Which credential this client holds. The two have different permissions. */
@@ -460,6 +472,82 @@ export class GitHubClient {
   }
 
   /**
+   * Makes the pull request's review state the one a developer profile chose.
+   *
+   * Blocking submits a `REQUEST_CHANGES` review carrying a marker. Not blocking lifts a block
+   * Maestro placed earlier — its own `CHANGES_REQUESTED` reviews, by marker AND author, for
+   * the reason `findPreviousComment` gives: the marker alone is text anybody can type, and
+   * dismissing a person's review because they quoted it would be worse than leaving a stale
+   * block. When the author cannot be established nothing is dismissed and the result says so.
+   *
+   * GitHub refuses `REQUEST_CHANGES` on a pull request opened by the posting account (a
+   * personal token reviewing its owner's own PR). That is reported as `refused`, not thrown:
+   * the review comment has already been posted and says what the profile would do.
+   */
+  async submitReviewState(
+    pr: PullRequestContext,
+    state: "REQUEST_CHANGES" | "COMMENT",
+    body: string,
+  ): Promise<ReviewStateResult> {
+    const dismissed: number[] = [];
+    if (state === "REQUEST_CHANGES") {
+      try {
+        const { data } = await this.octokit.rest.pulls.createReview({
+          owner: pr.owner,
+          repo: pr.repo,
+          pull_number: pr.number,
+          commit_id: pr.headSha,
+          event: "REQUEST_CHANGES",
+          body: `${REVIEW_STATE_MARKER}\n${body}`,
+        });
+        // The review names the account that posted it, which an App's token cannot otherwise
+        // learn: remembered here, so this client can lift the block it just placed.
+        if (data.user?.login) this.selfLogin ??= data.user.login;
+        return { outcome: "requested", reviewId: data.id, dismissed };
+      } catch (err) {
+        if ((err as { status?: number }).status !== 422) throw err;
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          outcome: "refused",
+          dismissed,
+          reason: /own pull request/i.test(message)
+            ? "GitHub does not let an account request changes on its own pull request"
+            : message,
+        };
+      }
+    }
+
+    const self = await this.resolveSelfAuthor();
+    const login = self?.login ?? this.selfLogin;
+    if (!login) {
+      return {
+        outcome: "none",
+        dismissed,
+        reason: "cannot establish which account Maestro posts as; no earlier block was dismissed",
+      };
+    }
+    const reviews = await this.octokit.paginate(this.octokit.rest.pulls.listReviews, {
+      owner: pr.owner,
+      repo: pr.repo,
+      pull_number: pr.number,
+      per_page: 100,
+    });
+    for (const r of reviews) {
+      if (r.state !== "CHANGES_REQUESTED") continue;
+      if (r.user?.login !== login || !(r.body ?? "").includes(REVIEW_STATE_MARKER)) continue;
+      await this.octokit.rest.pulls.dismissReview({
+        owner: pr.owner,
+        repo: pr.repo,
+        pull_number: pr.number,
+        review_id: r.id,
+        message: "Maestro's latest review of this pull request no longer requests changes.",
+      });
+      dismissed.push(r.id);
+    }
+    return { outcome: "none", dismissed };
+  }
+
+  /**
    * Leaves anchored comments on the diff, as one review.
    *
    * Returns how many landed. A rejection is logged and dropped rather than retried or
@@ -554,6 +642,8 @@ export class GitHubClient {
    * is a security check and has to fail closed.
    */
   private selfAuthor?: { login?: string; appId?: number } | null;
+  /** The login Maestro's own comments carry, learned from one; an App's token cannot ask. */
+  private selfLogin?: string;
 
   private async resolveSelfAuthor(): Promise<{ login?: string; appId?: number } | null> {
     if (this.selfAuthor !== undefined) return this.selfAuthor;
@@ -619,7 +709,9 @@ export class GitHubClient {
         self.appId
       );
     });
-    return mine.length ? (mine.at(-1)?.id ?? null) : null;
+    const last = mine.at(-1);
+    if (last?.user?.login) this.selfLogin = last.user.login;
+    return last?.id ?? null;
   }
 
   /**

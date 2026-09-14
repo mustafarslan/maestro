@@ -20,6 +20,7 @@
     "@maestro/integrations": "workspace:*",
     "@maestro/llm": "workspace:*",
     "@maestro/playbook": "workspace:*",
+    "@maestro/profile": "workspace:*",
     "@maestro/sandbox": "workspace:*"
   }
 }

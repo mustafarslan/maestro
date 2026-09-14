@@ -214,8 +214,9 @@ export class ReviewRecorder {
     const stmt = this.db.prepare(
       `INSERT INTO findings (id, review_id, task_id, agent_id, file, line_start, line_end, category,
                              severity, confidence, title, body, evidence_json, dedupe_group,
-                             agreement_count, suppressed_reason, status, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                             agreement_count, suppressed_reason, status, personalization_json,
+                             created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     const now = new Date().toISOString();
     const write = (f: TriagedFinding, status: string) =>
@@ -251,6 +252,8 @@ export class ReviewRecorder {
         f.agreementCount,
         f.suppressedReason ?? null,
         status,
+        // What a developer profile decided, beside the diagnosis and never in it.
+        f.personalization ? JSON.stringify(f.personalization) : null,
         now,
       );
 
@@ -269,6 +272,11 @@ export class ReviewRecorder {
         const taskId = this.recordNode(reviewId, node);
         if (node.agentId) taskByAgent.set(node.agentId, taskId);
       }
+      // Whose profile shaped this review, so later feedback on it can be read against that
+      // profile. Written as NULL for an ordinary review, which is what makes the two separable.
+      this.db
+        .prepare("UPDATE reviews SET profile_subject=? WHERE id=?")
+        .run(outcome.triage?.personalization?.subject ?? null, reviewId);
       if (outcome.triage) {
         this.recordFindings(
           reviewId,

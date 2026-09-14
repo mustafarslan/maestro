@@ -470,3 +470,58 @@ describe("the playbook diff", () => {
     expect((await fetch(`${base}/api/playbook/diff`)).status).toBe(401);
   });
 });
+
+describe("admin API: developer profiles", () => {
+  interface ProfilesBody {
+    battery: { version: string; items: number };
+    active: string | null;
+    profiles: { subject: string }[];
+    reviewFirst: { id: string }[];
+  }
+  interface ProfileBody {
+    profile: { subject: string; profile: { attributes: Record<string, number | null> } } | null;
+  }
+  const post = async (path: string, body: unknown) =>
+    (await (
+      await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    ).json()) as Record<string, unknown>;
+  const get = async <T>(path: string) =>
+    (await (await fetch(`${base}${path}`, { headers: auth })).json()) as T;
+
+  it("lists profiles, the battery, and the items to review first", async () => {
+    const { ProfileStore } = await import("@maestro/profile");
+    new ProfileStore(db).record("octocat", { "COG-01": "E" });
+    const body = await get<ProfilesBody>("/api/profiles");
+    expect(body.battery).toEqual({ version: "2.2", items: 95 });
+    expect(body.active).toBeNull();
+    expect(body.profiles.map((p) => p.subject)).toEqual(["octocat"]);
+    expect(body.reviewFirst.map((r) => r.id)).toEqual(["DEBT-01", "DEBT-11", "GATE-13", "HAB-09"]);
+  });
+
+  it("activates and deactivates, and refuses a subject with no profile", async () => {
+    const { ProfileStore } = await import("@maestro/profile");
+    new ProfileStore(db).record("octocat", { "COG-01": "E" });
+    expect(await post("/api/profiles/activate", { subject: "octocat" })).toEqual({
+      ok: true,
+      active: "octocat",
+    });
+    expect((await get<ProfilesBody>("/api/profiles")).active).toBe("octocat");
+    expect((await post("/api/profiles/activate", { subject: "nobody" })).ok).toBe(false);
+    expect(await post("/api/profiles/deactivate", {})).toEqual({ ok: true, was: "octocat" });
+    expect((await get<ProfilesBody>("/api/profiles")).active).toBeNull();
+  });
+
+  it("returns one profile without its answers", async () => {
+    const { ProfileStore } = await import("@maestro/profile");
+    new ProfileStore(db).record("octocat", { "COG-01": "E" });
+    const { profile } = await get<ProfileBody>("/api/profiles/octocat");
+    expect(profile?.subject).toBe("octocat");
+    expect(profile?.profile.attributes.kai_index).toBe(0);
+    expect(profile).not.toHaveProperty("responses");
+    expect((await get<ProfileBody>("/api/profiles/nobody")).profile).toBeNull();
+  });
+});

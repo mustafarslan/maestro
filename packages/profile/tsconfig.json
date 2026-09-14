@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*.ts", "src/battery.json"],
+  "exclude": ["src/**/*.test.ts"],
+  "references": [{ "path": "../agents" }, { "path": "../core" }, { "path": "../playbook" }]
+}

@@ -54,12 +54,16 @@ export const SUBMIT_FINDINGS_JSON_SCHEMA = {
           category: { type: "string", description: "Short kebab-case slug, e.g. 'sql-injection'." },
           severity: { type: "string", enum: [...SEVERITIES] },
           confidence: { type: "number", minimum: 0, maximum: 1 },
-          title: { type: "string", description: "One specific line. No hedging." },
+          title: { type: "string", description: "One specific line, under 80 characters." },
           body: {
             type: "string",
-            description: "What is wrong, why it matters, what would fix it.",
+            description:
+              "At most three short sentences, under 300 characters: what is wrong, why it matters, the fix.",
           },
-          evidence: { type: "string", description: "Code excerpt or real command output." },
+          evidence: {
+            type: "string",
+            description: "The shortest code excerpt or command output line that proves it.",
+          },
         },
         required: ["category", "severity", "confidence", "title", "body"],
         additionalProperties: false,

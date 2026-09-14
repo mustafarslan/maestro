@@ -86,6 +86,30 @@ describe("migrate", () => {
     expect(leftover, "DDL from a failed transaction survived the rollback").toEqual([]);
   });
 
+  it("a database that applied developer profiles before activation existed gets the rest", async () => {
+    // 005 shipped first as the bare table and was applied to real databases in that form; the
+    // columns reviews need came after, in 006, so those databases pick them up on next start.
+    const db = await fresh();
+    migrationState(db); // creates the tracking table
+    for (const m of migrations.filter((m) => m.version <= 5)) {
+      db.exec(m.sql);
+      db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        m.version,
+        m.name,
+        "2026-09-13T00:00:00Z",
+      );
+    }
+    expect(migrate(db).current).toBe(6);
+    const columns = (table: string) =>
+      db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all<{ name: string }>()
+        .map((c) => c.name);
+    expect(columns("developer_profiles")).toContain("active");
+    expect(columns("findings")).toContain("personalization_json");
+    expect(columns("reviews")).toEqual(expect.arrayContaining(["profile_subject", "posted_state"]));
+  });
+
   it("leaves a schema the rest of the code can actually use", async () => {
     // The migration could apply cleanly and still not produce the tables everything
     // else assumes; naming them here makes that a test failure rather than a runtime one.

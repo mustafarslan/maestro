@@ -173,3 +173,16 @@ describe("the admin API sends what the UI declares", () => {
     expectShape("ProvidersResponse", await get("/api/providers"));
   });
 });
+
+describe("the profiles page gets what it declares", () => {
+  it("ProfilesResponse, ProfileRow and ProfileScores", async () => {
+    const { ProfileStore } = await import("@maestro/profile");
+    new ProfileStore(db).record("octocat", { "COG-01": "E" });
+    const list = (await get("/api/profiles")) as { profiles: unknown[] };
+    expectShape("ProfilesResponse", list);
+    expectShape("ProfileRow", list.profiles[0]);
+    const one = (await get("/api/profiles/octocat")) as { profile: { profile: unknown } };
+    expectShape("ProfileRow", one.profile);
+    expectShape("ProfileScores", one.profile.profile);
+  });
+});

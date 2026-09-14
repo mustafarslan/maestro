@@ -18,7 +18,9 @@ import {
   type ReviewOutcome,
   ReviewRecorder,
   renderReview,
+  renderReviewStateBody,
   runReview,
+  type TriagePersonalization,
 } from "@maestro/engine";
 import type { EnvSpec, PlaybookDocument } from "@maestro/playbook";
 import { parse as parseYaml } from "yaml";
@@ -28,6 +30,7 @@ import {
   type GitHubClient,
   type PullRequestContext,
   type PullRequestRef,
+  type ReviewStateResult,
 } from "./github.js";
 import { type LinearClient, resolveIssueForPullRequest } from "./linear.js";
 
@@ -50,6 +53,8 @@ export interface ReviewPullRequestOptions {
   incremental?: boolean;
   /** Linear issue lookup. Absent means reviews run without ticket context. */
   linear?: LinearClient;
+  /** A developer profile to gate and word the findings for. The posted event stays COMMENT. */
+  profile?: TriagePersonalization;
   /**
    * Fired as soon as the review row exists, before any long-running work.
    *
@@ -211,6 +216,7 @@ export async function reviewPullRequest(
             : undefined,
         },
         envSpec,
+        profile: opts.profile,
         signal: opts.signal,
       },
     );
@@ -258,6 +264,21 @@ export async function reviewPullRequest(
     }
 
     const inlinePosted = await postAnchoredComments(client, pr, outcome, playbook, plan.carried);
+
+    // The state a developer profile chose, set after the comment that explains it. A failure
+    // here costs the state, never the review: the comment already says what the profile
+    // would do.
+    try {
+      const state = await settleReviewState(client, db, pr, reviewId, outcome);
+      if (state?.reason) log.warn({ reason: state.reason }, "review state not applied as chosen");
+      else if (state)
+        log.info({ outcome: state.outcome, dismissed: state.dismissed }, "review state set");
+    } catch (err) {
+      log.warn(
+        { err: err instanceof Error ? err.message : err },
+        "could not set the review state; the review comment stands",
+      );
+    }
 
     // Without the comment id, a later reaction cannot be matched back to the findings
     // it was reacting to, and the whole precision signal is lost.
@@ -475,6 +496,7 @@ export async function postAnchoredComments(
   const anchors = inlineComments(outcome.triage?.posted ?? [], pr.commentable ?? new Map(), {
     cap: playbook.triage.maxInlineComments,
     already,
+    politenessTags: outcome.triage?.personalization?.politenessTags,
   });
 
   const posted = await client.postInlineComments(pr, anchors);
@@ -497,4 +519,46 @@ export async function postAnchoredComments(
     if (dedupeGroup) out.push({ dedupeGroup, commentId: c.id });
   }
   return out;
+}
+
+/**
+ * Sets the pull request's review state after a review has been posted.
+ *
+ * With a profile: the state it chose. Without one: nothing — unless Maestro blocked this pull
+ * request on an earlier round, in which case the block is lifted, because a profile that was
+ * deactivated must not leave a block nobody is maintaining. The state Maestro set is recorded
+ * on the review row, which is how the next round knows.
+ */
+export async function settleReviewState(
+  client: Pick<GitHubClient, "submitReviewState">,
+  db: SqlDatabase,
+  pr: PullRequestContext,
+  reviewId: string,
+  outcome: ReviewOutcome,
+): Promise<ReviewStateResult | undefined> {
+  if (outcome.state !== "done") return undefined;
+  const personal = outcome.triage?.personalization;
+  const row = db
+    .prepare("SELECT repo_id, pr_number FROM reviews WHERE id=?")
+    .get<{ repo_id: string; pr_number: number }>(reviewId);
+  const previous = row
+    ? db
+        .prepare(
+          `SELECT posted_state FROM reviews
+            WHERE repo_id=? AND pr_number=? AND id<>? AND posted_state IS NOT NULL
+            ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        )
+        .get<{ posted_state: string }>(row.repo_id, row.pr_number, reviewId)?.posted_state
+    : undefined;
+  // GitHub is asked only when there is a block to place or one of Maestro's to lift. A profile
+  // that does not block, on a pull request Maestro never blocked, needs no call at all.
+  const state = personal?.state ?? "COMMENT";
+  if (state === "COMMENT" && previous !== "REQUEST_CHANGES") return undefined;
+
+  const result = await client.submitReviewState(pr, state, renderReviewStateBody(outcome));
+  db.prepare("UPDATE reviews SET posted_state=? WHERE id=?").run(
+    result.outcome === "requested" ? "REQUEST_CHANGES" : "COMMENT",
+    reviewId,
+  );
+  return result;
 }

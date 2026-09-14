@@ -41,6 +41,19 @@ export const api = {
   feedback: () => request<FeedbackResponse>("/api/findings/feedback"),
   environments: () => request<{ environments: EnvironmentRow[] }>("/api/environments"),
   evalScores: () => request<EvalResponse>("/api/eval"),
+  profiles: () => request<ProfilesResponse>("/api/profiles"),
+  profile: (subject: string) =>
+    request<{ profile: ProfileDetail | null }>(`/api/profiles/${encodeURIComponent(subject)}`),
+  activateProfile: (subject: string) =>
+    request<{ ok: boolean; active?: string; error?: string }>("/api/profiles/activate", {
+      method: "POST",
+      body: JSON.stringify({ subject }),
+    }),
+  deactivateProfile: () =>
+    request<{ ok: boolean; was?: string | null; error?: string }>("/api/profiles/deactivate", {
+      method: "POST",
+      body: "{}",
+    }),
   testProvider: (providerId: string, model: string) =>
     request<ProviderTestResponse>("/api/providers/test", {
       method: "POST",
@@ -326,4 +339,42 @@ export interface PlaybookDiff {
     after?: string;
     lines?: { sign: "+" | "-"; text: string }[];
   }[];
+}
+
+export interface ProfilesResponse {
+  battery: { version: string; items: number };
+  active: string | null;
+  profiles: ProfileRow[];
+  reviewFirst: { id: string; note: string | null; title: string; category: string }[];
+}
+
+export interface ProfileRow {
+  id: string;
+  subject: string;
+  batteryVersion: string;
+  answered: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProfileScores {
+  batteryVersion: string;
+  attributes: Record<string, number | null>;
+  topicWeights: Record<string, number>;
+  extendedSignals: Record<string, number>;
+  framingStrategy: string | null;
+  useNegativePolitenessTags: boolean;
+  kaiClassification: string | null;
+  regulatoryFocusLabel: string | null;
+  coverage: {
+    itemsAnswered: number;
+    nPerAttribute: Record<string, number>;
+    nPerTopic: Record<string, number>;
+    nPerExtendedSignal: Record<string, number>;
+  };
+}
+
+export interface ProfileDetail extends ProfileRow {
+  profile: ProfileScores;
 }

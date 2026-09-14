@@ -23,6 +23,7 @@ import {
   safeParsePlaybook,
   TEMPLATE_VARIABLES,
 } from "@maestro/playbook";
+import { bundledBattery, ProfileStore, reviewFirstItems } from "@maestro/profile";
 
 export interface ApiContext {
   db: SqlDatabase;
@@ -60,6 +61,68 @@ export function authorize(req: IncomingMessage, token: string): boolean {
 }
 
 const routes: Route[] = [
+  // ── developer profiles ────────────────────────────────────────────────────
+  {
+    method: "GET",
+    pattern: /^\/api\/profiles$/,
+    handler: async (ctx) => {
+      const battery = bundledBattery();
+      const store = new ProfileStore(ctx.db, battery);
+      return {
+        battery: { version: battery.version, items: battery.items.length },
+        active: store.active()?.subject ?? null,
+        profiles: store.list(),
+        // The items the battery's authors shipped on judgement rather than a clean audit.
+        // Shown so an admin can read them before trusting a profile that leans on them.
+        reviewFirst: reviewFirstItems(battery).map((r) => {
+          const item = battery.items.find((i) => i.id === r.id);
+          return {
+            id: r.id,
+            note: r.note ?? null,
+            title: item?.pr_context?.title ?? item?.prompt ?? "",
+            category: item?.category ?? "",
+          };
+        }),
+      };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/profiles\/([^/]+)$/,
+    handler: async (ctx, _req, m) => {
+      const stored = new ProfileStore(ctx.db).get(decodeURIComponent(m[1] as string));
+      if (!stored) return { profile: null };
+      // The answers stay out: the scored profile is what the page shows.
+      const { responses: _answers, ...profile } = stored;
+      return { profile };
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/profiles\/activate$/,
+    handler: async (ctx, _req, _m, body) => {
+      const subject = (body as { subject?: unknown })?.subject;
+      if (typeof subject !== "string" || !subject.trim()) {
+        return { ok: false, error: "subject is required" };
+      }
+      try {
+        const saved = new ProfileStore(ctx.db).activate(subject);
+        ctx.broadcast("profile", { active: saved.subject });
+        return { ok: true, active: saved.subject };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/profiles\/deactivate$/,
+    handler: async (ctx) => {
+      const was = new ProfileStore(ctx.db).deactivate();
+      ctx.broadcast("profile", { active: null });
+      return { ok: true, was: was ?? null };
+    },
+  },
   {
     method: "GET",
     pattern: /^\/api\/reviews$/,

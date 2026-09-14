@@ -2,13 +2,14 @@ import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api, type ProvidersResponse, type ReviewRow, type StatsResponse, TOKEN } from "./api";
 import { Environments } from "./Environments";
+import { Profiles } from "./Profiles";
 import { Providers } from "./Providers";
 import { Quality } from "./Quality";
 import { Reviews } from "./Reviews";
 import { Studio } from "./Studio";
 import "./styles.css";
 
-type Tab = "reviews" | "studio" | "providers" | "environments" | "quality";
+type Tab = "reviews" | "studio" | "providers" | "environments" | "quality" | "profiles";
 
 function App() {
   const [tab, setTab] = useState<Tab>("reviews");
@@ -73,16 +74,18 @@ function App() {
       <div className="topbar">
         <div className="brand">Maestro</div>
         <div className="tabs">
-          {(["reviews", "studio", "providers", "environments", "quality"] as Tab[]).map((t) => (
-            <button
-              type="button"
-              key={t}
-              className={`tab ${tab === t ? "active" : ""}`}
-              onClick={() => setTab(t)}
-            >
-              {t === "studio" ? "Playbook Studio" : t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
+          {(["reviews", "studio", "providers", "environments", "quality", "profiles"] as Tab[]).map(
+            (t) => (
+              <button
+                type="button"
+                key={t}
+                className={`tab ${tab === t ? "active" : ""}`}
+                onClick={() => setTab(t)}
+              >
+                {t === "studio" ? "Playbook Studio" : t[0].toUpperCase() + t.slice(1)}
+              </button>
+            ),
+          )}
         </div>
         <div className="spacer" />
         {error ? <span className="badge failed">{error}</span> : null}
@@ -97,6 +100,7 @@ function App() {
         {tab === "providers" ? <Providers providers={providers} stats={stats} /> : null}
         {tab === "environments" ? <Environments /> : null}
         {tab === "quality" ? <Quality /> : null}
+        {tab === "profiles" ? <Profiles /> : null}
       </div>
     </div>
   );

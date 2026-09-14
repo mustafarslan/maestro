@@ -37,7 +37,7 @@ export function anchorKey(file: string, line: number | undefined): string {
 export function inlineComments(
   findings: TriagedFinding[],
   commentable: Map<string, Set<number>>,
-  opts: { cap: number; already?: ReadonlySet<string> },
+  opts: { cap: number; already?: ReadonlySet<string>; politenessTags?: boolean },
 ): InlineAnchor[] {
   const out: InlineAnchor[] = [];
   for (const f of findings) {
@@ -52,7 +52,12 @@ export function inlineComments(
     const line = [f.lineStart, f.lineEnd].find((n) => n !== undefined && lines.has(n));
     if (!line) continue;
 
-    out.push({ path: f.file, line, body: renderInlineBody(f), dedupeGroup: f.dedupeGroup });
+    out.push({
+      path: f.file,
+      line,
+      body: renderInlineBody(f, { politenessTags: opts.politenessTags }),
+      dedupeGroup: f.dedupeGroup,
+    });
   }
   return out;
 }

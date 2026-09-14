@@ -1,5 +1,12 @@
 import { type Finding, type Severity, severityRank } from "@maestro/agents";
 import type { PlaybookDocument } from "@maestro/playbook";
+import {
+  applyProfile,
+  type DeveloperCognitiveProfile,
+  type Disposition,
+  type ProfilePolicy,
+  type Responses,
+} from "@maestro/profile";
 import type { CommandComparison } from "@maestro/sandbox";
 
 export interface AgentFindings {
@@ -32,12 +39,56 @@ export interface TriagedFinding extends Finding {
    */
   alsoReported?: { agentId: string; title: string; body: string }[];
   suppressedReason?: string;
+  /**
+   * What a developer profile decided about this finding, beside it and never in place of
+   * it. Present only on a review run with a profile; see `@maestro/profile`'s policy.
+   */
+  personalization?: {
+    disposition: Disposition;
+    reason: string;
+    sigma: number;
+    effective: number;
+    topic: string | null;
+    followUp?: "tracked_ticket";
+    /** Who made the disposition: the deterministic rules, or the triage agent within them. */
+    source?: "rules" | "agent";
+    /**
+     * The triage agent's wording, when it passed the output guard. Beside `body`, never over
+     * it: the agents' diagnosis is what gets stored and what eval scores.
+     */
+    body?: string;
+  };
+}
+
+/** A developer profile a review is gated and worded for. */
+export interface TriagePersonalization {
+  subject: string;
+  profile: DeveloperCognitiveProfile;
+  policy?: ProfilePolicy;
+  /** The answers the profile was scored from; the triage agent takes style exemplars from them. */
+  responses?: Responses;
 }
 
 export interface TriageResult {
   posted: TriagedFinding[];
   suppressed: TriagedFinding[];
   summary: string;
+  /** Present only when a profile was applied. */
+  personalization?: {
+    subject: string;
+    batteryVersion: string;
+    /** The state this developer would submit. Maestro itself still posts a comment. */
+    state: "REQUEST_CHANGES" | "COMMENT";
+    politenessTags: boolean;
+    /** Cosmetic findings the profile left out of the comment. */
+    dropped: number;
+    /**
+     * Whether the triage agent decided this review. Absent when none was asked; `unavailable`
+     * when it could not run or answer, `rejected` when its answer broke the contract — both
+     * leave the deterministic decision in place.
+     */
+    triageAgent?: { status: "used" | "unavailable" | "rejected"; note?: string };
+  };
 }
 
 /** One ordering for the whole codebase; see severityRank's comment for why. */
@@ -58,6 +109,7 @@ export function triage(
   doc: PlaybookDocument,
   inputs: AgentFindings[],
   comparisons?: CommandComparison[],
+  personal?: TriagePersonalization,
 ): TriageResult {
   const { minConfidence, maxInlineComments, agreementBoost } = doc.triage;
 
@@ -146,7 +198,42 @@ export function triage(
     posted.push(finding);
   }
 
-  return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed, comparisons) };
+  if (!personal) {
+    return { posted, suppressed, summary: buildSummary(inputs, posted, suppressed, comparisons) };
+  }
+
+  // Tier 3, after the mechanical gate and before the summary, so the summary counts what
+  // the comment will actually carry. It sees only what triage would have posted: a finding
+  // below the confidence threshold was never a candidate, whoever is reading.
+  const gated = applyProfile(posted, personal.profile, personal.policy);
+  const note = (a: (typeof gated.kept)[number]) => ({
+    disposition: a.disposition,
+    reason: a.reason,
+    sigma: a.sigma,
+    effective: a.effective,
+    topic: a.topic,
+    ...(a.followUp ? { followUp: a.followUp } : {}),
+  });
+  const kept = gated.kept.map((a) => ({ ...a.finding, personalization: note(a) }));
+  for (const a of gated.dropped) {
+    suppressed.push({
+      ...a.finding,
+      personalization: note(a),
+      suppressedReason: `left out for ${personal.subject}: ${a.reason}`,
+    });
+  }
+  return {
+    posted: kept,
+    suppressed,
+    summary: buildSummary(inputs, kept, suppressed, comparisons),
+    personalization: {
+      subject: personal.subject,
+      batteryVersion: personal.profile.batteryVersion,
+      state: gated.state,
+      politenessTags: personal.profile.useNegativePolitenessTags,
+      dropped: gated.dropped.length,
+    },
+  };
 }
 
 /**
@@ -197,7 +284,7 @@ function sameDefect(a: Finding, b: Finding): boolean {
  * "nothing here supports the claim" could be dropped for being low severity — which is
  * the one message that must not be silently discarded.
  */
-function comparisonNote(comparisons?: CommandComparison[]): string {
+export function comparisonNote(comparisons?: CommandComparison[]): string {
   if (!comparisons?.length) return "";
 
   const ran = comparisons.filter((c) => c.base && c.head);

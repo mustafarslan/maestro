@@ -66,6 +66,8 @@ const fixture: Fixture = {
 describe("scoring", () => {
   it("counts a matching finding as a hit", () => {
     const score = scoreOutcome(fixture, outcome([finding()]));
+    // A score names the review that produced it, so a miss can be traced to its trajectory.
+    expect(score.reviewId).toBe("rv_1");
     expect(score.hits).toHaveLength(1);
     expect(score.misses).toHaveLength(0);
     expect(score.recall).toBe(1);

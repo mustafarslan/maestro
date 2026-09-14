@@ -1,5 +1,14 @@
+import { attribution, type Disposition, safeSubject, taggedBody } from "@maestro/profile";
 import type { CommandComparison } from "@maestro/sandbox";
 import type { ReviewOutcome } from "./engine.js";
+
+const DISPOSITION_LABEL: Record<Disposition, string> = {
+  request_changes: "would block",
+  comment: "comment",
+  nit: "nit",
+  note: "note",
+  drop: "left out",
+};
 
 const SEVERITY_ICON: Record<string, string> = {
   critical: "🔴",
@@ -197,6 +206,28 @@ function prose(text: string): string {
   return deactivate(text).replace(/^(\s*)(#{1,6})(\s)/gm, "$1\\$2$3");
 }
 
+/**
+ * The body of the review that sets the pull request's state. Short on purpose: the review
+ * comment carries every finding, and this only says why the state is what it is.
+ */
+export function renderReviewStateBody(outcome: ReviewOutcome): string {
+  const p = outcome.triage?.personalization;
+  if (p?.state !== "REQUEST_CHANGES") {
+    return "Maestro's latest review no longer requests changes.";
+  }
+  const blocking = (outcome.triage?.posted ?? []).filter(
+    (f) => f.personalization?.disposition === "request_changes",
+  );
+  return [
+    `**Changes requested, as ${code(safeSubject(p.subject))} would.** ${blocking.length} finding(s) block this merge:`,
+    "",
+    ...blocking.slice(0, 5).map((f) => `- ${prose(oneLine(f.title))}`),
+    ...(blocking.length > 5 ? [`- and ${blocking.length - 5} more`] : []),
+    "",
+    "Details are in Maestro's review comment.",
+  ].join("\n");
+}
+
 export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = {}): string {
   const lines: string[] = [];
   const t = outcome.triage;
@@ -212,6 +243,28 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
   }
   if (t?.summary) lines.push(prose(t.summary), "");
 
+  // Said before any finding, so nobody reads a personalised comment as the person's own or
+  // mistakes the profile's verdict for the state GitHub shows: Maestro still posts a comment.
+  const personal = t?.personalization;
+  if (personal) {
+    lines.push(
+      `**As ${code(safeSubject(personal.subject))} would review it:** ` +
+        (personal.state === "REQUEST_CHANGES" ? "**request changes**" : "comment") +
+        ". Maestro posts every review as a comment; this is the state their profile would choose" +
+        (personal.dropped ? `, and ${personal.dropped} cosmetic finding(s) were left out.` : "."),
+      "",
+      attribution(personal.subject),
+      "",
+    );
+    if (personal.triageAgent && personal.triageAgent.status !== "used") {
+      lines.push(
+        `_The triage agent's answer was not used (${prose(oneLine(personal.triageAgent.note ?? personal.triageAgent.status))}); ` +
+          "the profile's rules decided this review._",
+        "",
+      );
+    }
+  }
+
   if (t?.posted.length) {
     for (const f of t.posted) {
       const where = f.file
@@ -223,9 +276,21 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
       lines.push(
         `${where} · **${f.severity}** · ${code(f.category)} · confidence ${(f.confidence * 100).toFixed(0)}%` +
           (f.agreementCount > 1 ? ` · **${f.agreementCount} agents agree**` : "") +
-          ` · _${f.agentIds.join(", ")}_`,
+          ` · _${f.agentIds.join(", ")}_` +
+          (f.personalization
+            ? ` · **${DISPOSITION_LABEL[f.personalization.disposition]}**` +
+              (f.personalization.followUp ? " · tracked ticket" : "")
+            : ""),
       );
-      lines.push("", prose(f.body));
+      const body =
+        personal && f.personalization
+          ? taggedBody(
+              f.personalization.body ?? f.body,
+              f.personalization.disposition,
+              personal.politenessTags,
+            )
+          : f.body;
+      lines.push("", prose(body));
       // A second agent that described this location differently, kept rather than
       // dropped — one comment per location, but nothing an agent said is lost.
       for (const also of f.alsoReported ?? []) {
@@ -260,7 +325,8 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
 
   lines.push("<details><summary>What Maestro checked</summary>", "");
 
-  const agentRows = outcome.nodes.filter((n) => n.kind === "agent");
+  // The triage agent is a model run like the specialists, so it is accounted for beside them.
+  const agentRows = outcome.nodes.filter((n) => n.kind === "agent" || n.agentId === "triage");
   if (agentRows.length) {
     lines.push(
       "| Agent | Status | Model | Findings | Cost | Time |",
@@ -303,7 +369,12 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
 
   if (t?.suppressed.length) {
     lines.push(
-      `**Suppressed:** ${t.suppressed.length} finding(s) below threshold or over the comment cap.`,
+      `**Suppressed:** ${t.suppressed.length} finding(s) below threshold or over the comment cap` +
+        // A profile's cosmetic drops land in the same list; saying only "threshold or cap"
+        // would misreport why a finding the agents raised is not in the comment.
+        (personal?.dropped
+          ? `, or left out by ${code(safeSubject(personal.subject))}'s profile.`
+          : "."),
       "",
     );
   }
@@ -402,21 +473,31 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
  * whole reason the posted comment renders as text — assembling an inline body by
  * concatenation somewhere else would reopen exactly that.
  */
-export function renderInlineBody(f: {
-  title: string;
-  body: string;
-  severity: string;
-  category: string;
-  confidence: number;
-  agentIds: string[];
-  agreementCount: number;
-}): string {
+export function renderInlineBody(
+  f: {
+    title: string;
+    body: string;
+    severity: string;
+    category: string;
+    confidence: number;
+    agentIds: string[];
+    agreementCount: number;
+    personalization?: { disposition: Disposition; followUp?: "tracked_ticket"; body?: string };
+  },
+  opts: { politenessTags?: boolean } = {},
+): string {
+  // The same label and the same tag as the summary: a nit that reads `nit:` in the summary
+  // and untagged in its own thread would be two voices for one reviewer.
+  const p = f.personalization;
   return [
     `**${SEVERITY_ICON[f.severity] ?? ""} ${prose(oneLine(f.title))}**`,
     `${f.severity} · ${code(f.category)} · confidence ${(f.confidence * 100).toFixed(0)}%` +
       (f.agreementCount > 1 ? ` · **${f.agreementCount} agents agree**` : "") +
-      ` · _${f.agentIds.join(", ")}_`,
+      ` · _${f.agentIds.join(", ")}_` +
+      (p
+        ? ` · **${DISPOSITION_LABEL[p.disposition]}**${p.followUp ? " · tracked ticket" : ""}`
+        : ""),
     "",
-    prose(f.body),
+    prose(p ? taggedBody(p.body ?? f.body, p.disposition, opts.politenessTags ?? false) : f.body),
   ].join("\n");
 }

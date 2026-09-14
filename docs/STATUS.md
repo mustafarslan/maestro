@@ -3876,6 +3876,12 @@ committed, traced the new config field through three packages, and found that no
     hours stale (the open-list entry above), and thirty-four scores of an outage that
     `saveScore` now refuses (finding 237).
 
+    **Superseded in part by finding 242.** The specialists' output contract changed after this
+    measurement (concise findings), so this control arm no longer describes the agents that
+    exist. Finishing the question now means three arms under the new contract: control twice
+    over all twenty fixtures, then guided. The commands below still apply; the second control
+    run is all twenty, not the remaining ten.
+
     **To finish it**, once the provider answers again. Rebuild the binary first — `dist/maestro`
     does not follow a package rebuild, and both aborted attempts were that. Then, from a
     checkout with `scripts/seed-golden-set.sh` already run:
@@ -3982,6 +3988,85 @@ committed, traced the new config field through three packages, and found that no
     inside a SQL comment closed the template literal, so the module did not parse and vitest
     reported "no tests" — which `grep "Tests "` read as a pass. A mutation check that does not
     confirm the tests ran is not a mutation check.
+242. **Developer profiles: with one active, the triage agent reviews as that developer.** Built
+    from the Developer Cognitive Profile Calibration Battery the user supplied. A first cut
+    gated findings with deterministic rules only; on reading it the user redirected the design,
+    and this is what stands:
+
+    - **The specialists are unchanged in role and shorter in output.** They review without a
+      profile. Their contract (`FIXED_CONTRACT`) now asks for a title under 80 characters and a
+      body of at most three short sentences — enforced by prompt, not by the schema, because a
+      zod rejection there throws away a whole submission.
+    - **Mechanical triage still runs first** — dedupe, agreement, confidence, the cap — and the
+      profile's rules annotate what survives: σ from severity, a topic from the category slug by
+      whole-word keywords built against the 58 slugs in the local database, and
+      S = σ × (0.5 + W). The battery's own S = σ × W halved every finding of a developer with no
+      view on its topic, so a fresh profile blocked on nothing below the floor; the scale is now
+      the identity at W = 0.5. Two numbers are constants, not settings: σ ≥ 0.80 blocks and
+      σ < 0.30 never does.
+    - **Then the triage agent** (`triage-agent.ts`), one model call on `triage.model`, reads
+      every surviving finding with the developer's profile in words, their style directives and
+      review comments they chose as their own, and answers through `submit_review`: a state, a
+      two-sentence summary, and a disposition and a concise rewording per finding. It refers to
+      findings by alias (F1, F2 …) and never emits a diagnosis field, so file, line, title, body
+      and severity cannot move; aliases also keep author-chosen file paths out of the trusted
+      prompt. On the way out Maestro clamps every disposition by the invariants, discards any
+      rewording that tags a blocker a nit, drops a fact or lifts an exemplar's content, rejects
+      an answer that mentions a finding it was not given, and recomputes the state itself. Every
+      failure — no provider, a quota error, prose instead of the tool — leaves the rules'
+      decision in place and says so in the comment. Never an empty review.
+    - **The pull request gets the state.** With a profile that blocks, `submitReviewState`
+      submits a `REQUEST_CHANGES` review carrying a marker; when a later round does not block,
+      Maestro's own earlier blocks — marker AND author — are dismissed, including on a round
+      that runs with no profile at all, which `reviews.posted_state` makes knowable. GitHub
+      refuses `REQUEST_CHANGES` on a pull request the posting account opened; that is reported,
+      not thrown, because the comment already says what the profile would do.
+    - **One active profile**, enforced by a partial unique index: `maestro profile activate`, the
+      admin UI's Profiles tab, or `maestro review --profile`; `--no-profile` opts out. The daemon
+      reads it per review, so activation needs no restart. Eval never activates one, so a golden
+      set run is never reworded.
+    - **Recorded like any model run:** the triage agent's task, `llm_calls` and trajectory;
+      `findings.personalization_json` beside each diagnosis; `reviews.profile_subject`.
+
+    **The battery is 2.2, edited at the user's instruction.** In 2.1 the three framing
+    preferences were mapped only ever at 1.0 and carried no information, and fifteen PED items
+    mapped `blocking_threshold` on their blocking option alone, so a pedant's answers pulled it
+    down and nobody's pulled it up; eight more items had the same one-sided shape. The framing
+    preferences are now one-hot, the one-sided mappings are removed, every index is regenerated
+    from the mappings, and the loader rejects a battery whose indexes drift or that maps an
+    attribute on some options of an item but not all. The port still agrees exactly with the
+    unmodified `score_battery.py` on three committed sheets, which took two measured fixes: the
+    mean is exact in BigInt, as `statistics.mean` is, and rounding is half-even on the double's
+    true value.
+
+    Three seams were found by review before commit and are tests: the "Suppressed" line counted
+    a profile's drops as threshold drops; inline comments were untagged while the summary was
+    tagged; and a personalised outcome had never been recorded, which would have failed only
+    after a paid model run.
+
+    **Verified offline, not live.** Every model reply in the triage agent's tests is scripted
+    through the Anthropic test transport, including a review end to end through `runReview`;
+    every GitHub call is against a fake octokit. Two things wait: a triage agent answering on a
+    real model (the Ollama quota), and `REQUEST_CHANGES` against the real API —
+    `scripts/live-github-check.mjs --write-review-state` exercises it, and is not run without
+    the user's word because a submitted review cannot be deleted.
+
+    **The agents' contract changed, so finding 239's control arm no longer describes them.**
+    See the note there.
+
+243. **The refinement proposer, up to the model call.** Steps 0–4 of the plan in `docs/TODO.md`.
+    A score now carries the review that produced it, so a training miss can be traced to what the
+    agents did. `proposer.ts` holds the rest: an allowlist of fields a candidate may change
+    (personas, triage thresholds, an agent's procedural graph, gate settings — never topology,
+    model bindings or the triage persona, which eval cannot measure), apply-to-a-copy with full
+    playbook validation, evidence from the training split only with the agents' tool calls, a
+    prompt that reports any held-out name, answer key or pattern that reached it — checked over
+    the real twenty-fixture golden set — and the round itself: `maestro eval propose` publishes
+    an inactive candidate marked `createdBy: refiner` or remembers an invalid proposal, and
+    `maestro eval gate --record` remembers the decision with the edit read back from the
+    candidate. `maestro eval evidence` prints what a proposer would be shown, so a proposal can be
+    written by hand or by any model today. What is absent is the model call that writes one.
+
 ## Model choice per agent
 
 Agents are bound to different models on purpose. Two copies of one model agreeing is one opinion

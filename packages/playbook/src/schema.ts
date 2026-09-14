@@ -147,20 +147,14 @@ export const RouterSchema = z.object({
 
 // ── Triage ───────────────────────────────────────────────────────────────────
 export const TriageSchema = z.object({
-  /** Reserved: triage is deterministic today. See `persona`. */
+  /** The triage agent's model. Called only when a developer profile is active. */
   model: ModelBindingSchema,
   /**
-   * RESERVED, and read by nothing at run time.
+   * The triage agent's persona, read only when a developer profile is active.
    *
-   * Triage is deterministic — dedupe, agreement, thresholds and caps are mechanical and
-   * testable rather than re-litigated by a model on every run — so `buildTriageSystemPrompt`
-   * exists and has no caller. The text is kept because the narrative pass the plan
-   * describes attaches here, and rewriting it later from nothing would be worse than
-   * carrying it.
-   *
-   * Said here because it is exported to YAML and read by people: an agent's persona
-   * changes that agent's behaviour, and someone reasonably assumes this one does too.
-   * It does not, and nothing at run time would tell them.
+   * Without a profile, triage is deterministic — dedupe, agreement, thresholds and caps —
+   * and this text changes nothing. With one, the triage agent reads it alongside the
+   * developer's profile and decides the final review within rules kept in code.
    */
   persona: z.string().min(1),
   minConfidence: z.number().min(0).max(1).default(0.6),

@@ -49,6 +49,10 @@ claude mcp add maestro -- maestro mcp
 maestro llm providers | models | test
 maestro playbook export pb.yaml && maestro playbook import pb.yaml --activate
 maestro eval add my-case ./repo && maestro eval run && maestro eval report
+
+# Review as a particular developer: answer the calibration battery once, then activate it
+maestro profile take --subject octocat && maestro profile activate --subject octocat
+maestro review https://github.com/owner/repo/pull/412 --no-profile   # one review without it
 maestro reap
 ```
 

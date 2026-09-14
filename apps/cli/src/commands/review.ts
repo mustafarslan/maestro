@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
-import { ReviewRecorder, renderReview, runReview } from "@maestro/engine";
+import {
+  ReviewRecorder,
+  renderReview,
+  runReview,
+  type TriagePersonalization,
+} from "@maestro/engine";
 import {
   GitHubClient,
   LinearClient,
@@ -13,6 +18,7 @@ import {
 } from "@maestro/integrations";
 import { ProviderConfigStore, type ProviderRegistry } from "@maestro/llm";
 import { type PlaybookDocument, PlaybookStore } from "@maestro/playbook";
+import { ProfileStore, resolveReviewProfile } from "@maestro/profile";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { has, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { color } from "../ui.js";
@@ -37,6 +43,9 @@ ${color.bold("maestro review")} <path | pr-url | owner/repo#123> [options]
   --provider <id>       override every agent's provider
   --model <id>          override every agent's model
   --json                emit the raw outcome as JSON instead of markdown
+  --no-profile          ignore the active profile for this review
+  --profile <subject>   gate and word the findings as this developer would
+                        (answer the battery first: maestro profile take)
 
 Reviews a local checkout: prepares an isolated container, runs the playbook's
 agents against it, and prints the consolidated review.
@@ -151,6 +160,8 @@ export async function review(argv: string[]): Promise<number> {
     "--json",
     "--dry-run",
     "--force",
+    "--profile",
+    "--no-profile",
   ]);
   const target = argv[0];
   if (wantsHelp(argv)) {
@@ -174,6 +185,11 @@ export async function review(argv: string[]): Promise<number> {
   const providerOverride = args(argv, "--provider")[0];
   const modelOverride = args(argv, "--model")[0];
   const asJson = has(argv, "--json");
+  const profileSubject = args(argv, "--profile")[0];
+  if (profileSubject && has(argv, "--no-profile")) {
+    console.error("--profile and --no-profile contradict each other; pass one of them");
+    return 1;
+  }
 
   const interrupt = abortOnInterrupt();
 
@@ -187,6 +203,23 @@ export async function review(argv: string[]): Promise<number> {
       return 1;
     }
     const playbook = structuredClone(playbookRecord.doc);
+
+    // Refused rather than ignored: a review asked for as someone and run as no one would
+    // read as their judgement while being nobody's.
+    // The named profile, else the active one, unless opted out. Refused rather than ignored
+    // when a named one does not exist: a review asked for as someone and run as no one would
+    // read as their judgement while being nobody's.
+    let personal: TriagePersonalization | undefined;
+    try {
+      personal = resolveReviewProfile(new ProfileStore(db), {
+        subject: profileSubject,
+        none: has(argv, "--no-profile"),
+      });
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      return 1;
+    }
+    if (personal) console.error(color.dim(`reviewing as ${personal.subject}'s profile`));
 
     // Overrides are applied to the pinned copy only; the stored playbook is untouched,
     // so a one-off `--model` never mutates configuration.
@@ -256,6 +289,7 @@ export async function review(argv: string[]): Promise<number> {
         signal: interrupt.signal,
         dryRun: has(argv, "--dry-run"),
         force: has(argv, "--force"),
+        profile: personal,
       });
 
       if (result.skipped) {
@@ -359,6 +393,7 @@ export async function review(argv: string[]): Promise<number> {
           diff: { changedFiles, changedLines },
           commands: [],
         },
+        profile: personal,
         // Ctrl-C aborts the run so the finalizer tears its containers down, rather than
         // killing the process and leaving them up.
         signal: interrupt.signal,

@@ -29,6 +29,9 @@
     },
     {
       "path": "../../packages/mcp"
+    },
+    {
+      "path": "../../packages/profile"
     }
   ],
   "exclude": ["src/**/*.test.ts"]

@@ -19,7 +19,9 @@
     "@maestro/core": "workspace:*",
     "@maestro/llm": "workspace:*",
     "@maestro/playbook": "workspace:*",
+    "@maestro/profile": "workspace:*",
     "@maestro/sandbox": "workspace:*",
-    "picomatch": "4.0.4"
+    "picomatch": "4.0.4",
+    "zod": "^4.1.5"
   }
 }

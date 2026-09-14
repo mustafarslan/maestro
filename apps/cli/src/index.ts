@@ -8,6 +8,7 @@ import { init } from "./commands/init.js";
 import { llm } from "./commands/llm.js";
 import { mcp } from "./commands/mcp.js";
 import { playbook } from "./commands/playbook.js";
+import { profile } from "./commands/profile.js";
 import { prune } from "./commands/prune.js";
 import { reap } from "./commands/reap.js";
 import { review } from "./commands/review.js";
@@ -31,6 +32,7 @@ ${color.bold("COMMANDS")}
   serve                run the daemon: webhooks/poller, workers, admin UI
   mcp                  stdio MCP server for Claude Code
   eval <sub>           score reviews against golden-PR fixtures
+  profile <sub>        answer the calibration battery; show a developer profile
   reap                 sweep leaked containers and snapshot images
   egress-proxy         run the prepare-phase allowlist proxy (used inside a container)
   prune [--days <n>]   delete the step trace of reviews older than n days (default 30)
@@ -79,6 +81,8 @@ async function main(): Promise<number> {
       return mcp(rest);
     case "eval":
       return evaluate(rest);
+    case "profile":
+      return profile(rest);
     default:
       console.error(`unknown command: ${cmd}\n`);
       usage();

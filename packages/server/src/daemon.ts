@@ -32,6 +32,7 @@ import {
 } from "@maestro/integrations";
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore } from "@maestro/playbook";
+import { ProfileStore, resolveReviewProfile } from "@maestro/profile";
 import { DockerSandboxDriver, type SandboxDriver } from "@maestro/sandbox";
 import { type RunningAdmin, startAdminServer } from "./admin.js";
 import { collectBody } from "./api.js";
@@ -432,6 +433,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         }
       : record.doc;
 
+    // Read per review rather than at startup, so `maestro profile activate` takes effect on the
+    // next pull request without restarting the daemon. A profile that cannot be read leaves
+    // the review unpersonalised rather than failing it.
+    let profile: ReturnType<typeof resolveReviewProfile>;
+    try {
+      profile = resolveReviewProfile(new ProfileStore(db));
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : err },
+        "could not read the active profile",
+      );
+    }
+
     const controller = new AbortController();
     try {
       const result = await reviewPullRequest({
@@ -455,6 +469,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         linear,
         pr,
         force,
+        profile,
         // Registering on the RESULT would register a review that has already finished:
         // the map would always be empty at the moment a push needs to cancel something,
         // so cancel-on-push could never fire during the minutes when it matters.

@@ -2,6 +2,7 @@ import { openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import { anthropicTransport, failingTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
 import type { PlaybookDocument } from "@maestro/playbook";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
+import { bundledBattery, scoreBattery } from "@maestro/profile";
 import type { PreparedEnvironment, Sandbox, SandboxDriver } from "@maestro/sandbox";
 import { describe, expect, it } from "vitest";
 import { runReview } from "./engine.js";
@@ -628,5 +629,189 @@ describe("agent spans", () => {
       .all<{ status: string; ended_at: string | null }>(reviewId);
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) expect(r.ended_at).not.toBeNull();
+  });
+});
+
+describe("the triage agent in a review", () => {
+  /**
+   * One specialist, so the scripted replies arrive in a known order: the agent's
+   * submit_findings first, then the triage agent's submit_review.
+   */
+  function oneAgentPlaybook(over: (doc: PlaybookDocument) => PlaybookDocument = (d) => d) {
+    const doc = defaultPlaybook();
+    return over({
+      ...doc,
+      agents: doc.agents.filter((a) => a.id === "security"),
+      graph: {
+        ...doc.graph,
+        nodes: doc.graph.nodes.filter((n) => n.kind !== "agent" || n.agentId === "security"),
+      },
+    });
+  }
+
+  const finding = {
+    file: "src/api/auth.ts",
+    lineStart: 3,
+    category: "prompt-injection",
+    severity: "high",
+    confidence: 0.9,
+    title: "PR text reaches the system prompt",
+    body: "`pr.description` is interpolated unfenced.",
+  };
+  const agentTurn = {
+    toolCalls: [{ id: "a1", name: "submit_findings", input: { findings: [finding] } }],
+  };
+  const triageTurn = {
+    toolCalls: [
+      {
+        id: "t1",
+        name: "submit_review",
+        input: {
+          state: "REQUEST_CHANGES",
+          summary: "Leaks PR text into the prompt; block.",
+          findings: [
+            {
+              id: "F1",
+              disposition: "request_changes",
+              body: "`pr.description` reaches the persona unfenced. Fence it.",
+            },
+          ],
+        },
+      },
+    ],
+  };
+
+  const scored = scoreBattery(bundledBattery(), {});
+  const profile = {
+    subject: "octocat",
+    profile: { ...scored, attributes: { ...scored.attributes, blocking_threshold: 0.4 } },
+  };
+
+  function registryWith(transport: ReturnType<typeof anthropicTransport>) {
+    const registry = new ProviderRegistry();
+    registry.register(fakeConfig(transport, { id: "anthropic" }));
+    return registry;
+  }
+
+  it("decides the review within the rules, and is recorded like any model run", async () => {
+    const db = await openStore({ path: ":memory:" });
+    const pb = new PlaybookStore(db).publish(defaultPlaybook());
+    const reviewId = new ReviewStore(db).create({
+      repoOwner: "o",
+      repoName: "r",
+      prNumber: 1,
+      headSha: "abc",
+      playbookVersionId: pb.id,
+    }).id;
+    const transport = anthropicTransport([agentTurn, triageTurn]);
+
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: registryWith(transport), db },
+      request({ reviewId, playbook: oneAgentPlaybook(), profile }),
+    );
+
+    expect(outcome.state).toBe("done");
+    const t = outcome.triage;
+    expect(t?.personalization?.triageAgent).toEqual({ status: "used" });
+    expect(t?.personalization?.state).toBe("REQUEST_CHANGES");
+    expect(t?.posted[0]?.body).toBe(finding.body);
+    expect(t?.posted[0]?.personalization?.body).toBe(
+      "`pr.description` reaches the persona unfenced. Fence it.",
+    );
+    expect(t?.summary.startsWith("Leaks PR text into the prompt; block.")).toBe(true);
+
+    const node = outcome.nodes.find((n) => n.agentId === "triage");
+    expect(node).toMatchObject({ nodeId: "triage:agent", kind: "triage", state: "done" });
+    expect(node?.costCents).toBeGreaterThan(0);
+    const agentCost = outcome.nodes
+      .filter((n) => n.kind === "agent")
+      .reduce((sum, n) => sum + n.costCents, 0);
+    expect(outcome.costCents).toBeCloseTo(agentCost + (node?.costCents ?? 0), 10);
+
+    const task = db
+      .prepare("SELECT id FROM tasks WHERE review_id=? AND node_id='triage:agent'")
+      .get<{ id: string }>(reviewId);
+    expect(task).toBeDefined();
+    const calls = db
+      .prepare("SELECT COUNT(*) AS n FROM llm_calls WHERE task_id=?")
+      .get<{ n: number }>(task?.id);
+    const turns = db
+      .prepare("SELECT COUNT(*) AS n FROM trajectory_turns WHERE task_id=?")
+      .get<{ n: number }>(task?.id);
+    expect(calls?.n).toBe(1);
+    expect(turns?.n).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it("with no provider for triage, the profile's rules decide and the review still completes", async () => {
+    const transport = anthropicTransport([agentTurn]);
+    const noTriageProvider = oneAgentPlaybook((d) => ({
+      ...d,
+      triage: {
+        ...d.triage,
+        model: { ...d.triage.model, providerId: "not-configured", fallback: [] },
+      },
+    }));
+
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: registryWith(transport) },
+      request({ playbook: noTriageProvider, profile }),
+    );
+
+    expect(outcome.state).toBe("done");
+    const t = outcome.triage;
+    expect(t?.personalization?.triageAgent?.status).toBe("unavailable");
+    expect(t?.personalization?.triageAgent?.note).toMatch(/no configured provider/);
+    // Not an empty review: the rules' decision stands.
+    expect(t?.posted).toHaveLength(1);
+    expect(t?.posted[0]?.personalization?.disposition).toBe("request_changes");
+    expect(outcome.nodes.find((n) => n.agentId === "triage")?.state).toBe("failed");
+  });
+
+  it("a provider error during triage falls back the same way", async () => {
+    const agents = anthropicTransport([agentTurn]);
+    const registry = registryWith(agents);
+    registry.register(
+      fakeConfig(failingTransport(400, "quota exhausted"), { id: "triage-provider" }),
+    );
+    const doc = oneAgentPlaybook((d) => ({
+      ...d,
+      triage: {
+        ...d.triage,
+        model: { ...d.triage.model, providerId: "triage-provider", fallback: [] },
+      },
+    }));
+
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry },
+      request({ playbook: doc, profile }),
+    );
+
+    expect(outcome.state).toBe("done");
+    expect(outcome.triage?.personalization?.triageAgent?.status).toBe("unavailable");
+    expect(outcome.triage?.posted).toHaveLength(1);
+  });
+
+  it("with nothing left to decide, the triage model is not called", async () => {
+    const empty = { toolCalls: [{ id: "a1", name: "submit_findings", input: { findings: [] } }] };
+    const transport = anthropicTransport([empty, triageTurn]);
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: registryWith(transport) },
+      request({ playbook: oneAgentPlaybook(), profile }),
+    );
+    expect(outcome.nodes.some((n) => n.agentId === "triage")).toBe(false);
+    expect(outcome.triage?.personalization?.state).toBe("COMMENT");
+    expect(transport.requests.filter((r) => !r.url.includes("/v1/models"))).toHaveLength(1);
+  });
+
+  it("without a profile the triage model is never called", async () => {
+    const transport = anthropicTransport([agentTurn, triageTurn]);
+    const outcome = await runReview(
+      { driver: fakeDriver(), registry: registryWith(transport) },
+      request({ playbook: oneAgentPlaybook() }),
+    );
+    expect(outcome.nodes.some((n) => n.agentId === "triage")).toBe(false);
+    expect(outcome.triage?.personalization).toBeUndefined();
+    expect(transport.requests.filter((r) => !r.url.includes("/v1/models"))).toHaveLength(1);
   });
 });

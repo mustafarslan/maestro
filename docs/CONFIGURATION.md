@@ -194,17 +194,52 @@ it makes a typo invisible: `{{linear.acceptance_criteria}}` against a field name
 `acceptanceCriteria` leaves the product agent checking a change against no acceptance criteria at
 all, silently. The editor warns while you type and `POST /api/playbook` refuses it.
 
-**`triage.persona` is reserved.** Triage is deterministic — dedupe, cross-agent agreement,
-thresholds and the comment cap are implemented in code rather than asked of a model on every
-run — so the triage persona and its model binding are carried for the narrative pass the design
-describes and are read by nothing today. An agent's persona changes that agent's behaviour;
-this one changes nothing, and nothing at run time would say so.
+**`triage.persona` is read only when a developer profile is active.** Without one, triage is
+deterministic — dedupe, cross-agent agreement, thresholds and the comment cap, in code — and the
+triage persona and its model binding change nothing. With one (`maestro profile activate`, or
+`maestro review --profile`), the triage agent runs on `triage.model` after mechanical triage and
+decides the final review as that developer would, reading this persona beside their profile. The
+rules it cannot break — every fact kept, nothing invented, a finding at σ ≥ 0.80 blocks, only a
+cosmetic finding is left out — are enforced in code on its answer, not asked of it.
 
 **Author-written values are fenced, not spliced.** The persona is rendered into the *system*
 prompt, beside the injection defenses. Interpolating a pull request description there unlabelled
 would hand whoever opened it a direct write into that prompt. Those values arrive inside the same
 nonce-delimited untrusted-content block the user prompt uses, so a description reading "ignore
 previous instructions" is presented as data to review.
+
+## Developer profiles
+
+A profile is a developer's answers to the calibration battery (95 items, version 2.2, embedded in
+the binary), scored into how they gate and how they write. With one active, the specialists still
+review without it; mechanical triage runs; then the triage agent decides the final review as that
+developer would, and the pull request gets the state their profile chooses.
+
+```sh
+maestro profile take --subject octocat      # answer the battery; saves after every answer
+maestro profile show --subject octocat      # scores, and how many answers inform each
+maestro profile activate --subject octocat  # every review now runs as octocat
+maestro profile deactivate
+maestro profile review-first                # items shipped on the authors' judgement
+maestro review <target> --profile hubot     # this review only, as hubot
+maestro review <target> --no-profile        # this review only, as nobody
+```
+
+`maestro serve` reads the active profile for each review, so activating one needs no restart. The
+admin UI's **Profiles** tab shows the same and can activate or deactivate.
+
+**The triage agent** runs on `triage.model` with `triage.persona`. If it cannot run or answers
+outside its contract, the profile's deterministic rules decide the review and the comment says so.
+A finding at σ ≥ 0.80 (critical by default) always blocks and one below σ 0.30 (low, info) never
+does, whatever the profile or the model says.
+
+**Review state.** When the profile blocks, Maestro submits a *Request changes* review. When a later
+round does not block — with a profile or without one — Maestro dismisses its own earlier block, and
+only its own. GitHub does not allow requesting changes on a pull request opened by the account
+Maestro posts as; that round's comment still says what the profile would do.
+
+The thresholds the profile's rules use (`ProfilePolicy`) and the style thresholds (`StyleConfig`)
+are defaults in code; nothing configurable reaches them yet.
 
 ## The golden set
 
@@ -264,6 +299,22 @@ rather than deriving it.
 The false-positive half of an answer key (`forbidden`) is written from what real runs
 report, not guessed at in advance. A forbidden pattern invented up front scores an agent
 against a prediction about its wording.
+
+### Refinement rounds
+
+A candidate playbook can be proposed, scored and judged without activating anything:
+
+```sh
+maestro eval evidence --from <version>                     # what a proposer is shown: training split only
+maestro eval propose --from <version> --proposal edit.json # publish an inactive candidate
+maestro eval run --playbook <candidate>
+maestro eval gate <version> <candidate> --record           # decide, and remember the decision
+```
+
+A proposal is `{"rationale": "...", "edits": [{"path": "...", "value": ...}]}` with at most three
+edits to `agents.<id>.persona`, `triage.minConfidence`, `triage.maxInlineComments`,
+`triage.agreementBoost`, `nodes.<agent node>.proceduralGraph` or `nodes.<gate node>.gate`. Anything
+else is refused, and a refused proposal is remembered so a later round is shown it.
 
 ## Procedural guidance for an agent (experimental)
 

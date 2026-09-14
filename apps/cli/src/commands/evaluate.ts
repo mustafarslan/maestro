@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { maestroHome, openStore, ReviewStore, SpanRecorder } from "@maestro/core";
 import {
+  buildEvidence,
   compareVersions,
   type EvalSplit,
   type Fixture,
@@ -11,7 +12,11 @@ import {
   gateCandidate,
   loadFixtures,
   loadScores,
+  priorRejections,
+  proposeCandidate,
+  proposerPrompt,
   ReviewRecorder,
+  recordGateDecision,
   runReview,
   saveScore,
   scoreOutcome,
@@ -22,7 +27,7 @@ import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/i
 import { ProviderConfigStore } from "@maestro/llm";
 import { PlaybookStore, type PlaybookVersionRecord } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
-import { arg, rejectUnknownFlags, wantsHelp } from "../args.js";
+import { arg, has, rejectUnknownFlags, wantsHelp } from "../args.js";
 import { checkLine, color } from "../ui.js";
 
 /**
@@ -59,6 +64,11 @@ ${color.bold("maestro eval")} <subcommand>
   report                     precision and recall per playbook version and split
   gate <from-version> <candidate-version>
                              would the candidate replace the current playbook?
+    --record                 keep the decision as refinement memory for later rounds
+  evidence --from <version>  the training-split evidence and prompt a refinement round is shown
+  propose --from <version> --proposal <file>
+                             apply a proposed edit to a copy, publish it as an inactive
+                             candidate, and remember it if it is invalid
 
 A fixture is a repository state with a known answer key. Scoring against it turns
 "this persona feels better" into a number, and groups results by playbook version so
@@ -108,7 +118,15 @@ export function resolveEvalPlaybook(
 }
 
 export async function evaluate(argv: string[]): Promise<number> {
-  rejectUnknownFlags(argv, ["--base", "--fixture", "--playbook", "--split"]);
+  rejectUnknownFlags(argv, [
+    "--base",
+    "--fixture",
+    "--playbook",
+    "--split",
+    "--from",
+    "--proposal",
+    "--record",
+  ]);
   const sub = argv[0];
   if (wantsHelp(argv)) return usage(0);
   if (!sub) return usage();
@@ -212,7 +230,87 @@ export async function evaluate(argv: string[]): Promise<number> {
       if (list.length) console.log(`  ${label}: ${list.join(", ")}`);
     }
     console.log(color.dim(`  unchanged: ${d.unchanged.length} of ${d.compared} held out\n`));
+    if (has(argv, "--record")) {
+      const db = await openStore();
+      try {
+        const id = recordGateDecision(db, from, candidate, d);
+        console.log(color.dim(`  recorded as ${id}\n`));
+      } finally {
+        db.close();
+      }
+    }
     return d.accepted ? 0 : 1;
+  }
+
+  if (sub === "evidence" || sub === "propose") {
+    const from = arg(argv, "--from");
+    const file = arg(argv, "--proposal");
+    if (!from || (sub === "propose" && !file)) {
+      console.error(
+        `usage: maestro eval ${sub} --from <version-id>${sub === "propose" ? " --proposal <file>" : ""}`,
+      );
+      return 1;
+    }
+    const db = await openStore();
+    try {
+      const record = new PlaybookStore(db).getVersion(from);
+      if (!record) {
+        console.error(
+          `no playbook version '${from}'. Run 'maestro playbook versions' to list them.`,
+        );
+        return 1;
+      }
+
+      if (sub === "evidence") {
+        const fixtures = loadFixtures(dir);
+        const evidence = buildEvidence({
+          db,
+          scores: loadScores(scoresDir(maestroHome())),
+          fixtures,
+          versionId: from,
+        });
+        const prompt = proposerPrompt(
+          record.doc,
+          evidence,
+          priorRejections(db, record.playbookId),
+          fixtures,
+        );
+        // Refused rather than printed with a warning: a prompt that carries held-out material
+        // makes the gate measure memory, and nothing downstream could tell.
+        if (prompt.leaks.length) {
+          console.error(
+            `refusing: held-out material would reach the prompt: ${prompt.leaks.join(", ")}`,
+          );
+          return 1;
+        }
+        console.log(`${prompt.system}\n\n---\n\n${prompt.user}`);
+        if (!evidence.fixtures.length) {
+          console.error(
+            color.yellow(
+              `\nno training-split scores for ${from}: maestro eval run --split train --playbook ${from}`,
+            ),
+          );
+        }
+        return 0;
+      }
+
+      const result = proposeCandidate(db, {
+        fromVersionId: from,
+        proposal: readFileSync(file as string, "utf8"),
+      });
+      if (!result.ok) {
+        console.error(
+          `invalid proposal, remembered as ${result.attemptId}:\n  ${result.problems.join("\n  ")}`,
+        );
+        return 1;
+      }
+      console.log(color.bold(`\ncandidate ${result.candidate.id} published, not active\n`));
+      console.log(`  maestro eval run --playbook ${result.candidate.id}`);
+      console.log(`  maestro eval gate ${from} ${result.candidate.id} --record\n`);
+      return 0;
+    } finally {
+      db.close();
+    }
   }
 
   if (sub !== "run") return usage();

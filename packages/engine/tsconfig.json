@@ -1,13 +1,29 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"],
   "references": [
-    { "path": "../agents" },
-    { "path": "../core" },
-    { "path": "../llm" },
-    { "path": "../playbook" },
-    { "path": "../sandbox" }
+    {
+      "path": "../agents"
+    },
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../llm"
+    },
+    {
+      "path": "../playbook"
+    },
+    {
+      "path": "../profile"
+    },
+    {
+      "path": "../sandbox"
+    }
   ]
 }

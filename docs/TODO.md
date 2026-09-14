@@ -73,6 +73,94 @@ Two things a future reader should know about the shape that was chosen:
   for publishing a proxy image, and it is the only one. `MAESTRO_PROXY_BINARY` covers the
   air-gapped case today.
 
+## The refinement proposer
+
+**What exists** (`docs/STATUS.md` 241): the validation gate (`gateCandidate`), rejection memory
+(`recordAttempt`, `priorRejections`), a train/val split on the golden set, `created_by` on
+playbook versions, and per-turn agent trajectories in `trajectory_turns`. **What does not:** the
+thing that proposes a candidate. It is a model call, so it waits for a provider — but most of
+what surrounds it does not, and that part can be built and tested first.
+
+**The one rule that decides whether any of this measures anything:** the proposer sees the
+TRAIN half only. If a held-out fixture's name, answer key or score reaches its prompt, the gate
+stops measuring generalisation and starts measuring memory. Enforced in code and in a test that
+builds the prompt over the real golden set and asserts no `val` fixture's name or `match` pattern
+appears in it — not left to a comment.
+
+**Inputs to one round**, all from `train`:
+
+1. The latest train scores for the version being refined: per fixture, `misses` and
+   `falsePositives` (`loadScores`, filtered by version and split).
+2. For each missed fixture, what the agent actually did: its `trajectory_turns`, reduced to the
+   tool calls, their outcomes and the final `submit_findings`, and capped in characters.
+   **Step 0, because this join does not exist:** `EvalScore` carries no review id, so a score
+   cannot be traced back to the run that produced it. Add `reviewId` at scoring time; older
+   scores simply have none and contribute no trajectory.
+3. `priorRejections(db, playbookId, { limit: 20 })`, so a round is not told to rediscover a
+   failure.
+4. The current playbook, restricted to the fields a candidate may change.
+
+**Output:** `{ rationale, edits: [{ path, value }] }`, validated with zod, at most three edits.
+`path` is checked against an allowlist of playbook FIELDS — agent personas,
+`node.config.proceduralGraph` guidance and pitfalls, `triage.minConfidence`,
+`triage.maxInlineComments`, `triage.agreementBoost`, gate node config — and never graph topology
+(`refine.ts` says why: nothing executes `graph.edges`) and never model bindings, which would turn
+a quality search into a cost search.
+
+**One round:**
+
+1. Apply the edits to a copy; `safeParsePlaybook` and `validateGraph`. Invalid →
+   `recordAttempt({ decision: "invalid" })` with the reason, and stop.
+2. `PlaybookStore.publish(candidate, { activate: false, createdBy: "refiner:<attempt id>" })`.
+3. `maestro eval run --playbook <candidate>` over both halves: `val` for the gate, `train` as
+   evidence for the next round.
+4. `gateCandidate(scores, from, candidate)`. Rejected → `recordAttempt` with the decision.
+   Accepted → `recordAttempt` and print it. **Activation stays a human step**
+   (`maestro playbook activate`): at ten held-out fixtures a gate is evidence, not a verdict.
+5. Stop on the round limit, a cost cap, or two rejections in a row.
+
+**Build order**, each step testable before the next:
+
+| step | needs a provider | test |
+| --- | --- | --- |
+| 0. `reviewId` on `EvalScore` — **done, 243** | no | a score written by `eval run` names its review |
+| 1. edit schema, path allowlist, apply-to-copy — **done, 243** | no | disallowed paths refused; topology and bindings untouchable |
+| 2. evidence builder, train only — **done, 243** | no | no val name or pattern in the prompt, over the real golden set |
+| 3. prompt and output parser — **done, 243** | no | malformed or oversized output becomes an `invalid` attempt |
+| 4. the round, fed a hand-written `--proposal <file>` — **done, 243** | no | publish → gate → record, against synthetic scores |
+| 5. the model-backed proposer | yes | one conformance run: valid schema, allowlisted paths |
+| 6. one live round on the finding-239 control arm | yes | a recorded attempt, accepted or not |
+
+Steps 0–4 are the work available while the quota is out. A round in step 6 costs one proposer
+call plus a full twenty-fixture eval, so it runs one round at a time, by hand.
+
+**Open before step 5:** whether one round should edit one agent only, so that a gate decision
+can be attributed to one change; and whether a net-two margin over ten held-out fixtures lets
+through anything but large changes — if nothing ever clears it, that is the golden set asking to
+grow, not the margin asking to shrink.
+
+## Developer profiles: what is left
+
+Built (`docs/STATUS.md` 242): scoring, battery 2.2, the active profile, the triage agent, the
+review state on GitHub, the Profiles tab, recorded dispositions. Left, each with its reason:
+
+- **A live triage agent run.** Every model reply in its tests is scripted. The first real run
+  waits for a provider; until then the rules' fallback is what any profiled review would use.
+- **A live review-state check.** `scripts/live-github-check.mjs --write-review-state` requests
+  changes on a real pull request and dismisses the block. A submitted review cannot be deleted, so
+  it runs on the user's word, against a pull request they choose. Run it under GitHub App auth
+  as well as a token: an App cannot ask who it is, so dismissal relies on the login learned from
+  Maestro's own summary comment, which `reviewPullRequest` finds before it settles the state.
+- **A place to configure the policy.** Every Tier 3 threshold is a field of `ProfilePolicy` and
+  every style threshold of `StyleConfig`, changeable in code; no playbook field, file or flag
+  reaches them. Where they belong — the playbook's `triage` section, so they version and gate with
+  it, or per subject — is a decision for the user.
+- **Which profile a webhook review runs as.** One active profile applies to every repository.
+  Per repository, or whoever asked with `@maestro review`, is a product decision.
+- **A topic for correctness defects.** `off-by-one`, `logic-error` and `type-error` map to no
+  battery topic and so to the neutral weight; with the identity scale that no longer lowers them,
+  but a developer's view on them is never measured. That wants new battery items.
+
 ## Other
 
 - ~~**A live hosted-provider call has never been made.**~~ Done: the conformance suite passes

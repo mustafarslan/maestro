@@ -4,6 +4,7 @@ import { evaluate } from "./commands/evaluate.js";
 import { githubApp } from "./commands/github-app.js";
 import { llm } from "./commands/llm.js";
 import { playbook } from "./commands/playbook.js";
+import { profile } from "./commands/profile.js";
 import { reap } from "./commands/reap.js";
 import { review } from "./commands/review.js";
 
@@ -27,7 +28,7 @@ describe("--help exits 0, a mistake exits 1", () => {
   // usage() doubled as the "you got the arguments wrong" path. Same shape as finding 201,
   // one level down — the guard was fixed at six call sites and these two were not among
   // them, because neither tested `--help` at all.
-  const commands = { playbook, llm, evaluate, reap, githubApp, review, egressProxy };
+  const commands = { playbook, llm, evaluate, reap, githubApp, review, egressProxy, profile };
 
   for (const [name, fn] of Object.entries(commands)) {
     it(`${name} --help`, async () => {
@@ -36,7 +37,7 @@ describe("--help exits 0, a mistake exits 1", () => {
   }
 
   // `reap` takes no subcommands, so it has no wrong-subcommand case to check.
-  for (const [name, fn] of Object.entries({ playbook, llm, evaluate, githubApp })) {
+  for (const [name, fn] of Object.entries({ playbook, llm, evaluate, githubApp, profile })) {
     it(`${name} with a subcommand that does not exist`, async () => {
       expect(await fn(["not-a-subcommand"])).toBe(1);
     });
@@ -70,7 +71,7 @@ describe("-h means help everywhere, including where it did not", () => {
     expect(log.mock.calls.flat().join("\n")).toContain("maestro reap");
   });
 
-  for (const [name, fn] of Object.entries({ playbook, llm, evaluate, githubApp })) {
+  for (const [name, fn] of Object.entries({ playbook, llm, evaluate, githubApp, profile })) {
     it(`${name} -h`, async () => {
       expect(await fn(["-h"])).toBe(0);
     });

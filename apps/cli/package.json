@@ -17,7 +17,8 @@
     "@maestro/sandbox": "workspace:*",
     "@maestro/integrations": "workspace:*",
     "@maestro/server": "workspace:*",
-    "@maestro/mcp": "workspace:*"
+    "@maestro/mcp": "workspace:*",
+    "@maestro/profile": "workspace:*"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

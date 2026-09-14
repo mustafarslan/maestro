@@ -89,6 +89,12 @@ export interface EvalScore {
   fixture: string;
   playbookVersionId?: string;
   /**
+   * The review that produced this score, so a miss can be traced to what the agents actually
+   * did (`trajectory_turns`). Absent on scores written before it was recorded: those still
+   * compare, they just contribute no trajectory to a refinement round.
+   */
+  reviewId?: string;
+  /**
    * Copied from the fixture at scoring time rather than looked up later, because a
    * fixture's split can be edited and a score is a record of a run that already
    * happened. Absent on scores written before splits existed; readers default it.
@@ -169,6 +175,7 @@ export function scoreOutcome(
   return {
     fixture: fixture.name,
     playbookVersionId,
+    reviewId: outcome.reviewId,
     split: splitOf(fixture),
     hits,
     misses,

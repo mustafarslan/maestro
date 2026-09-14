@@ -1,0 +1,83 @@
+{
+  "technical_debt_tolerance": 0.069,
+  "pedantry_level": 0.926,
+  "blocking_threshold": 0.097,
+  "kai_index": 0.0,
+  "regulatory_focus": 0.01,
+  "phi_framing": 0.557,
+  "directness_preference": 0.0,
+  "socratic_preference": 0.0,
+  "hedging_preference": 1.0,
+  "use_negative_politeness_tags": 1.0,
+  "topic_weights": {
+    "concurrency": 0.887,
+    "security": 0.93,
+    "performance": 0.866,
+    "error_handling": 0.948,
+    "testing": 0.87,
+    "api_design": 0.917,
+    "data_integrity": 0.887,
+    "observability": 0.814,
+    "dependency_management": 0.927,
+    "style_formatting": 0.76,
+    "documentation": 0.75,
+    "database_transactions": 0.817,
+    "backward_compatibility": 0.923
+  },
+  "extended_signals": {
+    "comment_density": 0.5,
+    "suggestion_block_usage": 0.533,
+    "test_insistence": 0.71,
+    "scope_discipline": 0.619,
+    "verification_effort": 0.632,
+    "praise_frequency": 0.518,
+    "follow_up_tracking": 0.49,
+    "escalation_propensity": 0.528
+  },
+  "framing_strategy": "Balanced_Inquisitive",
+  "use_negative_politeness_tags_bool": true,
+  "kai_classification": "Adaptor",
+  "regulatory_focus_label": "Prevention",
+  "coverage": {
+    "items_answered": 95,
+    "items_skipped": [],
+    "n_per_attribute": {
+      "technical_debt_tolerance": 26,
+      "pedantry_level": 16,
+      "blocking_threshold": 40,
+      "kai_index": 7,
+      "regulatory_focus": 10,
+      "phi_framing": 20,
+      "directness_preference": 15,
+      "socratic_preference": 15,
+      "hedging_preference": 15,
+      "use_negative_politeness_tags": 15
+    },
+    "n_per_topic": {
+      "concurrency": 6,
+      "security": 4,
+      "performance": 5,
+      "error_handling": 4,
+      "testing": 5,
+      "api_design": 4,
+      "data_integrity": 4,
+      "observability": 5,
+      "dependency_management": 3,
+      "style_formatting": 10,
+      "documentation": 2,
+      "database_transactions": 3,
+      "backward_compatibility": 3
+    },
+    "n_per_extended_signal": {
+      "comment_density": 34,
+      "suggestion_block_usage": 6,
+      "test_insistence": 24,
+      "scope_discipline": 18,
+      "verification_effort": 30,
+      "praise_frequency": 11,
+      "follow_up_tracking": 5,
+      "escalation_propensity": 45
+    }
+  },
+  "safety_floor": "Any defect candidate with sigma >= 0.80 is non-suppressible; Tier 3 must clamp S_effective >= sigma for it regardless of this profile."
+}

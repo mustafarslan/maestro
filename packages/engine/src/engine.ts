@@ -21,7 +21,18 @@ import {
   type SandboxDriver,
 } from "@maestro/sandbox";
 import { type RouteDecision, route } from "./router.js";
-import { type AgentFindings, type TriageResult, triage } from "./triage.js";
+import {
+  type AgentFindings,
+  type TriagePersonalization,
+  type TriageResult,
+  triage,
+} from "./triage.js";
+import {
+  mergeTriageReview,
+  runTriageAgent,
+  triageCandidates,
+  withTriageAgentStatus,
+} from "./triage-agent.js";
 
 export interface EngineDeps {
   driver: SandboxDriver;
@@ -94,6 +105,11 @@ export interface ReviewRequest {
    * one — "we did not check" and "we checked and found nothing" are different claims.
    */
   baselinePath?: string;
+  /**
+   * A developer profile to gate and word the findings for. Absent, the review is exactly
+   * the review it was before profiles existed. It never reaches an agent's prompt.
+   */
+  profile?: TriagePersonalization;
   signal?: AbortSignal;
 }
 
@@ -698,10 +714,121 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
           log,
           () =>
             timedNode(nodes, triageNode, deps.spans, req.reviewId, async () =>
-              triage(req.playbook, collected, comparisons),
+              triage(req.playbook, collected, comparisons, req.profile),
             ),
         )
-      : triage(req.playbook, collected, comparisons);
+      : triage(req.playbook, collected, comparisons, req.profile);
+
+    // ── triage agent: reviews as the developer, only when a profile is active ──
+    //
+    // Outside the triage node's failure policy on purpose. The deterministic result above is
+    // already a complete, correct review; the agent can only improve on it, so every way the
+    // agent can fail — no provider, a quota error, an answer that breaks the contract —
+    // leaves that result in place and says so, rather than degrading to an empty review.
+    const reviewAsDeveloper = async (t: TriageResult): Promise<TriageResult> => {
+      const personal = req.profile as TriagePersonalization;
+      // Nothing survived mechanical triage: the rules' answer — a clean review — is already the
+      // whole answer, and asking a model to say so is a paid call for nothing.
+      if (!triageCandidates(t).length) return t;
+      const nodeId = `${triageNode?.id ?? "triage"}:agent`;
+      const started = Date.now();
+      let release: (() => void) | undefined;
+      try {
+        const binding = deps.registry.resolve(req.playbook.triage.model);
+        release = await deps.acquireSlot?.(
+          {
+            reviewId: req.reviewId,
+            agentId: "triage",
+            repoId: req.repoId ?? req.reviewId,
+            providerId: binding.provider.id,
+          },
+          req.signal,
+        );
+        const run = await runTriageAgent({
+          provider: binding.provider,
+          model: binding.model,
+          doc: req.playbook,
+          triaged: t,
+          personal,
+          context: req.context,
+          budget: {
+            // One answer, plus the loop's single ask to use the tool if it answers in prose.
+            maxSteps: Math.min(req.playbook.triage.model.maxSteps, 3),
+            costCapCents: req.playbook.triage.model.costCapCents,
+            deadlineMs: spec.timeouts.analyzeSec * 1000,
+            maxPromptChars: promptCharBudget(binding.provider, binding.model),
+          },
+          temperature: req.playbook.triage.model.temperature,
+          maxOutputTokens: req.playbook.triage.model.maxTokens,
+          signal: req.signal,
+        });
+        totalCost += run.loop.costCents;
+        modelSteps += run.loop.steps.length;
+
+        const outcome: NodeOutcome = {
+          nodeId,
+          kind: "triage",
+          agentId: "triage",
+          state: run.review ? "done" : "failed",
+          durationMs: Date.now() - started,
+          costCents: run.loop.costCents,
+          model: binding.model,
+          stopKind: run.loop.stopKind,
+          error: run.parseError,
+        };
+        nodes.push(outcome);
+        if (deps.db) {
+          try {
+            const { ReviewRecorder } = await import("./recorder.js");
+            const recorder = new ReviewRecorder(deps.db);
+            const taskId = recorder.recordNode(req.reviewId, outcome);
+            recorder.recordLoop(req.reviewId, taskId, binding.provider.id, binding.model, run.loop);
+            recorder.recordTrajectory(req.reviewId, taskId, run.loop, run.prompts);
+          } catch (err) {
+            log.warn(
+              { err: err instanceof Error ? err.message : err },
+              "triage agent record failed",
+            );
+          }
+        }
+
+        if (!run.review) {
+          log.warn({ reason: run.parseError }, "triage agent gave no usable answer; rules decide");
+          return withTriageAgentStatus(t, "unavailable", run.parseError ?? "no answer");
+        }
+        const merged = mergeTriageReview(
+          t,
+          { review: run.review, aliases: run.aliases, exemplars: run.exemplars },
+          personal,
+          comparisons,
+        );
+        if (merged.adjustments.length) {
+          log.info(
+            { adjustments: merged.adjustments },
+            "triage agent answer adjusted by the rules",
+          );
+        }
+        return merged.triage;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (req.signal?.aborted) return t;
+        log.warn({ err: message }, "triage agent unavailable; the profile's rules decide");
+        nodes.push({
+          nodeId,
+          kind: "triage",
+          agentId: "triage",
+          state: "failed",
+          durationMs: Date.now() - started,
+          costCents: 0,
+          error: message,
+        });
+        return withTriageAgentStatus(t, "unavailable", message);
+      } finally {
+        release?.();
+      }
+    };
+    const reviewed =
+      req.profile && triaged.personalization ? await reviewAsDeveloper(triaged) : triaged;
 
     // ── post (the caller renders or publishes; the node records the step) ──
     const postNode = byKind("post")[0];
@@ -715,7 +842,7 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       });
     }
 
-    return finish({ state: "done", route: decision, triage: triaged });
+    return finish({ state: "done", route: decision, triage: reviewed });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ err: message }, "review failed");

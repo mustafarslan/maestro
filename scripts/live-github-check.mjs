@@ -16,6 +16,9 @@
  * Add --write to also exercise post/find/update. That one creates a comment on the pull
  * request and deletes it again, including if a step fails.
  *
+ * Add --write-review-state to exercise requesting changes and dismissing the block. A review
+ * cannot be deleted, so that one leaves a dismissed review behind; see its section below.
+ *
  * The two review-comment read paths need a pull request that actually has inline comments
  * and a reaction on one, which most do not. `--comments-from=<owner>/<repo>#<number>`
  * points those two checks somewhere else; they are read-only, so any public pull request
@@ -171,6 +174,45 @@ if (process.argv.includes("--write")) {
     });
   } finally {
     await remove();
+  }
+}
+
+/**
+ * The review-state path a developer profile uses, behind its own flag.
+ *
+ * Separate from `--write` because it cannot clean up after itself: a submitted review can be
+ * dismissed but never deleted, so running this leaves one dismissed "changes requested" review
+ * on the target pull request's timeline. Point it at a pull request that exists for testing.
+ *
+ * Either answer to the first call is informative. `requested` proves the request shape and
+ * then the dismissal; `refused` is GitHub declining REQUEST_CHANGES on a pull request the
+ * token's own account opened, which is the degradation `submitReviewState` promises.
+ */
+if (process.argv.includes("--write-review-state")) {
+  console.log("\n  review-state path (leaves one dismissed review on the timeline)\n");
+  let requested;
+  await check("submitReviewState REQUEST_CHANGES", async () => {
+    const result = await client.submitReviewState(
+      pr,
+      "REQUEST_CHANGES",
+      "Maestro live check — this review is dismissed immediately.",
+    );
+    if (result.outcome === "requested") requested = result.reviewId;
+    else if (result.outcome !== "refused") throw new Error(`unexpected outcome ${result.outcome}`);
+    return result.outcome === "requested"
+      ? `review ${result.reviewId} submitted`
+      : `refused as promised: ${result.reason}`;
+  });
+  if (requested) {
+    await check("submitReviewState COMMENT dismisses it", async () => {
+      const result = await client.submitReviewState(pr, "COMMENT", "");
+      if (!result.dismissed.includes(requested)) {
+        throw new Error(
+          `review ${requested} was not dismissed (${result.reason ?? "no reason given"}) — dismiss it by hand`,
+        );
+      }
+      return `dismissed ${result.dismissed.join(", ")}`;
+    });
   }
 }
 
