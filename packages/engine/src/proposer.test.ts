@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
+import { anthropicTransport, fakeConfig, ProviderRegistry } from "@maestro/llm";
 import { defaultPlaybook, PlaybookStore } from "@maestro/playbook";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type EvalScore, type Fixture, loadFixtures, splitOf } from "./eval.js";
@@ -8,11 +9,13 @@ import {
   buildEvidence,
   heldOutLeaks,
   MAX_EDITS,
+  PROPOSAL_TOOL,
   type Proposal,
   parseProposal,
   proposeCandidate,
   proposerPrompt,
   recordGateDecision,
+  runProposer,
 } from "./proposer.js";
 import { gateCandidate, priorRejections } from "./refine.js";
 
@@ -88,6 +91,44 @@ describe("what a candidate may change", () => {
     expect(r.problems).toHaveLength(3);
     expect(r.problems[1]).toBe("agents.nobody.persona: no agent 'nobody'");
     expect(r.problems[2]).toMatch(/belongs on an agent node/);
+  });
+
+  it("refuses a change to two agents in one round, and allows one agent with triage", () => {
+    const [a, b] = doc.agents;
+    const two = applyProposal(
+      doc,
+      proposal([
+        { path: `agents.${a?.id}.persona`, value: "one" },
+        { path: `agents.${b?.id}.persona`, value: "two" },
+      ]),
+    );
+    expect(two.ok).toBe(false);
+    if (!two.ok) expect(two.problems.join(" ")).toMatch(/one agent per round/);
+
+    const graphNodeOfB = doc.graph.nodes.find((n) => n.kind === "agent" && n.agentId === b?.id);
+    const viaGraph = applyProposal(
+      doc,
+      proposal([
+        { path: `agents.${a?.id}.persona`, value: "one" },
+        {
+          path: `nodes.${graphNodeOfB?.id}.proceduralGraph`,
+          value: {
+            nodes: [{ id: "Start" }, { id: "git_diff" }],
+            edges: [{ from: "Start", to: "git_diff" }],
+          },
+        },
+      ]),
+    );
+    expect(viaGraph.ok).toBe(false);
+
+    const withTriage = applyProposal(
+      doc,
+      proposal([
+        { path: `agents.${a?.id}.persona`, value: "one" },
+        { path: "triage.minConfidence", value: 0.5 },
+      ]),
+    );
+    expect(withTriage.ok).toBe(true);
   });
 
   it("refuses a proposal that changes nothing, or edits one field twice", () => {
@@ -307,5 +348,68 @@ describe("a round, from proposal to recorded decision", () => {
     );
     expect(prompt.user).toContain("ALREADY TRIED:");
     expect(prompt.user).toContain('"triage.minConfidence"');
+  });
+});
+
+describe("the model-backed proposer", () => {
+  let db: SqlDatabase;
+  let fromId: string;
+  let playbookId: string;
+  const prompt = { system: "improve it", user: "evidence" };
+
+  beforeEach(async () => {
+    db = await openStore({ path: ":memory:" });
+    const published = new PlaybookStore(db).publish(defaultPlaybook(), {
+      name: "default",
+      activate: true,
+    });
+    fromId = published.id;
+    playbookId = published.playbookId;
+  });
+
+  function scripted(turns: Parameters<typeof anthropicTransport>[0]) {
+    const transport = anthropicTransport(turns);
+    const registry = new ProviderRegistry();
+    registry.register(fakeConfig(transport, { id: "anthropic" }));
+    const { provider } = registry.resolve({
+      providerId: "anthropic",
+      model: "claude-opus-5",
+      fallback: [],
+    });
+    return { provider, transport };
+  }
+
+  it("takes the proposal from submit_proposal, and it publishes as an inactive candidate", async () => {
+    const edit = proposal([{ path: "triage.minConfidence", value: 0.5 }]);
+    const { provider, transport } = scripted([
+      { toolCalls: [{ id: "p", name: PROPOSAL_TOOL, input: edit }] },
+    ]);
+    const run = await runProposer({
+      provider,
+      model: "claude-opus-5",
+      prompt,
+      budget: { maxSteps: 2, costCapCents: 100 },
+    });
+    expect(run.loop.stopKind).toBe("terminal-tool");
+    const tools = (transport.requests[0]?.body.tools as { name: string }[]).map((t) => t.name);
+    expect(tools).toEqual([PROPOSAL_TOOL]);
+
+    const r = proposeCandidate(db, { fromVersionId: fromId, proposal: run.answer });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.candidate.createdBy).toBe("refiner");
+  });
+
+  it("an answer in prose is asked for once, then remembered as invalid", async () => {
+    const { provider, transport } = scripted([{ text: "I would lower the threshold." }]);
+    const run = await runProposer({
+      provider,
+      model: "claude-opus-5",
+      prompt,
+      budget: { maxSteps: 2, costCapCents: 100 },
+    });
+    expect(transport.requests.filter((r) => !r.url.includes("/v1/models"))).toHaveLength(2);
+    const r = proposeCandidate(db, { fromVersionId: fromId, proposal: run.answer });
+    expect(r.ok).toBe(false);
+    expect(priorRejections(db, playbookId)[0]?.reason).toBe("no JSON object in the answer");
   });
 });

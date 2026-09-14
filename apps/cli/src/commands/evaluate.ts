@@ -17,6 +17,7 @@ import {
   proposerPrompt,
   ReviewRecorder,
   recordGateDecision,
+  runProposer,
   runReview,
   saveScore,
   scoreOutcome,
@@ -24,7 +25,7 @@ import {
   splitOf,
 } from "@maestro/engine";
 import { GitHubClient, parsePullRequestRef, reviewPullRequest } from "@maestro/integrations";
-import { ProviderConfigStore } from "@maestro/llm";
+import { ProviderConfigStore, type ProviderRegistry } from "@maestro/llm";
 import { PlaybookStore, type PlaybookVersionRecord } from "@maestro/playbook";
 import { DockerSandboxDriver } from "@maestro/sandbox";
 import { arg, has, rejectUnknownFlags, wantsHelp } from "../args.js";
@@ -66,9 +67,12 @@ ${color.bold("maestro eval")} <subcommand>
                              would the candidate replace the current playbook?
     --record                 keep the decision as refinement memory for later rounds
   evidence --from <version>  the training-split evidence and prompt a refinement round is shown
-  propose --from <version> --proposal <file>
+  propose --from <version> [--proposal <file>]
                              apply a proposed edit to a copy, publish it as an inactive
-                             candidate, and remember it if it is invalid
+                             candidate, and remember it if it is invalid; without
+                             --proposal a model writes one from the training evidence
+    --provider <id>          the proposer's provider (default: the version's triage model)
+    --model <id>             the proposer's model
 
 A fixture is a repository state with a known answer key. Scoring against it turns
 "this persona feels better" into a number, and groups results by playbook version so
@@ -125,6 +129,8 @@ export async function evaluate(argv: string[]): Promise<number> {
     "--split",
     "--from",
     "--proposal",
+    "--provider",
+    "--model",
     "--record",
   ]);
   const sub = argv[0];
@@ -245,9 +251,9 @@ export async function evaluate(argv: string[]): Promise<number> {
   if (sub === "evidence" || sub === "propose") {
     const from = arg(argv, "--from");
     const file = arg(argv, "--proposal");
-    if (!from || (sub === "propose" && !file)) {
+    if (!from) {
       console.error(
-        `usage: maestro eval ${sub} --from <version-id>${sub === "propose" ? " --proposal <file>" : ""}`,
+        `usage: maestro eval ${sub} --from <version-id>${sub === "propose" ? " [--proposal <file>]" : ""}`,
       );
       return 1;
     }
@@ -261,28 +267,29 @@ export async function evaluate(argv: string[]): Promise<number> {
         return 1;
       }
 
-      if (sub === "evidence") {
-        const fixtures = loadFixtures(dir);
-        const evidence = buildEvidence({
-          db,
-          scores: loadScores(scoresDir(maestroHome())),
-          fixtures,
-          versionId: from,
-        });
-        const prompt = proposerPrompt(
-          record.doc,
-          evidence,
-          priorRejections(db, record.playbookId),
-          fixtures,
+      const fixtures = sub === "evidence" || !file ? loadFixtures(dir) : [];
+      const evidence = buildEvidence({
+        db,
+        scores: sub === "evidence" || !file ? loadScores(scoresDir(maestroHome())) : [],
+        fixtures,
+        versionId: from,
+      });
+      const prompt = proposerPrompt(
+        record.doc,
+        evidence,
+        priorRejections(db, record.playbookId),
+        fixtures,
+      );
+      // Refused rather than printed or sent with a warning: a prompt that carries held-out
+      // material makes the gate measure memory, and nothing downstream could tell.
+      if ((sub === "evidence" || !file) && prompt.leaks.length) {
+        console.error(
+          `refusing: held-out material would reach the prompt: ${prompt.leaks.join(", ")}`,
         );
-        // Refused rather than printed with a warning: a prompt that carries held-out material
-        // makes the gate measure memory, and nothing downstream could tell.
-        if (prompt.leaks.length) {
-          console.error(
-            `refusing: held-out material would reach the prompt: ${prompt.leaks.join(", ")}`,
-          );
-          return 1;
-        }
+        return 1;
+      }
+
+      if (sub === "evidence") {
         console.log(`${prompt.system}\n\n---\n\n${prompt.user}`);
         if (!evidence.fixtures.length) {
           console.error(
@@ -294,10 +301,52 @@ export async function evaluate(argv: string[]): Promise<number> {
         return 0;
       }
 
-      const result = proposeCandidate(db, {
-        fromVersionId: from,
-        proposal: readFileSync(file as string, "utf8"),
-      });
+      let proposal: unknown;
+      if (file) {
+        proposal = readFileSync(file, "utf8");
+      } else {
+        if (!evidence.fixtures.length) {
+          console.error(
+            `no training-split scores for ${from}, so a proposer would have nothing to learn from: maestro eval run --split train --playbook ${from}`,
+          );
+          return 1;
+        }
+        // The version's own triage model unless told otherwise. The proposer is not an agent in
+        // the playbook, and giving it a binding of its own would put a model binding where a
+        // candidate cannot reach it anyway.
+        const base = record.doc.triage.model;
+        const providerOverride = arg(argv, "--provider");
+        const modelOverride = arg(argv, "--model");
+        const binding = {
+          ...base,
+          ...(providerOverride ? { providerId: providerOverride, fallback: [] } : {}),
+          ...(modelOverride ? { model: modelOverride } : {}),
+        };
+        let resolved: ReturnType<ProviderRegistry["resolve"]>;
+        try {
+          resolved = (await new ProviderConfigStore(db).buildRegistry()).resolve(binding);
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          return 1;
+        }
+        console.log(color.dim(`proposing with ${resolved.provider.id} / ${resolved.model}…`));
+        const run = await runProposer({
+          provider: resolved.provider,
+          model: resolved.model,
+          prompt,
+          // One answer, and the loop's single ask to use the tool if it answers in prose.
+          budget: { maxSteps: 2, costCapCents: binding.costCapCents, deadlineMs: 300_000 },
+          temperature: binding.temperature,
+          maxOutputTokens: binding.maxTokens,
+        });
+        console.log(
+          color.dim(
+            `proposer stopped with '${run.loop.stopKind}' after ${run.loop.steps.length} step(s), ${run.loop.usage.inputTokens} in / ${run.loop.usage.outputTokens} out tokens`,
+          ),
+        );
+        proposal = run.answer;
+      }
+      const result = proposeCandidate(db, { fromVersionId: from, proposal });
       if (!result.ok) {
         console.error(
           `invalid proposal, remembered as ${result.attemptId}:\n  ${result.problems.join("\n  ")}`,
