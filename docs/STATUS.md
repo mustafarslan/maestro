@@ -14,14 +14,14 @@ The gap between those two columns is the honest summary of this project's state.
 | 0 Foundation | compiled binary opens SQLite, migrates, validates the default playbook, enqueues and claims a job; `doctor` reports Docker/git/config/migrations | yes | yes — every clean-checkout gate run, and the store driver's contract is now checked on **both** runtimes rather than only the one vitest happens to use (128) |
 | 1 Provider layer | `maestro llm test --all` does a tool-calling round trip and a schema-constrained output per provider; `maestro llm models` lists the live catalog | yes | **the full conformance suite passes live against three hosted models** — `glm-5.3:cloud`, `deepseek-v4-pro:cloud`, `kimi-k3:cloud` — covering completion, tool call, multi-turn loop with a terminal tool, usage accounting and error mapping. `anthropic` and `google` are verified as far as a refusal (200): reachable, and a rejected key mapped non-retryable; their happy path needs a key |
 | 2 Engine + agents | real findings on a real diff; sandbox network-isolated during analyze and torn down; persona/model edits and a second agent node change behaviour with no code change | yes | yes — findings on this repository and on `notabase`; isolation asserted in `docker.integration.test.ts` |
-| 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes — including **anchored inline comments** (170), which the row claimed and nothing built | webhook path verified by signing real payloads against the running daemon; **never driven by GitHub itself** |
-| 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, `serve`'s secret resolution and both `identity()` branches are tested against mocks; **no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised** |
+| 3 GitHub | PR opened → comment within minutes; nothing left behind; two quick pushes yield one comment for the newer SHA | yes — including **anchored inline comments** (170), which the row claimed and nothing built | webhook path verified by signing real payloads against the running daemon, and by replaying deliveries GitHub itself composed and signed ("The live GitHub run"); **a delivery reaching a daemon over the network has not happened** |
+| 3 GitHub App | manifest flow in `init` | yes — `maestro github-app create/installed/show` | an App (`maestro-live-test`) was created on 2026-09-10 and is installed; under its installation token the read paths, clone token, and `REQUEST_CHANGES` with dismissal all ran live on 2026-09-14 (242) |
 | 4 MCP | trigger a review, read findings and change a model from a Claude Code session | yes — all 10 planned tools plus `list_providers`, `review_stats`, `validate_playbook` | yes, against the **compiled binary**, and the exit criterion is now *performed* rather than implied: `scripts/mcp-protocol-check.mjs` reads the playbook over JSON-RPC, rebinds an agent, and reads it back changed. Runs in the gate |
 | 5 Full crew + minimal UI | one comment, ≥3 agents, no duplicates, metrics block, watchable in the browser | yes | yes, against Ollama Cloud |
 | 6 Playbook Studio | add an agent, write its persona, bind a different provider, raise memory, publish — next PR uses it, in-flight reviews finish on their pinned version | yes — React Flow canvas, persona editor, model picker with live catalog, **test connection**, env spec form, versions, per-repo assignment, **version diff** (160), **gate nodes with per-node failure policy** (162) and **rewiring with live port checking** (163), **template variables with the untrusted ones fenced** (164, 165) and **the golden-set findings delta under the persona slot** (168) — every item the phase names | publish/rollback/pin verified; test connection verified against Ollama; diff verified live against the binary |
-| 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency; **not 40 real containers** |
+| 7 Concurrency | 10 PRs across 3 repos complete; kill and restart mid-run with no leaks or duplicates | yes — fairness, limits, cache reuse, cancel-on-push, incremental, lease recovery, reaper, **spend caps** and **disk backpressure** (174), the half of the phase's backpressure line that had nothing behind it | scheduler test runs all 40 tasks with real concurrency, and `scripts/load-check.mjs` runs 30 reviews across 3 repositories against real Docker, with `scripts/crash-recovery-check.mjs` for kill and restart |
 | 8 Observability | click a failed task and read the error, the prompt and the playbook version | yes — live board, waterfall, environments, providers, quality | yes |
-| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the twenty committed fixtures, one complete control arm, with the run-to-run noise floor measured (findings 232, 239); no long-run acceptance history exists yet |
+| 9 Measurement | `maestro eval` scores; UI shows acceptance by agent **and a version-versus-version comparison** | yes — both, the second added after this audit found only the CLI and MCP could reach `compareVersions` | scoring verified against the twenty committed fixtures: two control arms and a guided arm, with the run-to-run noise floor measured (findings 232, 239, 244); no long-run acceptance history exists yet |
 | 10 Hardening | installer, multi-platform release, Compose, abuse controls, injection suite, docs | yes — `install.sh`, release CI, Compose, signature + association + body-size + spend controls, `injection.test.ts`, five docs | installer verified against a served artifact (found 130) **and against the real GitHub release**: all four published assets downloaded and confirmed by executable header to be built for the platform they are named for, and the darwin-arm64 one installed by `install.sh` and run; Compose runs locally; **no full model review has been driven through Compose** |
 
 What that leaves, in order of how much it would tell us:
@@ -197,7 +197,8 @@ insecure neighbour, so it was not pattern-matching on "API route".
   proved nothing: authentication is checked before validation, so a well-formed request and a
   deliberately malformed one both return the same 401. The request body *is* asserted directly in
   the test suite. All live model calls in this project used Ollama. The shipped default playbook
-  binds every agent to Anthropic, so a fresh install needs an `ANTHROPIC_API_KEY` before it runs.
+  binds its agents to Anthropic with `glm-5.3:cloud` on Ollama as the declared fallback, so a fresh
+  install without an `ANTHROPIC_API_KEY` reviews on Ollama instead.
 - **The prompt-size guard falls back to a constant on models it has no window for.** It is sized
   from `capabilities.contextWindow` where that is known, and every model tested live is an Ollama
   one with no entry, so those used the 400k-character default. That was enough for a 131k-token
@@ -205,12 +206,12 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
   Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
   admin UI on its first run.
-- **No GitHub App has been registered.** The manifest flow that creates one now exists and its
-  parts are tested — manifest shape, code exchange, 0600 storage, the `fromEnv` fallback, and the
-  `doctor` states including "created but installed nowhere". What has not happened is a real run:
-  no App has been created on GitHub, so the redirect and the conversion endpoint are unexercised.
-  Webhook deliveries were verified by signing real payloads with the configured secret and posting
-  them to the running daemon, which is the same code path GitHub exercises.
+- ~~**No GitHub App has been registered.**~~ **Done.** `maestro-live-test` was created on
+  2026-09-10 and is installed; `maestro doctor` authenticates as its installation, and on
+  2026-09-14 the live check ran every read path, the clone token and the review-state writes under
+  it (242). What is still unexercised is an App delivery reaching a daemon over the network —
+  deliveries GitHub composed and signed were replayed locally ("The live GitHub run"), which
+  leaves only TCP reachability.
 - ~~**No multi-platform release has been downloaded and run.**~~ **Done.** All four assets of
   v0.1.0 were downloaded from GitHub and identified by executable header —
   `darwin-arm64` Mach-O arm64, `darwin-x64` Mach-O x86_64, `linux-x64` ELF x86-64,
@@ -224,9 +225,9 @@ insecure neighbour, so it was not pattern-matching on "API route".
 - **No full model review has been driven through Compose.** Everything up to that point is
   verified against a running deployment, including the sandbox-network path the egress proxy
   depends on. What has not run is a review that actually calls a model, which needs credentials.
-- **The load scenario is simulated, not run against real Docker.** The plan's "10 simultaneous PRs
-  across 3 repos" now runs as a scheduler test with all 40 agent tasks and real concurrency, and it
-  found a fairness bug; it does not start 40 real containers.
+- ~~**The load scenario is simulated, not run against real Docker.**~~ **Done.**
+  `scripts/load-check.mjs` runs 30 reviews across 3 repositories against real Docker, and
+  `scripts/crash-recovery-check.mjs` covers the kill-and-restart half; see the open list above.
 
 ## Known limitations
 
@@ -237,9 +238,10 @@ insecure neighbour, so it was not pattern-matching on "API route".
   otherwise an agent blames the code for a broken environment.
 - **Base images are the non-slim variants** (`node:22-bookworm`, not `-slim`) because slim images
   ship without git, which silently broke every git tool. Larger images, correct diffs.
-- **Triage is deterministic**, not an LLM pass. Dedupe, agreement, thresholds and caps are
-  mechanical and testable. An LLM-written narrative is a reasonable future addition; the mechanical
-  parts should stay mechanical.
+- **Triage is deterministic unless a developer profile is active.** Dedupe, agreement, thresholds
+  and caps are mechanical and testable, and always run. With a profile active, a triage agent then
+  decides the final review as that developer would, inside invariants enforced in code, falling
+  back to the mechanical result on any failure (242).
 - **`docker-compose.yml` mounts the Docker socket.** That grants Maestro control of the host
   daemon. Agent containers never receive it, but run the daemon on a host you would trust with
   that.
@@ -4139,4 +4141,16 @@ harness exists to measure per playbook version.
     Precision is not reported: as 239 found, it moves with how many unkeyed things an agent
     mentions, and a shorter contract changes exactly that. Thermal pressure stayed nominal
     throughout; the runner paused once for sixty seconds on a load spike from Spotlight.
+
+245. **An agent out of time lost everything it had found.** The loop told an agent to submit when
+    its steps or its cost ran low, never when the clock did, so a slow model with steps to spare
+    was stopped by the deadline with nothing submitted. `reaper-double-count` scored zero that way
+    in five runs of five (239, 244): 26 steps, then 900 seconds, then `stopKind: deadline` and no
+    findings. The wrap-up turn now also fires when 80% of the deadline is gone, or when two more
+    steps at the pace of the slowest so far would not fit, and says the agent is almost out of
+    time. Tested with a run whose steps outlast the clock long before they outlast the step budget:
+    it is told, and it submits. Also corrected here: five "not yet verified" and limitation entries
+    that later findings had already settled — the GitHub App, the load scenario, the Anthropic-only
+    default, deterministic triage, and the measurement row.
+
 

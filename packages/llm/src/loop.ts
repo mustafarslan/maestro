@@ -134,6 +134,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   let totalCost = 0;
   let finalText = "";
   let askedToSubmit = false;
+  /** The longest a step has taken so far, model call and tools together, to see a deadline coming. */
+  let slowestStepMs = 0;
   /** The synthetic turn carrying the previous step's guidance, so the next one can replace it. */
   let lastGuidance: Message | undefined;
 
@@ -148,6 +150,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   });
 
   for (let index = 0; index < budget.maxSteps; index++) {
+    const stepStartedAt = Date.now();
     if (opts.signal?.aborted) return stop("aborted");
     if (budget.deadlineMs && Date.now() - startedAt > budget.deadlineMs) return stop("deadline");
     // Checked before the call, because the cheapest way to respect a cap is not to spend.
@@ -248,10 +251,20 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
     const wrapUpAt = opts.wrapUpAtStepsRemaining ?? 3;
     const remaining = budget.maxSteps - index - 1;
     const nearCostCap = totalCost >= budget.costCapCents * 0.8;
-    if (remaining > 0 && (remaining <= wrapUpAt || nearCostCap)) {
+    // The wall clock too. Without it a slow model with steps to spare is cut off by the
+    // deadline with nothing submitted — `reaper-double-count` lost every finding that way in
+    // five runs out of five, 26 steps into a 900-second budget. Near means 80% gone, as for
+    // cost, or the next two steps at the pace of the slowest so far not fitting in what is left.
+    const elapsed = Date.now() - startedAt;
+    slowestStepMs = Math.max(slowestStepMs, Date.now() - stepStartedAt);
+    const nearDeadline =
+      !!budget.deadlineMs &&
+      (elapsed >= budget.deadlineMs * 0.8 || elapsed + 2 * slowestStepMs >= budget.deadlineMs);
+    if (remaining > 0 && (remaining <= wrapUpAt || nearCostCap || nearDeadline)) {
       parts.push(
         `You have ${remaining} step${remaining === 1 ? "" : "s"} left` +
           (nearCostCap ? " and are near your cost budget" : "") +
+          (nearDeadline ? " and are almost out of time" : "") +
           `. Stop investigating and call ${terminalTool} now with what you already have. ` +
           "Reporting fewer, well-supported findings is the expected outcome; an empty list is valid.",
       );

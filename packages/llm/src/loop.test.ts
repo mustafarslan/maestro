@@ -448,6 +448,47 @@ describe("the wall-clock deadline", () => {
     expect(result.stopKind).toBe("deadline");
   });
 
+  it("tells the agent to submit before the deadline cuts it off, with steps to spare", async () => {
+    // Plenty of steps and budget; only the clock is running out. Each step takes ~40ms of a
+    // 150ms deadline, so by the second step two more at that pace no longer fit.
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: { value: "a" } }] },
+      { toolCalls: [{ id: "2", name: "echo", input: { value: "b" } }] },
+      { toolCalls: [{ id: "3", name: "submit", input: { answer: "in time" } }] },
+    ]);
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async (c) => {
+        await new Promise((r) => setTimeout(r, 40));
+        return { output: JSON.stringify(c.input) };
+      },
+      budget: { maxSteps: 50, costCapCents: 1e9, deadlineMs: 150 },
+    });
+
+    expect(t.requests.some((r) => JSON.stringify(r.body).includes("almost out of time"))).toBe(
+      true,
+    );
+    expect(result.stopKind).toBe("terminal-tool");
+  });
+
+  it("does not warn about time on a run with room to spare", async () => {
+    const t = anthropicTransport([
+      { toolCalls: [{ id: "1", name: "echo", input: {} }] },
+      { toolCalls: [{ id: "2", name: "submit", input: { answer: "done" } }] },
+    ]);
+    await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 50, costCapCents: 1e9, deadlineMs: 60_000 },
+    });
+
+    expect(t.requests.every((r) => !JSON.stringify(r.body).includes("almost out of time"))).toBe(
+      true,
+    );
+  });
+
   it("does not stop a run that finishes inside it", async () => {
     // The guard must not be a timer that fires regardless: a fast run reaches its terminal
     // tool, and reporting "deadline" there would mark good reviews as degraded.
