@@ -4149,7 +4149,8 @@ harness exists to measure per playbook version.
     findings. The wrap-up turn now also fires when 80% of the deadline is gone, or when two more
     steps at the pace of the slowest so far would not fit, and says the agent is almost out of
     time. Tested with a run whose steps outlast the clock long before they outlast the step budget:
-    it is told, and it submits. Also corrected here: five "not yet verified" and limitation entries
+    it is told, and it submits. **Live:** `reaper-double-count` against the control playbook on
+    `deepseek-v4-pro:cloud` scored recall 100% in 782 seconds — it submitted inside the deadline. Also corrected here: five "not yet verified" and limitation entries
     that later findings had already settled — the GitHub App, the load scenario, the Anthropic-only
     default, deterministic triage, and the measurement row.
 
