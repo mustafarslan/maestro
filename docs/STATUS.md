@@ -4071,6 +4071,12 @@ committed, traced the new config field through three packages, and found that no
     and no tool call — so every fallback is now `glm-5.3:cloud`, and the conformance suite gives a
     reasoning model 1024 tokens before calling it unusable.
 
+    **Review state, live.** `scripts/live-github-check.mjs --write-review-state` on
+    `mustafarslan/maestro#5`, both credentials. Under the author's token GitHub answered 422 and
+    Maestro reported *refused* rather than throwing. Under the App installation the
+    `REQUEST_CHANGES` review (5196844015) was submitted and then dismissed in the same process —
+    the dismissal that would have failed before the App learned its login from the review it placed.
+
 243. **The refinement proposer, up to the model call.** Steps 0–4 of the plan in `docs/TODO.md`.
     A score now carries the review that produced it, so a training miss can be traced to what the
     agents did. `proposer.ts` holds the rest: an allowlist of fields a candidate may change

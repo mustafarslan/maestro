@@ -146,7 +146,10 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
 
 - ~~**A live triage agent run.**~~ Done 2026-09-14 on `glm-5.3:cloud`: `comment-marker-author`
   reviewed as a conservative profile, the agent's answer used, the finding blocked and reworded.
-- **A live review-state check.** `scripts/live-github-check.mjs --write-review-state` requests
+- ~~**A live review-state check.**~~ Done 2026-09-14 on `mustafarslan/maestro#5`: under a token,
+  GitHub refused a block on the account's own pull request and Maestro reported it; under the App,
+  review 5196844015 was submitted and then dismissed by the login learned from it.
+  `scripts/live-github-check.mjs --write-review-state` requests
   changes on a real pull request and dismisses the block. A submitted review cannot be deleted, so
   it runs on the user's word, against a pull request they choose. Run it under GitHub App auth
   as well as a token: an App cannot ask who it is, so dismissal relies on the login learned from
