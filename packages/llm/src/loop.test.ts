@@ -470,6 +470,9 @@ describe("the wall-clock deadline", () => {
       true,
     );
     expect(result.stopKind).toBe("terminal-tool");
+    // And the step says so, which is what the transcript is written from.
+    expect(result.steps.some((s) => s.followUp?.includes("almost out of time"))).toBe(true);
+    expect(result.steps.every((s) => typeof s.elapsedMs === "number")).toBe(true);
   });
 
   it("does not warn about time on a run with room to spare", async () => {

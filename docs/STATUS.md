@@ -4149,8 +4149,14 @@ harness exists to measure per playbook version.
     findings. The wrap-up turn now also fires when 80% of the deadline is gone, or when two more
     steps at the pace of the slowest so far would not fit, and says the agent is almost out of
     time. Tested with a run whose steps outlast the clock long before they outlast the step budget:
-    it is told, and it submits. **Live:** `reaper-double-count` against the control playbook on
-    `deepseek-v4-pro:cloud` scored recall 100% in 782 seconds — it submitted inside the deadline. Also corrected here: five "not yet verified" and limitation entries
+    it is told, and it submits. **Live, not yet attributable:** `reaper-double-count` against the control
+    playbook on `deepseek-v4-pro:cloud` scored recall 100% in 782 seconds, submitting at step 16
+    rather than running out at 26 — but whether the warning fired cannot be read from that run:
+    transcripts recorded only model turns and tool results, never the turns the loop adds, and every
+    turn carried the same write time. One pass on a fixture that had failed five times is suggestive
+    and inside what run-to-run variation can produce. So steps now carry what the loop told the model
+    next and their elapsed time, and the recorder writes that turn marked `synthetic`; the next run
+    of this fixture will show whether the warning was given and when. Also corrected here: five "not yet verified" and limitation entries
     that later findings had already settled — the GitHub App, the load scenario, the Anthropic-only
     default, deterministic triage, and the measurement row.
 

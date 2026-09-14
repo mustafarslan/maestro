@@ -41,11 +41,15 @@ const loopWith = (
     text?: string;
     toolCalls?: { id: string; name: string; input: unknown }[];
     toolResults?: { callId: string; name: string; output: string; isError?: boolean }[];
+    followUp?: string;
+    elapsedMs?: number;
   }[],
 ): LoopResult => ({
   steps: steps.map((s) => ({
     index: s.index,
     costCents: 1,
+    ...(s.followUp ? { followUp: s.followUp } : {}),
+    ...(s.elapsedMs !== undefined ? { elapsedMs: s.elapsedMs } : {}),
     toolResults: s.toolResults ?? [],
     response: {
       text: s.text ?? "",
@@ -85,6 +89,35 @@ beforeEach(async () => {
 });
 
 describe("ReviewRecorder", () => {
+  it("writes the loop's own turns into the transcript, marked, with each step's time", () => {
+    const taskId = recorder.recordNode(reviewId, node());
+    recorder.recordTrajectory(
+      reviewId,
+      taskId,
+      loopWith([
+        {
+          index: 0,
+          toolCalls: [{ id: "1", name: "read_file", input: {} }],
+          toolResults: [{ callId: "1", name: "read_file", output: "x" }],
+          followUp: "You have 5 steps left and are almost out of time.",
+          elapsedMs: 720_000,
+        },
+        {
+          index: 1,
+          toolCalls: [{ id: "2", name: "submit_findings", input: {} }],
+          elapsedMs: 760_000,
+        },
+      ]),
+    );
+    const rows = turns(taskId);
+    expect(rows.map((r) => r.role)).toEqual(["assistant", "tool", "user", "assistant"]);
+    expect(JSON.parse(rows[2]?.content_json ?? "{}")).toEqual({
+      text: "You have 5 steps left and are almost out of time.",
+      synthetic: true,
+    });
+    expect(JSON.parse(rows[0]?.content_json ?? "{}").elapsedMs).toBe(720_000);
+  });
+
   it("returns the surviving task id when a node is recorded twice", async () => {
     // Regression: a re-review upserts the task, keeping the original row and id.
     // Returning the freshly generated id made every llm_calls insert fail its FK.

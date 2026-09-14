@@ -44,6 +44,14 @@ export interface LoopStep {
   response: ChatResponse;
   toolResults: ToolResult[];
   costCents: number;
+  /**
+   * The turn the loop itself added after this step — guidance, a wrap-up warning, the ask to
+   * submit — which the model read next. Kept on the step because it is not in `steps`
+   * otherwise, and a transcript without it cannot show whether a warning was ever given.
+   */
+  followUp?: string;
+  /** Milliseconds from the start of the run to the end of this step. */
+  elapsedMs?: number;
 }
 
 export interface LoopResult {
@@ -181,7 +189,18 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
     if (response.text) finalText = response.text;
 
     if (!response.toolCalls.length) {
-      const step: LoopStep = { index, response, toolResults: [], costCents: stepCost };
+      const askNow = !askedToSubmit && index < budget.maxSteps - 1;
+      const ask =
+        `You answered in prose, but only ${terminalTool} is recorded - anything outside that call is discarded. ` +
+        `Call ${terminalTool} now with the findings from your analysis. An empty list is valid if you found nothing.`;
+      const step: LoopStep = {
+        index,
+        response,
+        toolResults: [],
+        costCents: stepCost,
+        elapsedMs: Date.now() - startedAt,
+        ...(askNow ? { followUp: ask } : {}),
+      };
       steps.push(step);
       await opts.onStep?.(step);
       messages.push({ role: "assistant", content: response.text });
@@ -189,14 +208,9 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       // Some models answer in prose instead of calling the terminal tool. Discarding
       // that work outright wastes a whole agent run, so ask once, explicitly, before
       // giving up. Only once: a model that ignores the second ask will ignore a third.
-      if (!askedToSubmit && index < budget.maxSteps - 1) {
+      if (askNow) {
         askedToSubmit = true;
-        messages.push({
-          role: "user",
-          content:
-            `You answered in prose, but only ${terminalTool} is recorded - anything outside that call is discarded. ` +
-            `Call ${terminalTool} now with the findings from your analysis. An empty list is valid if you found nothing.`,
-        });
+        messages.push({ role: "user", content: ask });
         continue;
       }
       return stop("no-tool-calls");
@@ -208,7 +222,13 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
     // once the agent has submitted its findings, further tool work is noise.
     const terminal = response.toolCalls.find((c) => c.name === terminalTool);
     if (terminal) {
-      const step: LoopStep = { index, response, toolResults: [], costCents: stepCost };
+      const step: LoopStep = {
+        index,
+        response,
+        toolResults: [],
+        costCents: stepCost,
+        elapsedMs: Date.now() - startedAt,
+      };
       steps.push(step);
       await opts.onStep?.(step);
       return stop("terminal-tool", terminal.input);
@@ -311,6 +331,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       response,
       toolResults: toolResults.map((r) => ({ ...r })),
       costCents: stepCost,
+      elapsedMs: Date.now() - startedAt,
+      ...(parts.length ? { followUp: parts.join("\n\n") } : {}),
     };
     steps.push(step);
     await opts.onStep?.(step);

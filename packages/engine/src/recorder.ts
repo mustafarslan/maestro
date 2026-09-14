@@ -194,9 +194,13 @@ export class ReviewRecorder {
           text: step.response.text,
           toolCalls: step.response.toolCalls,
           finishReason: step.response.finishReason,
+          ...(step.elapsedMs !== undefined ? { elapsedMs: step.elapsedMs } : {}),
         });
         // A step that called the terminal tool, or answered in prose, has no results.
         if (step.toolResults.length) write(step.index, "tool", { results: step.toolResults });
+        // What the loop told the model next. Marked, because it is Maestro's text rather than
+        // the task's, and without it a transcript cannot show whether a warning was given.
+        if (step.followUp) write(step.index, "user", { text: step.followUp, synthetic: true });
       }
     });
   }
