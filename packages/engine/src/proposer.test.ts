@@ -391,7 +391,9 @@ describe("the model-backed proposer", () => {
       budget: { maxSteps: 2, costCapCents: 100 },
     });
     expect(run.loop.stopKind).toBe("terminal-tool");
-    const tools = (transport.requests[0]?.body.tools as { name: string }[]).map((t) => t.name);
+    const tools = ((transport.requests[0]?.body.tools ?? []) as { name: string }[]).map(
+      (t) => t.name,
+    );
     expect(tools).toEqual([PROPOSAL_TOOL]);
 
     const r = proposeCandidate(db, { fromVersionId: fromId, proposal: run.answer });
