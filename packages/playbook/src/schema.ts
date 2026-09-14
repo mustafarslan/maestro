@@ -146,6 +146,61 @@ export const RouterSchema = z.object({
 });
 
 // ── Triage ───────────────────────────────────────────────────────────────────
+const unit = z.number().min(0).max(1);
+
+/**
+ * Overrides for the thresholds a developer profile's rules use, merged field by field over the
+ * defaults in `@maestro/profile` (arrays replace). Here rather than per subject: the battery
+ * measures the developer, this is Maestro's mapping from that measurement to a decision, and two
+ * profiles are only comparable under one mapping. Versioned and diffed with the playbook.
+ *
+ * The two safety lines — σ ≥ 0.80 always blocks, σ < 0.30 never does — are not fields. A policy
+ * can move a severity across them; it cannot move them.
+ */
+export const ProfilePolicyOverrideSchema = z
+  .object({
+    severitySigma: z
+      .object({
+        critical: unit.optional(),
+        high: unit.optional(),
+        medium: unit.optional(),
+        low: unit.optional(),
+        info: unit.optional(),
+      })
+      .strict()
+      .optional(),
+    topicScale: z.object({ base: unit.optional(), slope: unit.optional() }).strict().optional(),
+    commentBand: unit.optional(),
+    pedantry: z
+      .object({ dropBelow: unit.optional(), commentAtOrAbove: unit.optional() })
+      .strict()
+      .optional(),
+    debt: z
+      .object({
+        base: z.number().min(0).max(2).optional(),
+        slope: z.number().min(0).max(2).optional(),
+        trackedTicketMinTolerance: unit.optional(),
+        trackedTicketBelowSigma: unit.optional(),
+      })
+      .strict()
+      .optional(),
+    architecturalKeywords: z.array(z.string().min(1)).optional(),
+    topicRules: z
+      .array(z.object({ topic: z.string().min(1), keywords: z.array(z.string().min(1)).min(1) }))
+      .optional(),
+    unmappedTopicWeight: unit.optional(),
+    fallbacks: z
+      .object({
+        blocking_threshold: unit.optional(),
+        technical_debt_tolerance: unit.optional(),
+        pedantry_level: unit.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ProfilePolicyOverride = z.infer<typeof ProfilePolicyOverrideSchema>;
+
 export const TriageSchema = z.object({
   /** The triage agent's model. Called only when a developer profile is active. */
   model: ModelBindingSchema,
@@ -166,6 +221,8 @@ export const TriageSchema = z.object({
   maxInlineComments: z.number().int().positive().default(15),
   /** Cross-agent agreement raises confidence rather than duplicating a comment. */
   agreementBoost: z.number().min(0).max(1).default(0.15),
+  /** Thresholds for a developer profile's rules; absent means the defaults. */
+  profilePolicy: ProfilePolicyOverrideSchema.optional(),
 });
 
 // ── Graph ────────────────────────────────────────────────────────────────────

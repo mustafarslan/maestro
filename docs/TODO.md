@@ -151,12 +151,10 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
   it runs on the user's word, against a pull request they choose. Run it under GitHub App auth
   as well as a token: an App cannot ask who it is, so dismissal relies on the login learned from
   Maestro's own summary comment, which `reviewPullRequest` finds before it settles the state.
-- **A place to configure the policy.** Every Tier 3 threshold is a field of `ProfilePolicy` and
-  every style threshold of `StyleConfig`, changeable in code; no playbook field, file or flag
-  reaches them. Where they belong — the playbook's `triage` section, so they version and gate with
-  it, or per subject — is a decision for the user.
-- **Which profile a webhook review runs as.** One active profile applies to every repository.
-  Per repository, or whoever asked with `@maestro review`, is a product decision.
+- ~~**A place to configure the policy.**~~ Done: `triage.profilePolicy` in the playbook
+  (`docs/CONFIGURATION.md`, "Developer profiles").
+- ~~**Which profile a webhook review runs as.**~~ Decided: locally one profile per person (each
+  checkout's own database and OS user); `maestro serve` one active profile for all.
 - **A topic for correctness defects.** `off-by-one`, `logic-error` and `type-error` map to no
   battery topic and so to the neutral weight; with the identity scale that no longer lowers them,
   but a developer's view on them is never measured. That wants new battery items.

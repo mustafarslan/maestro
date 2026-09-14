@@ -1,4 +1,5 @@
 import type { Severity } from "@maestro/core";
+import type { ProfilePolicyOverride } from "@maestro/playbook";
 import type { DeveloperCognitiveProfile } from "./score.js";
 
 /**
@@ -296,6 +297,39 @@ export const DEFAULT_PROFILE_POLICY: ProfilePolicy = {
   unmappedTopicWeight: 0.5,
   fallbacks: { blocking_threshold: 0.5, technical_debt_tolerance: 0.5, pedantry_level: 0.5 },
 };
+
+/**
+ * The policy a playbook asks for: its `triage.profilePolicy` merged over the defaults, one level
+ * deep, arrays replacing. Refuses a merge that leaves the pedantry bands inverted, which the
+ * schema cannot see because either half may come from the defaults.
+ */
+export function resolvePolicy(override?: ProfilePolicyOverride): ProfilePolicy {
+  if (!override) return DEFAULT_PROFILE_POLICY;
+  const d = DEFAULT_PROFILE_POLICY;
+  const policy: ProfilePolicy = {
+    severitySigma: { ...d.severitySigma, ...defined(override.severitySigma) },
+    topicScale: { ...d.topicScale, ...defined(override.topicScale) },
+    commentBand: override.commentBand ?? d.commentBand,
+    pedantry: { ...d.pedantry, ...defined(override.pedantry) },
+    debt: { ...d.debt, ...defined(override.debt) },
+    architecturalKeywords: override.architecturalKeywords ?? d.architecturalKeywords,
+    topicRules: override.topicRules ?? d.topicRules,
+    unmappedTopicWeight: override.unmappedTopicWeight ?? d.unmappedTopicWeight,
+    fallbacks: { ...d.fallbacks, ...defined(override.fallbacks) },
+  };
+  if (policy.pedantry.dropBelow > policy.pedantry.commentAtOrAbove) {
+    throw new Error(
+      `triage.profilePolicy: pedantry.dropBelow (${policy.pedantry.dropBelow}) is above commentAtOrAbove (${policy.pedantry.commentAtOrAbove})`,
+    );
+  }
+  return policy;
+}
+
+function defined<T extends object>(o: T | undefined): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(o ?? {}).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
+}
 
 /** `keyword` appears in `category` as whole words: `lock` matches `lock-order`, not `block`. */
 function hasWord(category: string, keyword: string): boolean {

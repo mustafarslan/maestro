@@ -729,7 +729,9 @@ export async function runReview(deps: EngineDeps, req: ReviewRequest): Promise<R
       const personal = req.profile as TriagePersonalization;
       // Nothing survived mechanical triage: the rules' answer — a clean review — is already the
       // whole answer, and asking a model to say so is a paid call for nothing.
-      if (!triageCandidates(t).length) return t;
+      if (!triageCandidates(t).length) {
+        return withTriageAgentStatus(t, "skipped", "no finding left to decide");
+      }
       const nodeId = `${triageNode?.id ?? "triage"}:agent`;
       const started = Date.now();
       let release: (() => void) | undefined;

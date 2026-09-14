@@ -1,5 +1,6 @@
 import type { Finding } from "@maestro/agents";
 import type { Severity } from "@maestro/core";
+import { ProfilePolicyOverrideSchema } from "@maestro/playbook";
 import { describe, expect, it } from "vitest";
 import conservative from "./__fixtures__/responses-conservative.json" with { type: "json" };
 import promotion from "./__fixtures__/responses-promotion.json" with { type: "json" };
@@ -12,6 +13,7 @@ import {
   isArchitectural,
   NON_SUPPRESSIBLE_SIGMA,
   type ProfilePolicy,
+  resolvePolicy,
   topicFor,
 } from "./policy.js";
 import { type DeveloperCognitiveProfile, scoreBattery } from "./score.js";
@@ -415,5 +417,47 @@ describe("a profile with nothing observed leaves every finding where the agents 
     const f = finding({ severity: "medium", category: "race-condition" });
     expect(assessFinding(f, heavy).effective).toBeCloseTo(0.75, 12);
     expect(assessFinding(f, light).effective).toBeCloseTo(0.25, 12);
+  });
+});
+
+describe("a playbook's triage.profilePolicy", () => {
+  it("absent is the defaults, the same object", () => {
+    expect(resolvePolicy(undefined)).toBe(DEFAULT_PROFILE_POLICY);
+  });
+
+  it("merges field by field and replaces arrays", () => {
+    const p = resolvePolicy({
+      severitySigma: { high: 0.85 },
+      pedantry: { dropBelow: 0.2 },
+      architecturalKeywords: ["layering"],
+    });
+    expect(p.severitySigma).toEqual({ ...DEFAULT_PROFILE_POLICY.severitySigma, high: 0.85 });
+    expect(p.pedantry).toEqual({ dropBelow: 0.2, commentAtOrAbove: 0.7 });
+    expect(p.architecturalKeywords).toEqual(["layering"]);
+    expect(p.topicRules).toBe(DEFAULT_PROFILE_POLICY.topicRules);
+  });
+
+  it("moves a severity across the safety lines, never the lines themselves", () => {
+    const profile = scoreBattery(bundledBattery(), promotion as Record<string, string>);
+    const high = finding({ severity: "high" });
+    const lenient = { ...profile, attributes: { ...profile.attributes, blocking_threshold: 1 } };
+    expect(
+      assessFinding(high, lenient, resolvePolicy({ severitySigma: { high: 0.9 } })).disposition,
+    ).toBe("request_changes");
+    const eager = { ...profile, attributes: { ...profile.attributes, blocking_threshold: 0 } };
+    expect(
+      assessFinding(high, eager, resolvePolicy({ severitySigma: { high: 0.2 } })).disposition,
+    ).not.toBe("request_changes");
+  });
+
+  it("refuses inverted pedantry bands, and the schema refuses what it can see", () => {
+    expect(() => resolvePolicy({ pedantry: { dropBelow: 0.9 } })).toThrow(/dropBelow/);
+    expect(ProfilePolicyOverrideSchema.safeParse({ severitySigma: { high: 1.2 } }).success).toBe(
+      false,
+    );
+    expect(ProfilePolicyOverrideSchema.safeParse({ nonSuppressibleSigma: 0.1 }).success).toBe(
+      false,
+    );
+    expect(ProfilePolicyOverrideSchema.safeParse({ commentBand: 0.1 }).success).toBe(true);
   });
 });

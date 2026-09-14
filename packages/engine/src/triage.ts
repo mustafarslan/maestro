@@ -6,6 +6,7 @@ import {
   type Disposition,
   type ProfilePolicy,
   type Responses,
+  resolvePolicy,
 } from "@maestro/profile";
 import type { CommandComparison } from "@maestro/sandbox";
 
@@ -87,7 +88,7 @@ export interface TriageResult {
      * when it could not run or answer, `rejected` when its answer broke the contract — both
      * leave the deterministic decision in place.
      */
-    triageAgent?: { status: "used" | "unavailable" | "rejected"; note?: string };
+    triageAgent?: { status: "used" | "skipped" | "unavailable" | "rejected"; note?: string };
   };
 }
 
@@ -205,7 +206,11 @@ export function triage(
   // Tier 3, after the mechanical gate and before the summary, so the summary counts what
   // the comment will actually carry. It sees only what triage would have posted: a finding
   // below the confidence threshold was never a candidate, whoever is reading.
-  const gated = applyProfile(posted, personal.profile, personal.policy);
+  const gated = applyProfile(
+    posted,
+    personal.profile,
+    personal.policy ?? resolvePolicy(doc.triage.profilePolicy),
+  );
   const note = (a: (typeof gated.kept)[number]) => ({
     disposition: a.disposition,
     reason: a.reason,

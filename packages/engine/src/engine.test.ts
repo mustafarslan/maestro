@@ -801,6 +801,7 @@ describe("the triage agent in a review", () => {
     );
     expect(outcome.nodes.some((n) => n.agentId === "triage")).toBe(false);
     expect(outcome.triage?.personalization?.state).toBe("COMMENT");
+    expect(outcome.triage?.personalization?.triageAgent?.status).toBe("skipped");
     expect(transport.requests.filter((r) => !r.url.includes("/v1/models"))).toHaveLength(1);
   });
 

@@ -238,8 +238,28 @@ round does not block — with a profile or without one — Maestro dismisses its
 only its own. GitHub does not allow requesting changes on a pull request opened by the account
 Maestro posts as; that round's comment still says what the profile would do.
 
-The thresholds the profile's rules use (`ProfilePolicy`) and the style thresholds (`StyleConfig`)
-are defaults in code; nothing configurable reaches them yet.
+**Whose profile.** Run locally, the active profile is per database, and `--subject` defaults to
+your OS user name, so each developer's own checkout reviews as them. `maestro serve` is one
+database for everyone it reviews for, so its one active profile applies to every repository.
+
+**Thresholds** live in the playbook, under `triage.profilePolicy`, and version, diff and gate with
+it. Every field is optional and merges over the defaults in `@maestro/profile` (arrays replace):
+
+```yaml
+triage:
+  profilePolicy:
+    severitySigma: { high: 0.85 }      # σ per severity; critical 0.95, high 0.75, medium 0.5, ...
+    commentBand: 0.15                  # COMMENT when within this much below the threshold
+    pedantry: { dropBelow: 0.3, commentAtOrAbove: 0.7 }
+    fallbacks: { blocking_threshold: 0.5 }  # for an attribute the profile never observed
+```
+
+Per playbook, not per subject: the battery measures the developer, and this is Maestro's mapping
+from that measurement to a decision, which has to be one mapping for two profiles to compare. The
+two safety lines — σ ≥ 0.80 always blocks, σ < 0.30 never does — are not fields; a policy can move
+a severity across them, never move them. The refinement proposer cannot edit this section: no
+eval measures profiled reviews, so it would have no evidence to tune on. Style thresholds are
+derived from the profile.
 
 ## The golden set
 

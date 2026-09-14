@@ -250,15 +250,16 @@ export function renderReview(outcome: ReviewOutcome, opts: { title?: string } = 
     lines.push(
       `**As ${code(safeSubject(personal.subject))} would review it:** ` +
         (personal.state === "REQUEST_CHANGES" ? "**request changes**" : "comment") +
-        ". Maestro posts every review as a comment; this is the state their profile would choose" +
+        ". Maestro sets that state on the pull request where GitHub allows it" +
         (personal.dropped ? `, and ${personal.dropped} cosmetic finding(s) were left out.` : "."),
       "",
       attribution(personal.subject),
       "",
     );
-    if (personal.triageAgent && personal.triageAgent.status !== "used") {
+    const agent = personal.triageAgent;
+    if (agent && agent.status !== "used" && agent.status !== "skipped") {
       lines.push(
-        `_The triage agent's answer was not used (${prose(oneLine(personal.triageAgent.note ?? personal.triageAgent.status))}); ` +
+        `_The triage agent's answer was not used (${prose(oneLine(agent.note ?? agent.status))}); ` +
           "the profile's rules decided this review._",
         "",
       );

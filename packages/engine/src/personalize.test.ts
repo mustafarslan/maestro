@@ -181,6 +181,23 @@ function outcomeWith(t: ReturnType<typeof triage>): ReviewOutcome {
   } as unknown as ReviewOutcome;
 }
 
+describe("thresholds from the playbook", () => {
+  it("triage.profilePolicy changes what the profile's rules decide", () => {
+    const personal = { subject: "octocat", profile: strict };
+    const race = (t: ReturnType<typeof triage>) =>
+      [...t.posted, ...t.suppressed].find((x) => x.category === "race-condition")?.personalization;
+    const before = race(triage(doc, inputs(), undefined, personal));
+    const tuned = {
+      ...doc,
+      triage: { ...doc.triage, profilePolicy: { severitySigma: { medium: 0.1 } } },
+    };
+    const after = race(triage(tuned, inputs(), undefined, personal));
+    expect(before?.sigma).toBe(0.5);
+    expect(after?.sigma).toBe(0.1);
+    expect(after?.disposition).not.toBe("request_changes");
+  });
+});
+
 describe("the rendered comment", () => {
   it("says whose profile shaped it and what they would do, before any finding", () => {
     const t = triage(doc, inputs(), undefined, { subject: "octocat", profile: strict });
@@ -189,7 +206,7 @@ describe("the rendered comment", () => {
     expect(out.indexOf("As `octocat` would review it:")).toBeGreaterThan(-1);
     expect(out.indexOf("As `octocat` would review it:")).toBeLessThan(firstFinding);
     expect(out).toContain("**request changes**");
-    expect(out).toContain("Maestro posts every review as a comment");
+    expect(out).toContain("Maestro sets that state on the pull request where GitHub allows it");
     expect(out).toContain("Worded by Maestro to match octocat's review style");
   });
 

@@ -4054,6 +4054,14 @@ committed, traced the new config field through three packages, and found that no
     **The agents' contract changed, so finding 239's control arm no longer describes them.**
     See the note there.
 
+    **Settled after review.** The policy's thresholds are configurable as `triage.profilePolicy`
+    in the playbook — per playbook rather than per subject, because two profiles are only
+    comparable under one mapping — with the two safety lines kept out of it. Profile scope: locally
+    one per person, `maestro serve` one for everyone. An App's installation token cannot ask its
+    own login, so `submitReviewState` now learns it from the block it places and can lift that
+    block in the same process. Migration 005 had been applied to a real database in an earlier
+    form; it is frozen as applied and the later columns are 006.
+
 243. **The refinement proposer, up to the model call.** Steps 0–4 of the plan in `docs/TODO.md`.
     A score now carries the review that produced it, so a training miss can be traced to what the
     agents did. `proposer.ts` holds the rest: an allowlist of fields a candidate may change

@@ -17,6 +17,7 @@ import {
   DEFAULT_PROFILE_POLICY,
   type Disposition,
   NON_SUPPRESSIBLE_SIGMA,
+  resolvePolicy,
   type StyleExemplar,
   safeSubject,
   styleExemplars,
@@ -252,7 +253,13 @@ export async function runTriageAgent(req: TriageAgentRequest): Promise<TriageAge
   const system = buildTriageSystemPrompt(
     req.doc,
     req.context ?? {},
-    profileBlock(req.personal, exemplars),
+    profileBlock(
+      {
+        ...req.personal,
+        policy: req.personal.policy ?? resolvePolicy(req.doc.triage.profilePolicy),
+      },
+      exemplars,
+    ),
   );
   const { prompt, aliases } = triageUserPrompt(triageCandidates(req.triaged), req.context);
 
@@ -302,7 +309,7 @@ export function clampDisposition(proposed: Disposition, sigma: number): Disposit
 /** The deterministic result, marked with why the triage agent did not decide it. */
 export function withTriageAgentStatus(
   t: TriageResult,
-  status: "unavailable" | "rejected",
+  status: "skipped" | "unavailable" | "rejected",
   note: string,
 ): TriageResult {
   if (!t.personalization) return t;
