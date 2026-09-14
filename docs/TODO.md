@@ -171,13 +171,10 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
 
 ## Other
 
-- **The wrap-up warning's wording.** Four warned runs of `reaper-double-count` (`docs/STATUS.md` 245,
-  248) all submitted in time and all scored zero: two findings at 0.50 and 0.30, suppressed under
-  `minConfidence` 0.6, and two empty lists. The warning says "reporting fewer, well-supported
-  findings is the expected outcome; an empty list is valid", which may be exactly what it gets.
-  A wording test — that text against one asking the agent to report what it has at its honest
-  confidence — wants about ten runs per arm on this fixture to clear run-to-run noise; three
-  would only say "inconclusive".
+- ~~**The wrap-up warning's wording.**~~ **Tested — 251: no detectable effect; kept as it is.**
+  What the test showed instead: the agent finds `reaper-double-count` in 18 runs of 20 and rates
+  it 0.30–0.70, mostly 0.40–0.55, so `triage.minConfidence` 0.6 is what decides this fixture. That
+  is a triage-threshold question for a gated refinement round (step 6), not a wording one.
 
 - ~~**A live hosted-provider call has never been made.**~~ Done: the conformance suite passes
   against `glm-5.3:cloud`, `deepseek-v4-pro:cloud` and `kimi-k3:cloud` — completion, tool call,

@@ -4264,3 +4264,31 @@ harness exists to measure per playbook version.
     rather than guessing. Tested on a run that hit its deadline after 26 steps having been warned,
     with a finding suppressed at 0.50; with the change reverted, that test fails.
 
+251. **The wrap-up wording test: no effect, and the threshold it uncovered.** Twenty runs of
+    `reaper-double-count` on the control playbook and `deepseek-v4-pro:cloud`, alternating two
+    binaries that differ only in the warning's last sentence, one run at a time: A, the shipped
+    "reporting fewer, well-supported findings is the expected outcome; an empty list is valid"; B,
+    "report every finding your evidence supports, at the confidence that evidence supports: running
+    out of time is not a reason to lower a confidence or leave a finding out".
+
+    | arm | hits | empty | highest confidence per run, mean (range) | at or above 0.6 |
+    | --- | --- | --- | --- | --- |
+    | A, shipped | 0 of 10 | 1 | 0.50 (0.40–0.55) | 0 |
+    | B, candidate | 2 of 10 | 1 | 0.47 (0.30–0.70) | 2 |
+
+    Every run was warned. B's two hits against A's none is a one-sided Fisher p of 0.24, and B did not
+    raise the confidence it asked for — its mean is lower, its spread wider — so the two hits read as
+    the spread, not the sentence. **The wording stays**; the candidate is kept on the unmerged local
+    branch `wrapup-wording` for the record.
+
+    **What the test found instead.** Eighteen runs of twenty submitted the right defect. The agent is
+    not failing to find this bug, or to report it in time; it rates it around 0.5, and
+    `triage.minConfidence` 0.6 suppresses it. Whether 0.6 is right is exactly what a refinement round
+    may change (`triage.minConfidence` is on the editable list) and exactly what the gate exists to
+    judge on held-out fixtures, where a lower threshold would also post whatever else sits at 0.5.
+
+    The run was interrupted once by its own quota guard, which matched a bare `429` in a line number
+    inside a file the agent read; the guard now matches only a provider's error message, and the run
+    resumed where it stopped. Thermal pressure stayed nominal throughout.
+
+
