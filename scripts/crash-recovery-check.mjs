@@ -18,7 +18,7 @@
  * reads, so the scenario needs no waiting.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore, ReviewStore } from "../packages/core/dist/index.js";

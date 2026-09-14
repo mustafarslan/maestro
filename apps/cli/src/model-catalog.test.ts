@@ -32,7 +32,7 @@ describe("a provider that lists nothing", () => {
       logs.push(a.join(" "));
     });
 
-    server = createServer((req, res) => {
+    server = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
       // What Ollama answers with no models pulled locally.
       res.end(JSON.stringify({ object: "list", data: [] }));

@@ -64,74 +64,72 @@ export function Environments() {
   const leaked = rows.filter((r) => r.state === "leaked" && !r.destroyed_at);
 
   return (
-    <>
-      <div className="panel">
-        <div className="panel-head">
-          Environments
-          <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
-            {live.length} live, {leaked.length} leaked, {rows.length} recorded
-          </span>
+    <div className="panel">
+      <div className="panel-head">
+        Environments
+        <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>
+          {live.length} live, {leaked.length} leaked, {rows.length} recorded
+        </span>
+      </div>
+      {leaked.length ? (
+        <div className="notice" style={{ margin: "8px 12px" }}>
+          {leaked.length} environment(s) could not be destroyed by the review that created them. Run{" "}
+          <code>maestro reap</code> to collect them; until then their containers and snapshot images
+          are still using disk.
         </div>
-        {leaked.length ? (
-          <div className="notice" style={{ margin: "8px 12px" }}>
-            {leaked.length} environment(s) could not be destroyed by the review that created them.
-            Run <code>maestro reap</code> to collect them; until then their containers and snapshot
-            images are still using disk.
-          </div>
-        ) : null}
-        <table>
-          <thead>
-            <tr>
-              <th>State</th>
-              <th>Kind</th>
-              <th>Agent</th>
-              <th>Pull request</th>
-              <th>Container</th>
-              <th>Age</th>
-              <th>Lease</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const expired = r.lease_until ? Date.parse(r.lease_until) < Date.now() : false;
-              return (
-                <tr key={r.id}>
-                  <td>
-                    <span
-                      className={`badge ${r.state === "leaked" ? "failed" : r.live ? "running" : "done"}`}
-                    >
-                      {r.state}
-                    </span>
-                  </td>
-                  <td>{r.kind}</td>
-                  <td>{r.agent_id ?? <span className="muted">—</span>}</td>
-                  <td className="muted">
-                    {r.repo}#{r.pr_number}
-                  </td>
-                  <td className="muted" style={{ fontFamily: "ui-monospace, monospace" }}>
-                    {r.container_id ? r.container_id.slice(0, 12) : "—"}
-                  </td>
-                  <td className="muted">{age(r.created_at)}</td>
-                  <td className={expired && r.live ? "" : "muted"}>
-                    {/* `lease_until` is stamped once, at creation, as prepare plus analyze
+      ) : null}
+      <table>
+        <thead>
+          <tr>
+            <th>State</th>
+            <th>Kind</th>
+            <th>Agent</th>
+            <th>Pull request</th>
+            <th>Container</th>
+            <th>Age</th>
+            <th>Lease</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const expired = r.lease_until ? Date.parse(r.lease_until) < Date.now() : false;
+            return (
+              <tr key={r.id}>
+                <td>
+                  <span
+                    className={`badge ${r.state === "leaked" ? "failed" : r.live ? "running" : "done"}`}
+                  >
+                    {r.state}
+                  </span>
+                </td>
+                <td>{r.kind}</td>
+                <td>{r.agent_id ?? <span className="muted">—</span>}</td>
+                <td className="muted">
+                  {r.repo}#{r.pr_number}
+                </td>
+                <td className="muted" style={{ fontFamily: "ui-monospace, monospace" }}>
+                  {r.container_id ? r.container_id.slice(0, 12) : "—"}
+                </td>
+                <td className="muted">{age(r.created_at)}</td>
+                <td className={expired && r.live ? "" : "muted"}>
+                  {/* `lease_until` is stamped once, at creation, as prepare plus analyze
                         timeouts; nothing renews it. So an expired lease on a row still
                         marked live means the environment has outlived the entire time
                         both its phases were allowed — which nothing legitimate does. It
                         is not what `reap` keys on: that sweeps by Docker label and age,
                         which is why this is a signal to look rather than a duplicate of
                         the reaper's own state. */}
-                    {r.live
-                      ? expired
-                        ? `expired ${age(r.lease_until)} ago`
-                        : `${age(r.lease_until)} left`
-                      : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </>
+                  {r.live
+                    ? expired
+                      ? `expired ${age(r.lease_until)} ago`
+                      : `${age(r.lease_until)} left`
+                    : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

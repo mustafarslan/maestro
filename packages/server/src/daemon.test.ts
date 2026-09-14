@@ -1,8 +1,7 @@
 import { createHmac } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { type AddressInfo, connect } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobQueue, newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { GitHubClient } from "@maestro/integrations";
