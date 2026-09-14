@@ -4186,5 +4186,26 @@ harness exists to measure per playbook version.
     checked: a fifteen-read conversation trimmed to what the engine gives a 32,768-token model fits
     under it, task first. Not checked: a live model with a small window.
 
+247. **The refinement proposer writes its own proposal: step 5, live.** `runProposer` asks a model
+    through a `submit_proposal` terminal tool, falling back to finding JSON in prose, and
+    `maestro eval propose --from <version>` without `--proposal` builds the training evidence,
+    refuses a prompt with held-out leaks, and asks the version's triage model unless `--provider`
+    and `--model` say otherwise. One of the two questions left open before this step is settled in
+    code: a proposal may change one agent per round, so a gate decision traces to one change, and
+    `applyProposal` refuses two — which holds for a hand-written proposal as much as a model's.
+
+    **Live, on `glm-5.3:cloud` against the finding-239 control (v4):** one step, 2,157 tokens in and
+    2,213 out, a valid proposal through the tool, published as v7 (`pv_a28505aae5b64456942bc0bd`),
+    inactive, `created_by: refiner`, one edit to `agents.architecture.persona`. Not scored and not
+    gated: that is step 6.
+
+    **What it proposed is the finding.** The only training miss was `reaper-double-count`, and the
+    proposal adds a bullet about "an image id once per tag… reap" — the answer key's own words, fitted
+    to the one example the system prompt tells it not to fit. It also misread the cause: that miss
+    was a run that hit its deadline (245), not a gap in what the agent knows, and the evidence could
+    not have said so, because it carries what was missed and not how the run ended. That is the next
+    thing to build before a live round (`docs/TODO.md`).
+
+
 
 

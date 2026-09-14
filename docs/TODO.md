@@ -128,16 +128,23 @@ a quality search into a cost search.
 | 2. evidence builder, train only — **done, 243** | no | no val name or pattern in the prompt, over the real golden set |
 | 3. prompt and output parser — **done, 243** | no | malformed or oversized output becomes an `invalid` attempt |
 | 4. the round, fed a hand-written `--proposal <file>` — **done, 243** | no | publish → gate → record, against synthetic scores |
-| 5. the model-backed proposer | yes | one conformance run: valid schema, allowlisted paths |
+| 5. the model-backed proposer — **done, 247** | yes | one conformance run: valid schema, allowlisted paths |
 | 6. one live round on the finding-239 control arm | yes | a recorded attempt, accepted or not |
 
 Steps 0–4 are the work available while the quota is out. A round in step 6 costs one proposer
 call plus a full twenty-fixture eval, so it runs one round at a time, by hand.
 
-**Open before step 5:** whether one round should edit one agent only, so that a gate decision
-can be attributed to one change; and whether a net-two margin over ten held-out fixtures lets
+**Settled at step 5:** one round edits one agent only, enforced in `applyProposal` (247). **Still
+open:** whether a net-two margin over ten held-out fixtures lets
 through anything but large changes — if nothing ever clears it, that is the golden set asking to
 grow, not the margin asking to shrink.
+
+**Before step 6: the evidence says what was missed, not why.** The first live proposal (247) read
+`reaper-double-count`'s miss as a knowledge gap and wrote the answer key's own words into the
+architecture persona. That miss was a run that ran out of time, and later a right finding suppressed
+by `minConfidence`. `buildEvidence` should carry each missed fixture's `stopKind` and any
+suppressed findings on the answer key, so a proposer can tell "did not know" from "did not finish"
+and "said it too quietly".
 
 ## Developer profiles: what is left
 

@@ -327,9 +327,16 @@ A candidate playbook can be proposed, scored and judged without activating anyth
 ```sh
 maestro eval evidence --from <version>                     # what a proposer is shown: training split only
 maestro eval propose --from <version> --proposal edit.json # publish an inactive candidate
+maestro eval propose --from <version> --provider ollama --model glm-5.3:cloud   # a model writes it
 maestro eval run --playbook <candidate>
 maestro eval gate <version> <candidate> --record           # decide, and remember the decision
 ```
+
+Without `--proposal`, `eval propose` builds the training evidence, refuses a prompt that carries
+held-out material, and asks the version's `triage.model` — or the `--provider`/`--model` given —
+through a `submit_proposal` tool. A proposal may change one agent per round (its persona or its
+procedural graph) alongside triage and gate settings; two agents are refused, so a gate decision
+traces to one change.
 
 A proposal is `{"rationale": "...", "edits": [{"path": "...", "value": ...}]}` with at most three
 edits to `agents.<id>.persona`, `triage.minConfidence`, `triage.maxInlineComments`,
