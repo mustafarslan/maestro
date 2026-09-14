@@ -4155,8 +4155,17 @@ harness exists to measure per playbook version.
     transcripts recorded only model turns and tool results, never the turns the loop adds, and every
     turn carried the same write time. One pass on a fixture that had failed five times is suggestive
     and inside what run-to-run variation can produce. So steps now carry what the loop told the model
-    next and their elapsed time, and the recorder writes that turn marked `synthetic`; the next run
-    of this fixture will show whether the warning was given and when. Also corrected here: five "not yet verified" and limitation entries
+    next and their elapsed time, and the recorder writes that turn marked `synthetic`.
+
+    **The second run, with the turn recorded, settles it.** Step 12 alone took 288 seconds; at 644
+    seconds the warning went out (*"You have 27 steps left and are almost out of time"*), and at step
+    13, 773 seconds, the agent called `submit_findings` with the right defect — `docker images -q`
+    emits one id per tag, so `reap()` over-counts. It scored as a miss anyway: the agent rated that
+    finding 0.50, triage suppresses below `minConfidence` 0.6, and the eval scores posted findings
+    only. The first run's finding of the same defect carried 0.65 and was posted. So the warning
+    does what it is for — an agent out of time now submits instead of losing everything — and what
+    decided the second score is the confidence a hurried agent gave, which is a question for the
+    wrap-up wording and needs repeated runs to answer (`docs/TODO.md`). Also corrected here: five "not yet verified" and limitation entries
     that later findings had already settled — the GitHub App, the load scenario, the Anthropic-only
     default, deterministic triage, and the measurement row.
 
