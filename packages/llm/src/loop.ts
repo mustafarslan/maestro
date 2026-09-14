@@ -144,6 +144,15 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
   let askedToSubmit = false;
   /** The longest a step has taken so far, model call and tools together, to see a deadline coming. */
   let slowestStepMs = 0;
+  /**
+   * What the conversation is trimmed to. Starts at the budget, or at a default when the model's
+   * window is unknown — which is every model without a pricing entry, Ollama's included — and is
+   * halved when a provider rejects a prompt as too long, so the rest of the run fits the window
+   * the provider just revealed.
+   */
+  let promptBudget = budget.maxPromptChars ?? DEFAULT_MAX_PROMPT_CHARS;
+  /** The step whose prompt was already shrunk once; a second rejection there ends the run. */
+  let shrunkAtStep = -1;
   /** The synthetic turn carrying the previous step's guidance, so the next one can replace it. */
   let lastGuidance: Message | undefined;
 
@@ -169,7 +178,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
 
     // Keep the conversation inside the model's window. Roughly four characters per
     // token is close enough for a guard whose job is to avoid a hard rejection.
-    const dropped = trimHistory(messages, budget.maxPromptChars ?? DEFAULT_MAX_PROMPT_CHARS);
+    const dropped = trimHistory(messages, promptBudget);
     if (dropped) log.warn({ dropped }, "trimmed oldest tool results to fit the context window");
 
     let response: ChatResponse;
@@ -177,6 +186,21 @@ export async function runAgent(opts: RunAgentOptions): Promise<LoopResult> {
       response = await callWithRetry(opts, messages, log, index);
     } catch (err) {
       if (isContextLimitError(err)) {
+        // Once per step, shrink and ask again. A model whose window Maestro does not know gets
+        // the default budget, and the first rejection used to end the run — every finding it
+        // had worked toward lost at exactly the point it had read the most. Trimming can only
+        // help while there is history to drop: the task and the live exchange are never cut.
+        const size = messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
+        if (shrunkAtStep !== index && messages.length > 5) {
+          shrunkAtStep = index;
+          promptBudget = Math.floor(Math.min(promptBudget, size) / 2);
+          log.warn(
+            { err: err instanceof Error ? err.message : err, promptChars: size, promptBudget },
+            "context window exceeded; trimming to half and retrying the step",
+          );
+          index--;
+          continue;
+        }
         // Returning what the agent has beats losing the entire run.
         log.warn({ err: err instanceof Error ? err.message : err }, "context window exceeded");
         return stop("context-limit");

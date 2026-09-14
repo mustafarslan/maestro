@@ -342,6 +342,71 @@ describe("context window guard", () => {
     expect(t.requests).toHaveLength(1);
   });
 
+  it("recovers from one rejection on a model whose window it was never told", async () => {
+    // Every model without a pricing entry — every Ollama model — gets the 400k-character
+    // default. A 32k-token window holds roughly 90k, so a long run is rejected, and the first
+    // rejection used to end it with nothing submitted.
+    const WINDOW_CHARS = 90_000;
+    const requests: number[] = [];
+    let answered = 0;
+    const reply = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    const fetchImpl: typeof globalThis.fetch = async (_input, init) => {
+      const size = String(init?.body ?? "").length;
+      requests.push(size);
+      if (size > WINDOW_CHARS) {
+        return reply(
+          {
+            type: "error",
+            error: { type: "invalid_request_error", message: "prompt is too long" },
+          },
+          400,
+        );
+      }
+      answered++;
+      const call =
+        answered < 8
+          ? { type: "tool_use", id: `e${answered}`, name: "echo", input: {} }
+          : { type: "tool_use", id: "s", name: "submit", input: { answer: "found it" } };
+      return reply({
+        id: `msg_${answered}`,
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-5",
+        content: [call],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 25 },
+      });
+    };
+
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig({ fetch: fetchImpl, requests: [] })),
+      dispatch: async () => ({ output: "r".repeat(20_000) }),
+      budget: { maxSteps: 20, costCapCents: 1e9 },
+    });
+
+    expect(result.stopKind).toBe("terminal-tool");
+    expect(result.terminalInput).toEqual({ answer: "found it" });
+    // Exactly one rejection: the shrunk budget holds for the rest of the run.
+    expect(requests.filter((n) => n > WINDOW_CHARS)).toHaveLength(1);
+  });
+
+  it("still stops when the prompt cannot shrink, rather than asking again for ever", async () => {
+    const t = failingTransport(400, "prompt is too long");
+    const result = await runAgent({
+      ...base,
+      provider: new Provider(fakeConfig(t)),
+      dispatch: async () => ({ output: "ok" }),
+      budget: { maxSteps: 5, costCapCents: 100 },
+    });
+    expect(result.stopKind).toBe("context-limit");
+    expect(t.requests).toHaveLength(1);
+  });
+
   it("drops the oldest tool results rather than letting history grow unbounded", async () => {
     // Each step returns a large tool result; without trimming the conversation would
     // grow past any context window.
@@ -413,6 +478,20 @@ describe("trimHistory", () => {
       if (m.role !== "tool") continue;
       expect(messages[i - 1]).toMatchObject({ role: "assistant" });
     }
+  });
+
+  it("fits a realistic long run into a 32k-token window's budget, task first", () => {
+    // What the engine gives a 32,768-token model: three characters a token, 80% of the window.
+    const budget = Math.floor(32_768 * 3 * 0.8);
+    const messages: Message[] = [
+      { role: "user", content: `review this\n${"t".repeat(3_000)}` },
+      ...Array.from({ length: 15 }, (_, i) => pair(i, 6_000 + (i % 3) * 1_000)).flat(),
+    ];
+    trimHistory(messages, budget);
+    const size = messages.reduce((n, m) => n + JSON.stringify(m).length, 0);
+    expect(size).toBeLessThanOrEqual(budget);
+    expect(messages[0]).toMatchObject({ role: "user" });
+    expect(String((messages[0] as { content: string }).content)).toMatch(/^review this/);
   });
 
   it("leaves a conversation that already fits completely alone", () => {

@@ -201,8 +201,10 @@ insecure neighbour, so it was not pattern-matching on "API route".
   install without an `ANTHROPIC_API_KEY` reviews on Ollama instead.
 - **The prompt-size guard falls back to a constant on models it has no window for.** It is sized
   from `capabilities.contextWindow` where that is known, and every model tested live is an Ollama
-  one with no entry, so those used the 400k-character default. That was enough for a 131k-token
-  window once reads were capped; a 32k-window model has not been tried.
+  one with no entry, so those used the 400k-character default. What is now checked offline (246):
+  a realistic long run trimmed to a 32k-token window's budget fits with its task intact, and a
+  model that rejects a prompt as too long no longer ends the run — the loop halves its budget,
+  trims and retries the step once. A live small-window model is still untried.
 - **Hosted providers remain the gap in agent coverage.** All four agents have now run live against
   Ollama Cloud, including `ui-ux`, which found a real keyboard-accessibility defect in Maestro's own
   admin UI on its first run.
@@ -4168,5 +4170,21 @@ harness exists to measure per playbook version.
     wrap-up wording and needs repeated runs to answer (`docs/TODO.md`). Also corrected here: five "not yet verified" and limitation entries
     that later findings had already settled — the GitHub App, the load scenario, the Anthropic-only
     default, deterministic triage, and the measurement row.
+
+246. **A model whose window Maestro did not know lost its whole run at the first rejection.**
+    The prompt budget comes from `capabilities.contextWindow`, and only hosted models have a pricing
+    entry to supply one — every Ollama model gets the 400k-character default. A 32k-token model holds
+    roughly 90k, so a long run grew past it, the provider refused, `isContextLimitError` matched, and
+    the loop stopped with `context-limit` and nothing submitted: the same full-cost, zero-findings
+    outcome the wrap-up warnings exist to prevent, arriving at the point the agent had read the most.
+    Now the first rejection at a step halves the budget (from the smaller of the budget and the
+    prompt's actual size), trims, and retries that step; the smaller budget holds for the rest of the
+    run, and a second rejection at the same step still stops. A prompt with no history to drop — the
+    task and the live exchange are never cut — is not retried at all, so a hopeless request costs one
+    call as before. Tested with a transport that refuses any body over 90k characters: one rejection,
+    then a submitted answer; with the change reverted, the same test ends in `context-limit`. Also
+    checked: a fifteen-read conversation trimmed to what the engine gives a 32,768-token model fits
+    under it, task first. Not checked: a live model with a small window.
+
 
 
