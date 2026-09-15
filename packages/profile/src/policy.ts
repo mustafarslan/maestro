@@ -273,6 +273,29 @@ export const DEFAULT_PROFILE_POLICY: ProfilePolicy = {
       topic: "api_design",
       keywords: ["api", "contract", "interface", "signature", "flag", "config", "cli", "schema"],
     },
+    // After every named domain, so a race or an injection keeps its own topic; before
+    // observability, testing and style, which a plain bug is not. Phrases, not bare `type` or
+    // `error`, which occur inside names that are not defects at all.
+    {
+      topic: "correctness",
+      keywords: [
+        "correctness",
+        "off-by-one",
+        "boundary",
+        "boundary-condition",
+        "edge-case",
+        "logic-error",
+        "type-error",
+        "type-mismatch",
+        "type-coercion",
+        "wrong-operator",
+        "inverted-condition",
+        "assignment-instead-of-comparison",
+        "null-dereference",
+        "nan",
+        "semantics",
+      ],
+    },
     {
       topic: "observability",
       keywords: ["logging", "log", "logs", "metrics", "tracing", "telemetry", "observability"],

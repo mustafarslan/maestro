@@ -1,7 +1,7 @@
 {
   "technical_debt_tolerance": 0.874,
   "pedantry_level": 0.057,
-  "blocking_threshold": 0.868,
+  "blocking_threshold": 0.842,
   "kai_index": 1.0,
   "regulatory_focus": 0.965,
   "phi_framing": 0.055,
@@ -17,34 +17,35 @@
     "testing": 0.16,
     "api_design": 0.163,
     "data_integrity": 0.175,
-    "observability": 0.166,
+    "observability": 0.288,
     "dependency_management": 0.183,
-    "style_formatting": 0.085,
+    "style_formatting": 0.159,
     "documentation": 0.075,
     "database_transactions": 0.15,
-    "backward_compatibility": 0.123
+    "backward_compatibility": 0.123,
+    "correctness": 0.16
   },
   "extended_signals": {
-    "comment_density": 0.262,
+    "comment_density": 0.273,
     "suggestion_block_usage": 0.25,
-    "test_insistence": 0.075,
-    "scope_discipline": 0.653,
-    "verification_effort": 0.252,
+    "test_insistence": 0.07,
+    "scope_discipline": 0.636,
+    "verification_effort": 0.248,
     "praise_frequency": 0.341,
     "follow_up_tracking": 0.113,
-    "escalation_propensity": 0.148
+    "escalation_propensity": 0.168
   },
   "framing_strategy": "Direct_Imperative",
   "use_negative_politeness_tags_bool": false,
   "kai_classification": "Innovator",
   "regulatory_focus_label": "Promotion",
   "coverage": {
-    "items_answered": 95,
+    "items_answered": 100,
     "items_skipped": [],
     "n_per_attribute": {
       "technical_debt_tolerance": 26,
       "pedantry_level": 16,
-      "blocking_threshold": 40,
+      "blocking_threshold": 45,
       "kai_index": 7,
       "regulatory_focus": 10,
       "phi_framing": 20,
@@ -61,22 +62,23 @@
       "testing": 5,
       "api_design": 4,
       "data_integrity": 4,
-      "observability": 5,
+      "observability": 6,
       "dependency_management": 3,
-      "style_formatting": 10,
+      "style_formatting": 11,
       "documentation": 2,
       "database_transactions": 3,
-      "backward_compatibility": 3
+      "backward_compatibility": 3,
+      "correctness": 5
     },
     "n_per_extended_signal": {
-      "comment_density": 37,
+      "comment_density": 40,
       "suggestion_block_usage": 5,
-      "test_insistence": 4,
-      "scope_discipline": 33,
-      "verification_effort": 53,
+      "test_insistence": 5,
+      "scope_discipline": 35,
+      "verification_effort": 56,
       "praise_frequency": 11,
       "follow_up_tracking": 12,
-      "escalation_propensity": 9
+      "escalation_propensity": 10
     }
   },
   "safety_floor": "Any defect candidate with sigma >= 0.80 is non-suppressible; Tier 3 must clamp S_effective >= sigma for it regardless of this profile."

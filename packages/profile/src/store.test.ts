@@ -20,7 +20,7 @@ describe("the profile store", () => {
   it("saves a first answer and scores the sheet with the battery's version", () => {
     const saved = store.record("octocat", { "COG-01": "E" });
     expect(saved.subject).toBe("octocat");
-    expect(saved.batteryVersion).toBe("2.2");
+    expect(saved.batteryVersion).toBe(bundledBattery().version);
     expect(saved.answered).toBe(1);
     expect(saved.profile.attributes.kai_index).toBe(0);
     expect(saved.id).toMatch(/^dp_/);
@@ -82,7 +82,7 @@ describe("the profile store", () => {
   it("keeps a profile per battery version, and a store reads only its own", () => {
     store.record("octocat", { "COG-01": "E" });
     const next = structuredClone(bundledBattery()) as Battery;
-    next.version = "2.3";
+    next.version = "2.4";
     const nextStore = new ProfileStore(db, next);
     expect(nextStore.get("octocat")).toBeUndefined();
     nextStore.record("octocat", { "COG-01": "A" });
@@ -165,7 +165,7 @@ describe("the active profile", () => {
   it("an active profile from an older battery version is not used", () => {
     store.activate("octocat");
     const next = structuredClone(bundledBattery()) as Battery;
-    next.version = "2.3";
+    next.version = "2.4";
     expect(new ProfileStore(db, next).active()).toBeUndefined();
   });
 

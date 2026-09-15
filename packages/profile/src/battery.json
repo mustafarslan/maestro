@@ -1,7 +1,7 @@
 {
  "battery": "Developer Cognitive Profile Calibration Battery",
- "version": "2.2",
- "question_count": 95,
+ "version": "2.3",
+ "question_count": 100,
  "attribution": "Synthetically generated calibration instrument for a personalized, human-aligned PR-review pipeline (Tier 3 gating + Tier 4 persona synthesis). Items are behaviourally anchored; no option represents an objectively correct engineering answer.",
  "changes_from_v1": [
   "Every item carries pr_context (title, author description, size, CI status, author note) as real reviewers and agents see it.",
@@ -48,6 +48,12 @@
    "count": 10,
    "format": "4-option interaction mechanism",
    "design": "finding and severity fixed by the scenario; options differ only in communication mechanism (5 items suggestion_block_usage, 5 items praise_frequency)"
+  },
+  {
+   "name": "Category 7: Correctness Defect Emphasis",
+   "count": 5,
+   "format": "4-option choice mapped to APPROVE / APPROVE+note / COMMENT / REQUEST_CHANGES",
+   "design": "three solo vignettes (a real defect with a plausible reason to defer; options differ only in how hard the review pushes on it) and two comparative vignettes (the same PR carries a defect and a concern from another topic; options differ in which one the review leads with and blocks on). Every option accepts that the defect is real."
   }
  ],
  "profile_schema": {
@@ -128,7 +134,8 @@
     "semantics": "effective severity S_effective at which the reviewer switches from advisory to REQUEST_CHANGES; low = blocks early",
     "source_categories": [
      "Category 2",
-     "Category 4"
+     "Category 4",
+     "Category 7"
     ],
     "contributing_items": [
      "DEBT-01",
@@ -170,7 +177,12 @@
      "GATE-12",
      "GATE-13",
      "GATE-14",
-     "GATE-15"
+     "GATE-15",
+     "BUG-01",
+     "BUG-02",
+     "BUG-03",
+     "BUG-04",
+     "BUG-05"
     ]
    },
    "kai_index": {
@@ -367,7 +379,8 @@
      "style_formatting",
      "documentation",
      "database_transactions",
-     "backward_compatibility"
+     "backward_compatibility",
+     "correctness"
     ],
     "range": [
      0.0,
@@ -377,7 +390,8 @@
     "source_categories": [
      "Category 2",
      "Category 3",
-     "Category 4"
+     "Category 4",
+     "Category 7"
     ],
     "contributing_items": [
      "DEBT-01",
@@ -434,7 +448,12 @@
      "GATE-12",
      "GATE-13",
      "GATE-14",
-     "GATE-15"
+     "GATE-15",
+     "BUG-01",
+     "BUG-02",
+     "BUG-03",
+     "BUG-04",
+     "BUG-05"
     ]
    }
   },
@@ -526,7 +545,12 @@
      "HAB-06",
      "HAB-07",
      "HAB-08",
-     "HAB-10"
+     "HAB-10",
+     "BUG-01",
+     "BUG-02",
+     "BUG-03",
+     "BUG-04",
+     "BUG-05"
     ]
    },
    "suggestion_block_usage": {
@@ -545,7 +569,10 @@
      "HAB-02",
      "HAB-03",
      "HAB-04",
-     "HAB-05"
+     "HAB-05",
+     "BUG-01",
+     "BUG-02",
+     "BUG-04"
     ]
    },
    "test_insistence": {
@@ -587,7 +614,12 @@
      "GATE-11",
      "GATE-13",
      "GATE-14",
-     "HAB-05"
+     "HAB-05",
+     "BUG-01",
+     "BUG-02",
+     "BUG-03",
+     "BUG-04",
+     "BUG-05"
     ]
    },
    "scope_discipline": {
@@ -647,7 +679,10 @@
      "HAB-01",
      "HAB-04",
      "HAB-05",
-     "HAB-09"
+     "HAB-09",
+     "BUG-03",
+     "BUG-04",
+     "BUG-05"
     ]
    },
    "verification_effort": {
@@ -727,7 +762,10 @@
      "HAB-06",
      "HAB-07",
      "HAB-08",
-     "HAB-09"
+     "HAB-09",
+     "BUG-01",
+     "BUG-02",
+     "BUG-04"
     ]
    },
    "praise_frequency": {
@@ -754,7 +792,8 @@
      "HAB-07",
      "HAB-08",
      "HAB-09",
-     "HAB-10"
+     "HAB-10",
+     "BUG-03"
     ]
    },
    "follow_up_tracking": {
@@ -826,7 +865,11 @@
      "HAB-06",
      "HAB-08",
      "HAB-09",
-     "HAB-10"
+     "HAB-10",
+     "BUG-01",
+     "BUG-02",
+     "BUG-04",
+     "BUG-05"
     ]
    },
    "escalation_propensity": {
@@ -887,7 +930,9 @@
      "LING-05",
      "LING-14",
      "HAB-02",
-     "HAB-03"
+     "HAB-03",
+     "BUG-03",
+     "BUG-05"
     ]
    }
   }
@@ -909,7 +954,7 @@
    },
    {
     "attribute": "topic_weights",
-    "rule": "W_topic scales sigma per finding topic; weights are estimated per topic from Categories 2-4 and default to 0.5 where unobserved."
+    "rule": "W_topic scales sigma per finding topic; weights are estimated per topic from Categories 2-4 and 7 and default to 0.5 where unobserved."
    }
   ],
   "tier4": [
@@ -1050,7 +1095,12 @@
    "GATE-12",
    "GATE-13",
    "GATE-14",
-   "GATE-15"
+   "GATE-15",
+   "BUG-01",
+   "BUG-02",
+   "BUG-03",
+   "BUG-04",
+   "BUG-05"
   ],
   "topic_weights.concurrency": [
    "DEBT-02",
@@ -1102,7 +1152,8 @@
    "DEBT-20",
    "PED-11",
    "GATE-06",
-   "GATE-13"
+   "GATE-13",
+   "BUG-05"
   ],
   "topic_weights.backward_compatibility": [
    "DEBT-10",
@@ -1143,7 +1194,8 @@
    "PED-09",
    "PED-10",
    "PED-13",
-   "PED-15"
+   "PED-15",
+   "BUG-03"
   ],
   "topic_weights.documentation": [
    "PED-03",
@@ -1238,6 +1290,13 @@
    "LING-13",
    "LING-14",
    "LING-15"
+  ],
+  "topic_weights.correctness": [
+   "BUG-01",
+   "BUG-02",
+   "BUG-03",
+   "BUG-04",
+   "BUG-05"
   ]
  },
  "extended_signal_index": {
@@ -1304,7 +1363,11 @@
    "HAB-06",
    "HAB-08",
    "HAB-09",
-   "HAB-10"
+   "HAB-10",
+   "BUG-01",
+   "BUG-02",
+   "BUG-04",
+   "BUG-05"
   ],
   "verification_effort": [
    "DEBT-01",
@@ -1377,7 +1440,10 @@
    "HAB-06",
    "HAB-07",
    "HAB-08",
-   "HAB-09"
+   "HAB-09",
+   "BUG-01",
+   "BUG-02",
+   "BUG-04"
   ],
   "scope_discipline": [
    "DEBT-01",
@@ -1430,7 +1496,10 @@
    "HAB-01",
    "HAB-04",
    "HAB-05",
-   "HAB-09"
+   "HAB-09",
+   "BUG-03",
+   "BUG-04",
+   "BUG-05"
   ],
   "escalation_propensity": [
    "DEBT-01",
@@ -1484,7 +1553,9 @@
    "LING-05",
    "LING-14",
    "HAB-02",
-   "HAB-03"
+   "HAB-03",
+   "BUG-03",
+   "BUG-05"
   ],
   "test_insistence": [
    "DEBT-01",
@@ -1519,7 +1590,12 @@
    "GATE-11",
    "GATE-13",
    "GATE-14",
-   "HAB-05"
+   "HAB-05",
+   "BUG-01",
+   "BUG-02",
+   "BUG-03",
+   "BUG-04",
+   "BUG-05"
   ],
   "comment_density": [
    "DEBT-01",
@@ -1593,7 +1669,12 @@
    "HAB-06",
    "HAB-07",
    "HAB-08",
-   "HAB-10"
+   "HAB-10",
+   "BUG-01",
+   "BUG-02",
+   "BUG-03",
+   "BUG-04",
+   "BUG-05"
   ],
   "suggestion_block_usage": [
    "DEBT-02",
@@ -1605,7 +1686,10 @@
    "HAB-02",
    "HAB-03",
    "HAB-04",
-   "HAB-05"
+   "HAB-05",
+   "BUG-01",
+   "BUG-02",
+   "BUG-04"
   ],
   "praise_frequency": [
    "DEBT-15",
@@ -1625,7 +1709,8 @@
    "HAB-07",
    "HAB-08",
    "HAB-09",
-   "HAB-10"
+   "HAB-10",
+   "BUG-03"
   ]
  },
  "quality_assurance": {
@@ -1640,8 +1725,14 @@
    "DEBT-01 (option C contention mitigation)",
    "DEBT-11",
    "GATE-13",
-   "HAB-09"
-  ]
+   "HAB-09",
+   "BUG-01 (written 2026-09-15, not audited)",
+   "BUG-02 (written 2026-09-15, not audited)",
+   "BUG-03 (written 2026-09-15, not audited)",
+   "BUG-04 (written 2026-09-15, not audited)",
+   "BUG-05 (written 2026-09-15, not audited)"
+  ],
+  "category_7": "BUG-01..05 were written in Maestro on 2026-09-15 at the battery owner's request, to give correctness defects (off-by-one, empty-input boundaries, assignment in a condition, type coercion, inverted conditions) a topic weight. They were written by the assistant, checked by Maestro's loader and parity tests, and have had neither the per-item consistency audit nor any calibration on people. Read them before relying on W_correctness."
  },
  "items": [
   {
@@ -12845,6 +12936,661 @@
      "A"
     ]
    }
+  },
+  {
+   "id": "BUG-01",
+   "category": "Category 7: Correctness Defect Emphasis",
+   "format": "single_choice_4",
+   "constructs": [
+    "blocking_threshold",
+    "topic_weights.correctness"
+   ],
+   "factors": {
+    "defect_class": "off_by_one",
+    "shape": "solo",
+    "blast_radius": "downstream_system_self_healing_weekly"
+   },
+   "stack": "Python",
+   "pr_context": {
+    "title": "Push changed accounts to the CRM in bulk batches",
+    "description": "The CRM's per-record endpoint is being rate limited during the nightly sync. This switches to the bulk endpoint, which accepts at most BATCH_SIZE (100) records per call. The existing sync test runs against a 250-account fixture and passes.",
+    "files_changed": 1,
+    "additions": 4,
+    "deletions": 3,
+    "ci_status": "passing",
+    "author_note": "Sunday's full resync rewrites every account anyway, so the nightly job only has to be close."
+   },
+   "scenario": "You are reviewing a change to the nightly job that pushes accounts changed that day into the sales team's CRM. The new loop bound is `len(rows) - 1`, so whenever the number of changed accounts is one more than a multiple of 100 (1, 101, 201, ...) the last account is never pushed; on other nights every account goes through. The 250-account test fixture never hits that case. A full resync every Sunday rewrites all accounts, so a dropped account is stale in the CRM for at most six days. The author is a senior engineer who owns the job, and there is no deadline on this change.",
+   "code": "diff --git a/jobs/crm_sync.py b/jobs/crm_sync.py\n--- a/jobs/crm_sync.py\n+++ b/jobs/crm_sync.py\n@@ -40,7 +40,8 @@ def sync_changed_accounts(since: datetime) -> int:\n     rows = fetch_changed_accounts(since)\n     pushed = 0\n-    for row in rows:\n-        crm.upsert_account(to_crm_payload(row))\n-        pushed += 1\n+    # The CRM bulk endpoint accepts at most BATCH_SIZE records per call.\n+    for start in range(0, len(rows) - 1, BATCH_SIZE):\n+        batch = rows[start:start + BATCH_SIZE]\n+        crm.bulk_upsert([to_crm_payload(r) for r in batch])\n+        pushed += len(batch)\n     log.info(\"pushed %d changed accounts\", pushed)\n     return pushed",
+   "prompt": "The loop bound on crm_sync.py:43 drops the last account on some nights, and Sunday's resync repairs it. What do you do with this PR?",
+   "options": [
+    {
+     "label": "A",
+     "text": "Approve, with a comment on crm_sync.py:43 explaining which counts lose the last account and asking the author to fix the bound in a follow-up ticket.",
+     "mapping": {
+      "blocking_threshold": 0.65,
+      "topic_weights.correctness": 0.4
+     },
+     "extended_signals": {
+      "follow_up_tracking": 0.75,
+      "comment_density": 0.4
+     },
+     "rationale": "The defect is real and should be fixed, but the weekly resync means it can wait for a follow-up instead of holding this change.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": "crm_sync.py:43 - `range(0, len(rows) - 1, BATCH_SIZE)` skips the last account whenever the count is one more than a multiple of 100 (101 rows pushes 100, 1 row pushes nothing). Sunday's resync covers it, so I'm not holding this, but please open a ticket to change the bound to `len(rows)`.",
+      "follow_up": "tracked_ticket",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should report a bounded off-by-one as a non-blocking comment and draft a tracking ticket for it.",
+     "canonical_rank": "B"
+    },
+    {
+     "label": "B",
+     "text": "Request changes on crm_sync.py:43: fix the bound, and add a test that syncs 1, 100 and 101 accounts and checks every one arrives.",
+     "mapping": {
+      "blocking_threshold": 0.12,
+      "topic_weights.correctness": 0.92
+     },
+     "extended_signals": {
+      "test_insistence": 0.9,
+      "verification_effort": 0.75
+     },
+     "rationale": "The 250-row fixture let this through; without a test at the boundaries the next change to the batching can reintroduce it just as quietly.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "crm_sync.py:43 - `len(rows) - 1` drops the last account whenever the count is one more than a multiple of BATCH_SIZE, which the 250-account fixture never exercises. Please use `len(rows)` and add a test that syncs 1, 100 and 101 accounts and asserts all of them reach `bulk_upsert`.",
+      "follow_up": "none",
+      "requests_tests": true,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should block on off-by-one defects and ask for a test at the exact boundary that exposes them.",
+     "canonical_rank": "D"
+    },
+    {
+     "label": "C",
+     "text": "Request changes on crm_sync.py:43 with a suggestion block that changes the bound to `len(rows)`, and approve once it is applied.",
+     "mapping": {
+      "blocking_threshold": 0.35,
+      "topic_weights.correctness": 0.7
+     },
+     "extended_signals": {
+      "suggestion_block_usage": 0.85,
+      "test_insistence": 0.2
+     },
+     "rationale": "It's a one-token fix and the loop is wrong as written; a repair job elsewhere isn't a reason to merge a loop that drops data.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "crm_sync.py:43 - this bound skips the last account when the count is 1, 101, 201, ... Suggested fix:\n```suggestion\n    for start in range(0, len(rows), BATCH_SIZE):\n```",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": true
+     },
+     "agent_behavior": "For this developer, the agent should block on off-by-one defects even when another process repairs their effect, and offer the one-line fix.",
+     "canonical_rank": "C"
+    },
+    {
+     "label": "D",
+     "text": "Approve as pushed; an account dropped on the odd night is repaired by Sunday's full resync, so you'll mention the loop bound to the author next time you talk rather than in the review.",
+     "mapping": {
+      "blocking_threshold": 0.85,
+      "topic_weights.correctness": 0.15
+     },
+     "extended_signals": {
+      "verification_effort": 0.2,
+      "test_insistence": 0.05
+     },
+     "rationale": "The job already has a repair path, and a few days of staleness in one CRM record doesn't justify a review round on a senior engineer's change.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": null,
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should not raise off-by-one defects whose effects an existing repair path already bounds.",
+     "canonical_rank": "A"
+    }
+   ],
+   "discriminates": "separates reviewers who let a real off-by-one merge when an existing repair path bounds its effect from those who treat a loop that drops data as blocking regardless of the repair.",
+   "bias_control": "every option accepts that the bound is wrong and should change; the scenario supplies a genuine repair path, a senior owner and a green test, so deferring is defensible within the scenario rather than negligent.",
+   "presentation": {
+    "shuffled": true,
+    "seed": 20260915,
+    "canonical_order": [
+     "B",
+     "D",
+     "C",
+     "A"
+    ]
+   }
+  },
+  {
+   "id": "BUG-02",
+   "category": "Category 7: Correctness Defect Emphasis",
+   "format": "single_choice_4",
+   "constructs": [
+    "blocking_threshold",
+    "topic_weights.correctness"
+   ],
+   "factors": {
+    "defect_class": "boundary_empty_input",
+    "shape": "solo",
+    "blast_radius": "internal_dashboard_display_only"
+   },
+   "stack": "TypeScript + React",
+   "pr_context": {
+    "title": "Show average latency next to p50 on the service card",
+    "description": "Adds an average alongside the existing p50 on the ops dashboard's latency card, which on-call asked for. Screenshot attached from staging.",
+    "files_changed": 1,
+    "additions": 2,
+    "deletions": 0,
+    "ci_status": "passing",
+    "author_note": "Small one, would like to get it out with today's dashboard deploy."
+   },
+   "scenario": "You are reviewing a change to the internal ops dashboard. The new average divides by `samples.length` without the empty check the p50 line already has, so for a service with no requests in the selected window the card shows the empty placeholder and, beside it, \"avg NaN ms\". That happens for newly created services and for quiet services on short time windows. Nothing is stored or alerted on from this value; it is display only. The staging screenshot was taken on a busy service.",
+   "code": "diff --git a/src/widgets/LatencyCard.tsx b/src/widgets/LatencyCard.tsx\n--- a/src/widgets/LatencyCard.tsx\n+++ b/src/widgets/LatencyCard.tsx\n@@ -12,8 +12,10 @@ interface Props {\n export function LatencyCard({ samples }: Props) {\n   const p50 = samples.length ? median(samples) : null;\n+  const avg = samples.reduce((sum, s) => sum + s.ms, 0) / samples.length;\n   return (\n     <Card title=\"Request latency\">\n       {p50 === null ? <Empty /> : <Stat label=\"p50\" value={`${p50} ms`} />}\n+      <Stat label=\"avg\" value={`${avg.toFixed(1)} ms`} />\n     </Card>\n   );\n }",
+   "prompt": "For an empty window the new line renders \"avg NaN ms\" on an internal, display-only card. What do you do with this PR?",
+   "options": [
+    {
+     "label": "A",
+     "text": "Leave a comment without approving on LatencyCard.tsx:14 with a suggestion block that guards the empty case, and approve once it is applied.",
+     "mapping": {
+      "blocking_threshold": 0.45,
+      "topic_weights.correctness": 0.65
+     },
+     "extended_signals": {
+      "suggestion_block_usage": 0.85,
+      "verification_effort": 0.4
+     },
+     "rationale": "A card that prints NaN is wrong output, even if it's only a display; the fix is one line, so I hold my approval for it without formally blocking.",
+     "review_action": {
+      "state": "COMMENT",
+      "comment": "LatencyCard.tsx:14 - an empty window divides by zero here, so the card shows \"avg NaN ms\". Suggested fix, matching the p50 guard:\n```suggestion\n  const avg = samples.length ? samples.reduce((sum, s) => sum + s.ms, 0) / samples.length : null;\n```\nand render the avg Stat only when `avg !== null`.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": true
+     },
+     "agent_behavior": "For this developer, the agent should hold approval on boundary defects that produce wrong output, even display-only, and offer the fix.",
+     "canonical_rank": "C"
+    },
+    {
+     "label": "B",
+     "text": "Request changes on LatencyCard.tsx:14: guard the empty case and add a render test for a card with no samples.",
+     "mapping": {
+      "blocking_threshold": 0.2,
+      "topic_weights.correctness": 0.9
+     },
+     "extended_signals": {
+      "test_insistence": 0.85,
+      "verification_effort": 0.7
+     },
+     "rationale": "The empty case is the one the screenshot didn't cover and the existing guard shows it was known; a render test keeps the next field added to this card from repeating it.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "LatencyCard.tsx:14 - with no samples this is 0 / 0, and the card renders \"avg NaN ms\" beside the empty state. Please guard it like p50 on line 13 and add a render test for `samples: []` asserting no NaN appears.",
+      "follow_up": "none",
+      "requests_tests": true,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should block on empty-input and divide-by-zero defects regardless of how visible or contained the effect is.",
+     "canonical_rank": "D"
+    },
+    {
+     "label": "C",
+     "text": "Approve, with a comment on LatencyCard.tsx:14 pointing out the empty case and suggesting it reuse the p50 guard, fine in this PR or the next.",
+     "mapping": {
+      "blocking_threshold": 0.7,
+      "topic_weights.correctness": 0.35
+     },
+     "extended_signals": {
+      "comment_density": 0.45,
+      "follow_up_tracking": 0.3
+     },
+     "rationale": "It should be fixed, and the author should know, but it isn't worth holding today's deploy for a display glitch on quiet services.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": "LatencyCard.tsx:14 - with no samples this divides by zero and the card shows \"avg NaN ms\" next to the empty state. Guarding it the same way as p50 on line 13 would fix it; fine in this PR or a follow-up.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should mention display-only boundary defects as an approving comment and leave the timing to the author.",
+     "canonical_rank": "B"
+    },
+    {
+     "label": "D",
+     "text": "Approve as pushed; \"NaN ms\" next to the empty placeholder is self-evidently no data, and whoever next touches the card can tidy it.",
+     "mapping": {
+      "blocking_threshold": 0.9,
+      "topic_weights.correctness": 0.1
+     },
+     "extended_signals": {
+      "verification_effort": 0.15,
+      "comment_density": 0.05
+     },
+     "rationale": "It's an internal display with the empty state already visible beside it; nobody is misled and nothing depends on the number.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": null,
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should not raise empty-input defects whose only effect is a visibly wrong value on an internal display.",
+     "canonical_rank": "A"
+    }
+   ],
+   "discriminates": "separates reviewers who weigh a boundary defect by its consequences, here display-only, from those who treat wrong output at an edge as a defect to stop regardless of stakes.",
+   "bias_control": "every option accepts that NaN is wrong and the guard belongs there; the stakes are deliberately low and a same-day deploy is pending, so approving is a reasonable engineering call rather than a lapse.",
+   "presentation": {
+    "shuffled": true,
+    "seed": 20260915,
+    "canonical_order": [
+     "C",
+     "D",
+     "B",
+     "A"
+    ]
+   }
+  },
+  {
+   "id": "BUG-03",
+   "category": "Category 7: Correctness Defect Emphasis",
+   "format": "single_choice_4",
+   "constructs": [
+    "blocking_threshold",
+    "topic_weights.correctness",
+    "topic_weights.style_formatting"
+   ],
+   "factors": {
+    "defect_class": "assignment_in_condition",
+    "shape": "comparative",
+    "competing_topic": "style_formatting"
+   },
+   "stack": "Node.js (JavaScript)",
+   "pr_context": {
+    "title": "Add backoff between retries in fetchWithRetry",
+    "description": "Retries were firing immediately and hammering upstreams during incidents. Adds exponential backoff between attempts and a fast path for callers that pass retries: 0. Unit tests pass.",
+    "files_changed": 1,
+    "additions": 8,
+    "deletions": 4,
+    "ci_status": "passing",
+    "author_note": "First PR in this repo, still getting used to the conventions here."
+   },
+   "scenario": "You are reviewing a shared HTTP helper that fourteen services import. The diff has two problems. On line 10 `request_config.retries = 0` assigns instead of compares: the fast path never runs, the caller's config object is overwritten with 0, and every call makes exactly one attempt, so retries are silently disabled everywhere. The unit test only covers success on the first attempt. Separately, the new names `request_config` and `backoff_ms` are snake_case in a codebase whose style guide requires camelCase; the lint rule that enforces it is not enabled in `lib/` yet, so reviewers are expected to catch it.",
+   "code": "diff --git a/lib/http/fetchWithRetry.js b/lib/http/fetchWithRetry.js\n--- a/lib/http/fetchWithRetry.js\n+++ b/lib/http/fetchWithRetry.js\n@@ -8,10 +8,14 @@ const { sleep } = require(\"../util/sleep\");\n \n-async function fetchWithRetry(url, config) {\n-  for (let attempt = 0; attempt <= config.retries; attempt++) {\n+async function fetchWithRetry(url, request_config) {\n+  if (request_config.retries = 0) {\n+    return fetchOnce(url, request_config);\n+  }\n+  for (let attempt = 0; attempt <= request_config.retries; attempt++) {\n     try {\n-      return await fetchOnce(url, config);\n+      return await fetchOnce(url, request_config);\n     } catch (err) {\n-      if (attempt === config.retries) throw err;\n+      if (attempt === request_config.retries) throw err;\n+      await sleep(backoff_ms(attempt));\n     }\n   }\n }",
+   "prompt": "The PR has an assignment where a comparison was meant (fetchWithRetry.js:10) and snake_case names the style guide forbids (lines 9 and 18). How does your review handle the two?",
+   "options": [
+    {
+     "label": "A",
+     "text": "Request changes with fetchWithRetry.js:10 as the blocking reason, explaining that it disables retries for every caller, and add the snake_case names as nits in the same review.",
+     "mapping": {
+      "blocking_threshold": 0.25,
+      "topic_weights.correctness": 0.75,
+      "topic_weights.style_formatting": 0.45
+     },
+     "extended_signals": {
+      "escalation_propensity": 0.3,
+      "comment_density": 0.5
+     },
+     "rationale": "Line 10 turns off retries for fourteen services and mutates their config; that is what blocks. The naming is worth fixing while they're in there, but it isn't why I'm holding the PR.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "fetchWithRetry.js:10 - `request_config.retries = 0` is an assignment: it overwrites the caller's config with 0, the fast path never runs, and every call makes exactly one attempt, so retries are disabled for every service using this. Should be `=== 0`.\n\nnit: :9, :18 - camelCase per the style guide (`requestConfig`, `backoffMs`).",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should make a logic defect the blocking reason and demote convention issues in the same PR to nits.",
+     "canonical_rank": "C"
+    },
+    {
+     "label": "B",
+     "text": "Request changes citing the style guide on the snake_case names at fetchWithRetry.js:9 and :18, and add a separate, non-blocking note that the condition on line 10 should be `===`.",
+     "mapping": {
+      "blocking_threshold": 0.3,
+      "topic_weights.correctness": 0.2,
+      "topic_weights.style_formatting": 0.9
+     },
+     "extended_signals": {
+      "comment_density": 0.6,
+      "scope_discipline": 0.3
+     },
+     "rationale": "Conventions only hold if reviewers enforce them while the lint rule is off, and a new contributor learns them fastest on their first PR; the `=` is a plain slip they'll fix when they see the note.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "fetchWithRetry.js:9, :18 - our style guide requires camelCase: `requestConfig`, `backoffMs`. The lint rule isn't on in lib/ yet, so please rename before merge.\n\nSeparately, line 10: `=` should be `===`.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should lead with convention violations on a shared module and treat a plain logic slip as a secondary note.",
+     "canonical_rank": "A"
+    },
+    {
+     "label": "C",
+     "text": "Comment without blocking, listing both: the naming convention first, since it is the repo-wide point for a new contributor, then the `=` on line 10 as a second item to fix before merge.",
+     "mapping": {
+      "blocking_threshold": 0.6,
+      "topic_weights.correctness": 0.45,
+      "topic_weights.style_formatting": 0.65
+     },
+     "extended_signals": {
+      "comment_density": 0.7,
+      "praise_frequency": 0.35
+     },
+     "rationale": "Both need to change; for someone new I'd rather explain the conventions and the slip together in one friendly pass than put a block on their first PR.",
+     "review_action": {
+      "state": "COMMENT",
+      "comment": "Welcome! Two things before this merges:\n1. fetchWithRetry.js:9, :18 - the style guide uses camelCase (`requestConfig`, `backoffMs`); lint doesn't enforce it in lib/ yet.\n2. Line 10 - `request_config.retries = 0` assigns rather than compares, so it should be `===`.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should weigh logic slips and convention violations about equally and report both without blocking.",
+     "canonical_rank": "B"
+    },
+    {
+     "label": "D",
+     "text": "Request changes on fetchWithRetry.js:10 only, ask for a test that a failing call is actually retried, and leave the naming out of this review so the defect is the only thing the author has to act on.",
+     "mapping": {
+      "blocking_threshold": 0.2,
+      "topic_weights.correctness": 0.95,
+      "topic_weights.style_formatting": 0.1
+     },
+     "extended_signals": {
+      "test_insistence": 0.8,
+      "scope_discipline": 0.85
+     },
+     "rationale": "Mixing a naming lecture into a review about a defect that disables retries everywhere dilutes the one thing that matters; conventions can wait for the lint rule.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "fetchWithRetry.js:10 - this assigns 0 to `retries` instead of comparing, so the caller's config is overwritten and no call is ever retried. Please use `=== 0` and add a test where `fetchOnce` fails once and succeeds on the second attempt; the current test only covers first-attempt success.",
+      "follow_up": "none",
+      "requests_tests": true,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should report only the correctness defect when one is present and suppress convention findings on the same PR.",
+     "canonical_rank": "D"
+    }
+   ],
+   "discriminates": "separates reviewers who lead with, and block on, the logic defect when a PR also breaks a team convention from those who give convention enforcement equal or greater weight.",
+   "bias_control": "every option asks for the `===` fix before merge, and the convention is real, documented and unenforced by tooling, so leading with it is a defensible review for a first-time contributor rather than a failure to see the bug.",
+   "presentation": {
+    "shuffled": true,
+    "seed": 20260915,
+    "canonical_order": [
+     "C",
+     "A",
+     "B",
+     "D"
+    ]
+   }
+  },
+  {
+   "id": "BUG-04",
+   "category": "Category 7: Correctness Defect Emphasis",
+   "format": "single_choice_4",
+   "constructs": [
+    "blocking_threshold",
+    "topic_weights.correctness"
+   ],
+   "factors": {
+    "defect_class": "type_coercion",
+    "shape": "solo",
+    "blast_radius": "internal_admin_tool_navigation"
+   },
+   "stack": "TypeScript + Express",
+   "pr_context": {
+    "title": "Paginate the audit log page",
+    "description": "The audit page loaded the newest 50 entries only; compliance asked to be able to page back. Adds ?page= support and a Next link. Route test updated.",
+    "files_changed": 1,
+    "additions": 6,
+    "deletions": 2,
+    "ci_status": "passing",
+    "author_note": "The `as any` is temporary until we type req.query properly across the app."
+   },
+   "scenario": "You are reviewing an admin-only audit log viewer that the compliance team opens a few times a month. `page` comes from the query string as a string, so `(page - 1)` coerces correctly but `page + 1` concatenates: the Next link from page 1 goes to page 2, but from page 2 it goes to page 21, from page 3 to page 31. The route test requests the page without a query parameter, where `page` is the number 1, so it passes. No data is wrong; navigation past page 2 is. Compliance can still reach any page by editing the URL.",
+   "code": "diff --git a/src/routes/auditLog.ts b/src/routes/auditLog.ts\n--- a/src/routes/auditLog.ts\n+++ b/src/routes/auditLog.ts\n@@ -21,4 +21,8 @@ const PAGE_SIZE = 50;\n router.get(\"/audit\", requireRole(\"admin\"), async (req, res) => {\n-  const entries = await auditStore.list({ limit: PAGE_SIZE });\n-  res.render(\"audit\", { entries });\n+  const page = (req.query.page as any) ?? 1;\n+  const entries = await auditStore.list({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });\n+  res.render(\"audit\", {\n+    entries,\n+    nextPage: entries.length === PAGE_SIZE ? page + 1 : null,\n+  });\n });",
+   "prompt": "`page + 1` on auditLog.ts:26 concatenates a query-string value, so Next jumps from page 2 to page 21 on a rarely used admin page. What do you do with this PR?",
+   "options": [
+    {
+     "label": "A",
+     "text": "Approve, with a comment on auditLog.ts:22 explaining the string concatenation and suggesting `Number(req.query.page ?? 1)`.",
+     "mapping": {
+      "blocking_threshold": 0.65,
+      "topic_weights.correctness": 0.4
+     },
+     "extended_signals": {
+      "comment_density": 0.45,
+      "follow_up_tracking": 0.35
+     },
+     "rationale": "It's worth telling the author exactly what goes wrong so it's fixed soon, but an admin page with a URL workaround doesn't need to be held.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": "auditLog.ts:22 - `req.query.page` is a string, so `page + 1` on line 26 concatenates: Next from page 2 links to page 21. `Number(req.query.page ?? 1)` fixes it; happy for that to go in now or next.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should explain coercion defects in an approving comment with the fix and let the author schedule it.",
+     "canonical_rank": "B"
+    },
+    {
+     "label": "B",
+     "text": "Approve as pushed; the page works, the author already plans to type req.query properly, and the few people who page past 2 can adjust the URL until then.",
+     "mapping": {
+      "blocking_threshold": 0.85,
+      "topic_weights.correctness": 0.15
+     },
+     "extended_signals": {
+      "verification_effort": 0.2,
+      "scope_discipline": 0.4
+     },
+     "rationale": "The typing cleanup the author mentioned will fix this class of problem at the root; a separate round on a rarely used admin page isn't worth it.",
+     "review_action": {
+      "state": "APPROVE",
+      "comment": null,
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should not raise type-coercion defects on low-traffic internal tools when a broader typing fix is planned.",
+     "canonical_rank": "A"
+    },
+    {
+     "label": "C",
+     "text": "Leave a comment without approving on auditLog.ts:22 with a suggestion block that parses `page` as a number, and approve once it is applied.",
+     "mapping": {
+      "blocking_threshold": 0.4,
+      "topic_weights.correctness": 0.7
+     },
+     "extended_signals": {
+      "suggestion_block_usage": 0.85,
+      "verification_effort": 0.45
+     },
+     "rationale": "The feature this PR adds is paging, and paging is broken from page 2; I'm not formally blocking a one-line fix, but I won't approve a Next link that goes to the wrong page.",
+     "review_action": {
+      "state": "COMMENT",
+      "comment": "auditLog.ts:22 - query values are strings, so `page + 1` on line 26 yields \"21\" from page 2. Suggested:\n```suggestion\n  const page = Number(req.query.page ?? 1);\n```",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": true
+     },
+     "agent_behavior": "For this developer, the agent should withhold approval when the feature a PR adds is wrong at its second use, and offer the fix.",
+     "canonical_rank": "C"
+    },
+    {
+     "label": "D",
+     "text": "Request changes on auditLog.ts:22: parse and validate `page` (a number, at least 1), drop the `as any`, and extend the route test to request ?page=2 and assert nextPage is 3.",
+     "mapping": {
+      "blocking_threshold": 0.15,
+      "topic_weights.correctness": 0.92
+     },
+     "extended_signals": {
+      "test_insistence": 0.85,
+      "verification_effort": 0.75
+     },
+     "rationale": "The `as any` is what hid this, and the test only covers the one case where the type happens to be right; both need to change or the next query parameter repeats it.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "auditLog.ts:22 - `req.query.page` is a string, so line 26 concatenates (page 2 -> \"21\"), and `as any` hides it from the compiler. Please parse it with `Number`, reject NaN or < 1, remove the cast, and add a test for `?page=2` asserting `nextPage === 3`; the current test never passes a page.",
+      "follow_up": "none",
+      "requests_tests": true,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should block on type-coercion defects and on the unchecked casts that hide them, and ask for a test with the real input type.",
+     "canonical_rank": "D"
+    }
+   ],
+   "discriminates": "separates reviewers who scale their response to a coercion bug by the traffic and workaround available from those who treat a feature that is wrong on its second use as blocking.",
+   "bias_control": "every option accepts that the Next link is wrong and should be fixed; the page is rarely used, a URL workaround exists and the author has a broader typing fix planned, so approving is a considered call.",
+   "presentation": {
+    "shuffled": true,
+    "seed": 20260915,
+    "canonical_order": [
+     "B",
+     "A",
+     "C",
+     "D"
+    ]
+   }
+  },
+  {
+   "id": "BUG-05",
+   "category": "Category 7: Correctness Defect Emphasis",
+   "format": "single_choice_4",
+   "constructs": [
+    "blocking_threshold",
+    "topic_weights.correctness",
+    "topic_weights.observability"
+   ],
+   "factors": {
+    "defect_class": "inverted_condition",
+    "shape": "comparative",
+    "competing_topic": "observability"
+   },
+   "stack": "Go",
+   "pr_context": {
+    "title": "Skip catalog sources refreshed within staleAfter",
+    "description": "Upstream catalog providers complained about load: we refresh every source every minute. This skips sources refreshed recently. Tested locally against the staging sources.",
+    "files_changed": 1,
+    "additions": 6,
+    "deletions": 2,
+    "ci_status": "passing",
+    "author_note": "Left the skip at debug level so it doesn't spam the logs."
+   },
+   "scenario": "You are reviewing the refresher that keeps the product catalog in sync with upstream providers. The comparison on line 55 is inverted: it refreshes sources that are still fresh and skips sources that have gone stale, so any source that misses a refresh stays stale indefinitely while the debug log calls it fresh. Locally every staging source was fresh, so everything kept refreshing. Separately, the on-call runbook, after last quarter's catalog incident, requires every refresh-skip decision to increment a metric; this PR only writes a debug log, which is off in production. Both need to change before this ships.",
+   "code": "diff --git a/internal/catalog/refresher.go b/internal/catalog/refresher.go\n--- a/internal/catalog/refresher.go\n+++ b/internal/catalog/refresher.go\n@@ -54,6 +54,10 @@ func (r *Refresher) Tick(ctx context.Context) {\n   for _, src := range r.sources {\n-    if err := r.refresh(ctx, src); err != nil {\n-      r.log.Warn(\"refresh failed\", \"source\", src.Name, \"err\", err)\n+    if time.Since(src.LastRefreshed) < r.staleAfter {\n+      if err := r.refresh(ctx, src); err != nil {\n+        r.log.Warn(\"refresh failed\", \"source\", src.Name, \"err\", err)\n+      }\n+      continue\n     }\n+    r.log.Debug(\"source fresh, skipping\", \"source\", src.Name)\n   }\n }",
+   "prompt": "The PR inverts the staleness check (refresher.go:55) and records skips only in a debug log, where the runbook requires a metric (line 61). How does your review handle the two?",
+   "options": [
+    {
+     "label": "A",
+     "text": "Comment without blocking, raising both at equal weight: the runbook metric at refresher.go:61 and the inverted comparison at line 55, and ask the author to address both before merging.",
+     "mapping": {
+      "blocking_threshold": 0.6,
+      "topic_weights.correctness": 0.45,
+      "topic_weights.observability": 0.65
+     },
+     "extended_signals": {
+      "comment_density": 0.6,
+      "follow_up_tracking": 0.3
+     },
+     "rationale": "Both are required before this ships, and neither needs a formal block if the author sees them clearly listed.",
+     "review_action": {
+      "state": "COMMENT",
+      "comment": "Two things before merge:\n- refresher.go:61 - runbook requires a `catalog_refresh_skipped_total` increment for skips; debug logs are off in prod.\n- refresher.go:55 - the comparison is inverted: it refreshes fresh sources and skips stale ones. Should be `>=`.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should weigh logic defects and instrumentation gaps about equally and report both without blocking.",
+     "canonical_rank": "B"
+    },
+    {
+     "label": "B",
+     "text": "Request changes with refresher.go:55 as the blocking reason, explaining that stale sources are never refreshed again, and ask for the runbook metric in a tracked follow-up.",
+     "mapping": {
+      "blocking_threshold": 0.25,
+      "topic_weights.correctness": 0.75,
+      "topic_weights.observability": 0.4
+     },
+     "extended_signals": {
+      "follow_up_tracking": 0.7,
+      "escalation_propensity": 0.3
+     },
+     "rationale": "Line 55 freezes stale catalog data indefinitely; that's what can't merge. The metric matters too, but it can follow in its own change without leaving the catalog wrong.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "refresher.go:55 - this is inverted: `< r.staleAfter` refreshes the sources that are fresh and skips the ones that are stale, so a source that misses one refresh is never refreshed again (and the debug log calls it fresh). Should be `>=`.\n\nThe runbook's skip metric is also needed; please open a ticket for it if it won't fit here.",
+      "follow_up": "tracked_ticket",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should make a logic defect the blocking reason and let required instrumentation follow as tracked work.",
+     "canonical_rank": "C"
+    },
+    {
+     "label": "C",
+     "text": "Request changes on refresher.go:55 only, with a test in which one source is stale and one is fresh asserting only the stale one is refreshed, and raise the metric separately with the author outside this review.",
+     "mapping": {
+      "blocking_threshold": 0.15,
+      "topic_weights.correctness": 0.95,
+      "topic_weights.observability": 0.15
+     },
+     "extended_signals": {
+      "test_insistence": 0.85,
+      "scope_discipline": 0.8
+     },
+     "rationale": "The staging check passed because every source was fresh; the defect needs a test with a stale source, and the review should be about that alone.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "refresher.go:55 - the comparison is inverted, so stale sources are skipped forever and fresh ones are refreshed every tick. Please flip it to `>=` and add a test with one stale and one fresh source asserting only the stale one is refreshed; testing against staging, where all sources were fresh, can't catch this.",
+      "follow_up": "none",
+      "requests_tests": true,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should report only the correctness defect, with a test at the condition that exposes it, and keep instrumentation findings out of the same review.",
+     "canonical_rank": "D"
+    },
+    {
+     "label": "D",
+     "text": "Request changes on the missing skip metric at refresher.go:61, citing the runbook, and add a second comment noting that the comparison on line 55 looks inverted and should be flipped too.",
+     "mapping": {
+      "blocking_threshold": 0.3,
+      "topic_weights.correctness": 0.2,
+      "topic_weights.observability": 0.9
+     },
+     "extended_signals": {
+      "escalation_propensity": 0.35,
+      "comment_density": 0.55
+     },
+     "rationale": "The runbook requirement exists because we were blind in the last catalog incident; with the metric in place a wrong skip decision like line 55 shows up on a dashboard instead of in a customer ticket.",
+     "review_action": {
+      "state": "REQUEST_CHANGES",
+      "comment": "refresher.go:61 - the runbook requires skip decisions to increment `catalog_refresh_skipped_total`; a debug log is off in prod, so we'd be blind to this again. Please add the metric.\n\nAlso line 55: the comparison looks inverted (this refreshes fresh sources and skips stale ones); should be `>=`.",
+      "follow_up": "none",
+      "requests_tests": false,
+      "includes_suggestion_block": false
+     },
+     "agent_behavior": "For this developer, the agent should lead with missing required instrumentation and present a logic defect found alongside it as a secondary point.",
+     "canonical_rank": "A"
+    }
+   ],
+   "discriminates": "separates reviewers who lead with, and block on, an inverted condition when a PR also misses required instrumentation from those who give the instrumentation requirement equal or greater weight.",
+   "bias_control": "every option asks for the comparison to be flipped, and the metric requirement is real and born of an incident, so leading with it is a defensible operational priority rather than a failure to see the bug.",
+   "presentation": {
+    "shuffled": true,
+    "seed": 20260915,
+    "canonical_order": [
+     "B",
+     "C",
+     "D",
+     "A"
+    ]
+   }
   }
  ],
  "changes_from_v2": [
@@ -12856,5 +13602,11 @@
   "Removed attribute mappings present on only some options of an item: blocking_threshold on PED-01..15 (only the blocking option mapped it, so pedantry answers could only lower the threshold), technical_debt_tolerance on PED-10, topic_weights.performance on PED-13, kai_index on PED-15, phi_framing on HAB-01/02/05/06 and pedantry_level on HAB-03/05/06. A mean over whichever option happened to carry the key is selection-biased; DEBT and GATE (all options mapped) still measure blocking_threshold.",
   "scoring_index, extended_signal_index and every contributing_items/source_categories list regenerated from the mappings; Maestro's loader now rejects a battery whose indexes disagree with its mappings or that maps an attribute on some options of an item but not all.",
   "Edited in Maestro at the battery owner's instruction (2026-09-13); item text, scenarios, options and all other values are unchanged from 2.1."
+ ],
+ "changes_from_v2_2": [
+  "Added Category 7: Correctness Defect Emphasis (BUG-01..BUG-05) and the correctness topic. Before 2.3 no item measured how a reviewer weighs plain defects, so off-by-one, boundary, type and logic findings were gated at a fixed neutral weight for every developer.",
+  "Three solo items vary how hard the review pushes on a real defect with a plausible reason to defer; two comparative items put a defect beside a style_formatting (BUG-03) or observability (BUG-05) concern, so W_correctness is separated from blocking_threshold rather than collinear with it. BUG-03 and BUG-05 therefore also add one observation each to those two topics.",
+  "Purely additive: no 2.2 item, option or value changed, so a 2.2 answer sheet is a valid partial 2.3 sheet.",
+  "scoring_index, extended_signal_index, contributing_items and source_categories regenerated from the mappings."
  ]
 }

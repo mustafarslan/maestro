@@ -24,11 +24,11 @@ describe("the bundled battery", () => {
     expect(batteryProblems(raw)).toEqual([]);
   });
 
-  it("is version 2.2 with 95 items, every id unique", () => {
+  it("is version 2.3 with 100 items, every id unique", () => {
     const b = bundledBattery();
-    expect(b.version).toBe("2.2");
-    expect(b.items).toHaveLength(95);
-    expect(new Set(b.items.map((i) => i.id)).size).toBe(95);
+    expect(b.version).toBe("2.3");
+    expect(b.items).toHaveLength(100);
+    expect(new Set(b.items.map((i) => i.id)).size).toBe(100);
   });
 
   it("carries the fourth format the brief did not list, and loads it", () => {
@@ -40,16 +40,19 @@ describe("the bundled battery", () => {
     const v = vocabulary(bundledBattery());
     expect(v.core).toContain("blocking_threshold");
     expect(v.core).not.toContain("topic_weights");
-    expect(v.topics).toHaveLength(13);
+    expect(v.topics).toHaveLength(14);
+    expect(v.topics).toContain("correctness");
     expect(v.signals).toHaveLength(8);
   });
 
-  it("lists the four items shipped on author judgement, with their notes", () => {
+  it("lists the items shipped on author judgement, with their notes", () => {
+    const unaudited = { note: "written 2026-09-15, not audited" };
     expect(reviewFirstItems(bundledBattery())).toEqual([
       { id: "DEBT-01", note: "option C contention mitigation" },
       { id: "DEBT-11" },
       { id: "GATE-13" },
       { id: "HAB-09" },
+      ...["BUG-01", "BUG-02", "BUG-03", "BUG-04", "BUG-05"].map((id) => ({ id, ...unaudited })),
     ]);
   });
 });
@@ -155,7 +158,7 @@ describe("a battery that is wrong is refused, with every reason", () => {
     b.items.push(structuredClone(item(b, "COG-01")));
     const problems = batteryProblems(b);
     expect(problems).toContain("COG-01: duplicate id");
-    expect(problems).toContain("question_count is 95 but 96 items exist");
+    expect(problems).toContain("question_count is 100 but 101 items exist");
   });
 
   it("a Likert item whose points are incomplete", () => {

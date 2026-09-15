@@ -122,7 +122,7 @@ describe("triage with a profile", () => {
     const t = triage(doc, inputs(), undefined, { subject: "octocat", profile: strict });
     expect(t.personalization).toMatchObject({
       subject: "octocat",
-      batteryVersion: "2.2",
+      batteryVersion: "2.3",
       state: "REQUEST_CHANGES",
       politenessTags: true,
       dropped: 0,

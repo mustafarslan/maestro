@@ -1,7 +1,7 @@
 {
   "technical_debt_tolerance": 0.069,
   "pedantry_level": 0.926,
-  "blocking_threshold": 0.097,
+  "blocking_threshold": 0.104,
   "kai_index": 0.0,
   "regulatory_focus": 0.01,
   "phi_framing": 0.557,
@@ -17,19 +17,20 @@
     "testing": 0.87,
     "api_design": 0.917,
     "data_integrity": 0.887,
-    "observability": 0.814,
+    "observability": 0.703,
     "dependency_management": 0.927,
-    "style_formatting": 0.76,
+    "style_formatting": 0.7,
     "documentation": 0.75,
     "database_transactions": 0.817,
-    "backward_compatibility": 0.923
+    "backward_compatibility": 0.923,
+    "correctness": 0.928
   },
   "extended_signals": {
     "comment_density": 0.5,
     "suggestion_block_usage": 0.533,
-    "test_insistence": 0.71,
-    "scope_discipline": 0.619,
-    "verification_effort": 0.632,
+    "test_insistence": 0.734,
+    "scope_discipline": 0.64,
+    "verification_effort": 0.641,
     "praise_frequency": 0.518,
     "follow_up_tracking": 0.49,
     "escalation_propensity": 0.528
@@ -39,12 +40,12 @@
   "kai_classification": "Adaptor",
   "regulatory_focus_label": "Prevention",
   "coverage": {
-    "items_answered": 95,
+    "items_answered": 100,
     "items_skipped": [],
     "n_per_attribute": {
       "technical_debt_tolerance": 26,
       "pedantry_level": 16,
-      "blocking_threshold": 40,
+      "blocking_threshold": 45,
       "kai_index": 7,
       "regulatory_focus": 10,
       "phi_framing": 20,
@@ -61,19 +62,20 @@
       "testing": 5,
       "api_design": 4,
       "data_integrity": 4,
-      "observability": 5,
+      "observability": 6,
       "dependency_management": 3,
-      "style_formatting": 10,
+      "style_formatting": 11,
       "documentation": 2,
       "database_transactions": 3,
-      "backward_compatibility": 3
+      "backward_compatibility": 3,
+      "correctness": 5
     },
     "n_per_extended_signal": {
       "comment_density": 34,
       "suggestion_block_usage": 6,
-      "test_insistence": 24,
-      "scope_discipline": 18,
-      "verification_effort": 30,
+      "test_insistence": 29,
+      "scope_discipline": 20,
+      "verification_effort": 33,
       "praise_frequency": 11,
       "follow_up_tracking": 5,
       "escalation_propensity": 45

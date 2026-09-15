@@ -75,7 +75,7 @@ describe("agreement with the reference scorer", () => {
   it("the partial sheet really is partial", () => {
     const p = scoreBattery(bundledBattery(), random);
     expect(p.coverage.itemsSkipped.length).toBeGreaterThan(0);
-    expect(p.coverage.itemsAnswered + p.coverage.itemsSkipped.length).toBe(95);
+    expect(p.coverage.itemsAnswered + p.coverage.itemsSkipped.length).toBe(100);
   });
 });
 
@@ -171,7 +171,7 @@ describe("a sheet saved half-way, or written by hand", () => {
     expect(Object.values(p.extendedSignals).every((v) => v === 0.5)).toBe(true);
     expect(p.framingStrategy).toBeNull();
     expect(p.useNegativePolitenessTags).toBe(false);
-    expect(p.coverage.itemsSkipped).toHaveLength(95);
+    expect(p.coverage.itemsSkipped).toHaveLength(100);
   });
 
   it("a label the item does not offer is reported, not thrown", () => {

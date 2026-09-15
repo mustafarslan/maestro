@@ -20,7 +20,7 @@ function usage(code = 1): number {
 ${color.bold("maestro profile")} <subcommand>
 
   take                       answer the calibration battery, one item at a time
-    --category <prefix>      only items whose id starts with it: COG, DEBT, PED, GATE, LING, HAB
+    --category <prefix>      only items whose id starts with it: COG, DEBT, PED, GATE, LING, HAB, BUG
     --redo                   ask again items already answered
   answer <item-id> <label>   record one answer
   import <responses.json>    record a sheet of {"<item-id>": "<label>"} answers

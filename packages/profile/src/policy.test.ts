@@ -289,6 +289,13 @@ describe("topics for the categories agents really emit", () => {
     ["dead-code", "style_formatting"],
     ["SQL_Injection", "security"],
     ["sql query order", "database_transactions"],
+    ["off-by-one", "correctness"],
+    ["type-error", "correctness"],
+    ["logic-error", "correctness"],
+    ["boundary-condition", "correctness"],
+    ["type-mismatch", "correctness"],
+    ["size-limit-semantics", "correctness"],
+    ["assignment-instead-of-comparison", "correctness"],
   ])("%s → %s", (category, topic) => {
     expect(topicFor(category)).toBe(topic);
   });
@@ -296,24 +303,31 @@ describe("topics for the categories agents really emit", () => {
   it("a word inside a longer word is not that word", () => {
     expect(topicFor("block-scoping")).toBeNull();
     expect(topicFor("catalog-mismatch")).toBeNull();
-    // `error` alone is not error handling: a logic error is a correctness defect.
-    expect(topicFor("logic-error")).toBeNull();
-    expect(topicFor("type-error")).toBeNull();
+    // `error` alone is not error handling, and `type` alone is not a type defect.
+    expect(topicFor("logic-error")).toBe("correctness");
+    expect(topicFor("type-error")).toBe("correctness");
+    expect(topicFor("content-type-header")).toBeNull();
   });
 
-  it("plain correctness defects have no topic in this battery, and say so by weight", () => {
+  it("only two real categories are still outside the battery's topics", () => {
+    // `scope-mismatch` was a PR that did not do what its title said, and `accessibility` is
+    // a UI concern; neither is a defect in the code, and no item measures either.
     const unmapped = REAL_CATEGORIES.filter((c) => topicFor(c) === null);
-    expect(unmapped).toEqual([
-      "off-by-one",
-      "type-error",
-      "logic-error",
-      "boundary-condition",
-      "type-mismatch",
-      "size-limit-semantics",
-      "scope-mismatch",
-      "assignment-instead-of-comparison",
-      "accessibility",
-    ]);
+    expect(unmapped).toEqual(["scope-mismatch", "accessibility"]);
+  });
+
+  it("a plain defect is gated by the developer's own weight on correctness", () => {
+    const f = finding({ category: "off-by-one", severity: "medium" });
+    const at = (w: number) =>
+      assessFinding(
+        f,
+        profile({ attributes: { blocking_threshold: 0.5 }, topicWeights: { correctness: w } }),
+      );
+    expect(at(0.9).topic).toBe("correctness");
+    expect(at(0.9).effective).toBeCloseTo(0.7, 12);
+    expect(at(0.9).disposition).toBe("request_changes");
+    expect(at(0.1).effective).toBeCloseTo(0.3, 12);
+    expect(at(0.1).disposition).not.toBe("request_changes");
   });
 
   it("architectural shortcuts are recognised by word", () => {

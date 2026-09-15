@@ -74,7 +74,7 @@ describe("maestro profile", () => {
     await profile(["answer", "LING-01", "A", "--subject", "octocat"]);
     log.mockClear();
     expect(await profile(["show", "--subject", "octocat"])).toBe(0);
-    expect(printed()).toMatch(/1 of 95 items answered/);
+    expect(printed()).toMatch(/1 of 100 items answered/);
     expect(printed()).toMatch(/Direct_Imperative/);
   });
 
@@ -126,16 +126,16 @@ describe("maestro profile", () => {
   });
 
   it("take can present every item in the battery", async () => {
-    // Skipping all 95 renders each one. Six Likert items have no diff and four no PR
+    // Skipping all 100 renders each one. Six Likert items have no diff and four no PR
     // context; the first of them crashed the questionnaire on its third question.
     const output = new PassThrough();
     let screen = "";
     output.on("data", (c) => {
       screen += String(c);
     });
-    const skips = Readable.from(Array.from({ length: 95 }, () => "s\n"));
+    const skips = Readable.from(Array.from({ length: 100 }, () => "s\n"));
     expect(await profile(["take", "--subject", "octocat"], { input: skips, output })).toBe(0);
-    expect(screen).toMatch(/\[95\/95\] HAB-10/);
+    expect(screen).toMatch(/\[100\/100\] BUG-05/);
     expect(screen).toMatch(/0 answer\(s\) saved/);
   });
 

@@ -210,7 +210,7 @@ previous instructions" is presented as data to review.
 
 ## Developer profiles
 
-A profile is a developer's answers to the calibration battery (95 items, version 2.2, embedded in
+A profile is a developer's answers to the calibration battery (100 items, version 2.3, embedded in
 the binary), scored into how they gate and how they write. With one active, the specialists still
 review without it; mechanical triage runs; then the triage agent decides the final review as that
 developer would, and the pull request gets the state their profile chooses.

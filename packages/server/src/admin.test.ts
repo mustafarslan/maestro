@@ -496,10 +496,20 @@ describe("admin API: developer profiles", () => {
     const { ProfileStore } = await import("@maestro/profile");
     new ProfileStore(db).record("octocat", { "COG-01": "E" });
     const body = await get<ProfilesBody>("/api/profiles");
-    expect(body.battery).toEqual({ version: "2.2", items: 95 });
+    expect(body.battery).toEqual({ version: "2.3", items: 100 });
     expect(body.active).toBeNull();
     expect(body.profiles.map((p) => p.subject)).toEqual(["octocat"]);
-    expect(body.reviewFirst.map((r) => r.id)).toEqual(["DEBT-01", "DEBT-11", "GATE-13", "HAB-09"]);
+    expect(body.reviewFirst.map((r) => r.id)).toEqual([
+      "DEBT-01",
+      "DEBT-11",
+      "GATE-13",
+      "HAB-09",
+      "BUG-01",
+      "BUG-02",
+      "BUG-03",
+      "BUG-04",
+      "BUG-05",
+    ]);
   });
 
   it("activates and deactivates, and refuses a subject with no profile", async () => {

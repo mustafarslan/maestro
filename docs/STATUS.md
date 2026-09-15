@@ -4315,5 +4315,41 @@ harness exists to measure per playbook version.
     The loop itself worked end to end — evidence, proposal, candidate, full scoring, gate, memory — and
     nothing was activated. Thermal pressure stayed nominal throughout.
 
+253. **Battery 2.3: a topic for correctness defects, and five items that measure it.** Plain defects
+    mapped to no battery topic, so every profile gated `off-by-one`, `logic-error`, `type-error`,
+    `boundary-condition`, `type-mismatch`, `size-limit-semantics` and
+    `assignment-instead-of-comparison` at the same neutral weight: the battery never asked how a
+    developer weighs a bug. Category 7 (`BUG-01..05`) adds `topic_weights.correctness`.
 
+    Every option of every item accepts that the defect is real and should be fixed; the options
+    differ only in how hard the review pushes on it, because a topic weight measures emphasis, and
+    everyone agrees an off-by-one is a bug. Three items are solo, a real defect with a plausible
+    reason to defer: an off-by-one batch bound a weekly resync repairs (`BUG-01`, Python), an empty
+    window rendering `NaN` on a display-only card (`BUG-02`, React), and a query-string `page + 1`
+    that concatenates on a rarely used admin page (`BUG-04`, Express). Two are comparative, the same
+    PR carrying a defect and another topic's concern, asking which the review leads with and blocks
+    on: an assignment in a condition beside snake_case names (`BUG-03`, `style_formatting`), and an
+    inverted staleness check beside a missing runbook metric (`BUG-05`, `observability`). A solo item
+    alone moves W_correctness together with `blocking_threshold`; the comparative ones are what
+    separate the two. They also add one observation each to those two topics.
 
+    Purely additive: no 2.2 item, option or value changed. Every index was regenerated from the
+    mappings by a script that first asserted each pre-existing list came out unchanged, and the loader
+    accepts the file. The three parity sheets gained answers for the new items (the canonical ends for
+    `conservative` and `promotion`, four of five at random for `random`), the goldens were regenerated
+    by the unmodified `reference/score_battery.py`, and the port still matches it exactly.
+
+    In the policy, a `correctness` rule sits after every named domain, so a race or an injection keeps
+    its topic, and before observability, testing and style. Its keywords are phrases, not a bare
+    `type` or `error`. Checked against all 58 real categories: exactly the seven above moved, nothing
+    else. `scope-mismatch` and `accessibility` stay unmapped. The one `scope-mismatch` finding in the
+    database was a PR that did not do what its title said, and `size-limit-semantics` was a byte limit
+    counted in UTF-16 units, so the second is a defect and the first is not. A medium off-by-one now
+    blocks at W 0.9 (S 0.70 against a threshold of 0.50) and does not at W 0.1 (S 0.30).
+
+    **Not done, and why it matters.** The five items were written by the assistant and have had
+    neither the per-item audit the other 95 went through nor any calibration on people. They are
+    listed under `maestro profile review-first` and want the battery owner's read before anyone takes
+    them. Profiles are stored per battery version, so a 2.2 sheet is not carried over by itself: the
+    local `live-test` sheet (the conservative fixture) was imported again under 2.3 beside its 2.2
+    row, and `maestro profile show` reads `correctness 0.93 n=5` from it.

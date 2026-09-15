@@ -165,9 +165,12 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
   (`docs/CONFIGURATION.md`, "Developer profiles").
 - ~~**Which profile a webhook review runs as.**~~ Decided: locally one profile per person (each
   checkout's own database and OS user); `maestro serve` one active profile for all.
-- **A topic for correctness defects.** `off-by-one`, `logic-error` and `type-error` map to no
-  battery topic and so to the neutral weight; with the identity scale that no longer lowers them,
-  but a developer's view on them is never measured. That wants new battery items.
+- ~~**A topic for correctness defects.**~~ Done in battery 2.3 (`docs/STATUS.md` 253): Category 7,
+  `BUG-01..05`, measures `topic_weights.correctness`, and seven real categories now route to it.
+  Left: the five items were written by the assistant and have had no audit and no calibration on
+  people, so they are listed under `maestro profile review-first` and want the battery owner's
+  read before anyone takes them. `scope-mismatch` and `accessibility` still map to no topic; no
+  item measures either, and neither is a defect in the code.
 
 ## Other
 
