@@ -4307,7 +4307,7 @@ harness exists to measure per playbook version.
     **What the lower threshold did.** The fixture it was aimed at still missed: this run's
     `reaper-double-count` finding came in at 0.45, under 0.5 as well — the confidence spread measured
     in 251 (0.30–0.70) is wider than a 0.1 move in the threshold. And precision fell where it had been
-    clean: six fixtures dropped to 25–50% (`body-utf8-split`, `doctor-first-line`, `failure-policy`,
+    clean: seven fixtures dropped to 25–50% (`body-utf8-split`, `doctor-first-line`, `failure-policy`,
     `review-create-race`, `secrets-atomic-write`, `spa-immutable-cache`, `unhandled-rejection`), the
     extra findings a 0.5 line lets through. The gate judges recall, so it could not have seen that;
     it is recorded here because a threshold change is exactly the edit whose cost lands there.
