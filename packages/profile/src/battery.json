@@ -52,7 +52,7 @@
   {
    "name": "Category 7: Correctness Defect Emphasis",
    "count": 5,
-   "format": "4-option choice mapped to APPROVE / APPROVE+note / COMMENT / REQUEST_CHANGES",
+   "format": "4-option choice; each option carries the review state it would submit (solo items span APPROVE / APPROVE+note / COMMENT / REQUEST_CHANGES; comparative items mostly REQUEST_CHANGES, differing in which concern leads and blocks)",
    "design": "three solo vignettes (a real defect with a plausible reason to defer; options differ only in how hard the review pushes on it) and two comparative vignettes (the same PR carries a defect and a concern from another topic; options differ in which one the review leads with and blocks on). Every option accepts that the defect is real."
   }
  ],

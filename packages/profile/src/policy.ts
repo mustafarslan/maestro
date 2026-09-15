@@ -86,9 +86,8 @@ export interface ProfilePolicy {
    * W for a finding no rule could place.
    *
    * 0.5, the same value the battery gives a topic the developer was never asked about — a
-   * finding of unknown topic is treated like one they expressed no view on. Many real
-   * findings land here, because the battery has no topic for plain correctness defects
-   * (`off-by-one`, `logic-error`, `type-error`).
+   * finding of unknown topic is treated like one they expressed no view on. Since battery 2.3
+   * plain defects have their own topic, `correctness`, and few real findings land here.
    */
   unmappedTopicWeight: number;
   /** Used where the profile has no estimate for an attribute a rule reads. */
@@ -281,7 +280,6 @@ export const DEFAULT_PROFILE_POLICY: ProfilePolicy = {
       keywords: [
         "correctness",
         "off-by-one",
-        "boundary",
         "boundary-condition",
         "edge-case",
         "logic-error",
