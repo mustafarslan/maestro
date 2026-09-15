@@ -4291,4 +4291,29 @@ harness exists to measure per playbook version.
     inside a file the agent read; the guard now matches only a provider's error message, and the run
     resumed where it stopped. Thermal pressure stayed nominal throughout.
 
+252. **The first live refinement round: the right diagnosis, and a gate that says it is not enough.**
+    Step 6 on the finding-239 control (v4), with the evidence of 250. `glm-5.3:cloud` answered in one
+    step with a different proposal from 247's, because it could now see how the miss had ended: *"the
+    only training failure wasn't a detection miss… triage suppressed it at 0.55 confidence against the
+    0.6 threshold"*, and a single edit, `triage.minConfidence` 0.6 → 0.5. Published inactive as
+    `pv_cb2bc479bb6343339684a634` and scored on all twenty fixtures, one at a time.
+
+    **Rejected.** `maestro eval gate v4 candidate --record`: *net +0 on 10 held out, short of the
+    2-fixture margin* — gained `unhandled-rejection`, lost half of `severity-sql-order`, eight
+    unchanged, recorded as refinement memory `ra_ed56fb04b4604a438db89db6`, so the next round is told
+    this was tried. That is the same one-each-way swing the guided arm showed (244), which is what the
+    margin exists to discount.
+
+    **What the lower threshold did.** The fixture it was aimed at still missed: this run's
+    `reaper-double-count` finding came in at 0.45, under 0.5 as well — the confidence spread measured
+    in 251 (0.30–0.70) is wider than a 0.1 move in the threshold. And precision fell where it had been
+    clean: six fixtures dropped to 25–50% (`body-utf8-split`, `doctor-first-line`, `failure-policy`,
+    `review-create-race`, `secrets-atomic-write`, `spa-immutable-cache`, `unhandled-rejection`), the
+    extra findings a 0.5 line lets through. The gate judges recall, so it could not have seen that;
+    it is recorded here because a threshold change is exactly the edit whose cost lands there.
+
+    The loop itself worked end to end — evidence, proposal, candidate, full scoring, gate, memory — and
+    nothing was activated. Thermal pressure stayed nominal throughout.
+
+
 

@@ -129,7 +129,7 @@ a quality search into a cost search.
 | 3. prompt and output parser — **done, 243** | no | malformed or oversized output becomes an `invalid` attempt |
 | 4. the round, fed a hand-written `--proposal <file>` — **done, 243** | no | publish → gate → record, against synthetic scores |
 | 5. the model-backed proposer — **done, 247** | yes | one conformance run: valid schema, allowlisted paths |
-| 6. one live round on the finding-239 control arm | yes | a recorded attempt, accepted or not |
+| 6. one live round on the finding-239 control arm — **done, 252: rejected** | yes | a recorded attempt, accepted or not |
 
 Steps 0–4 are the work available while the quota is out. A round in step 6 costs one proposer
 call plus a full twenty-fixture eval, so it runs one round at a time, by hand.
