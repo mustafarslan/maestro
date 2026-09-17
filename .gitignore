@@ -8,3 +8,7 @@ dist/
 .env
 .env.*
 coverage/
+
+# Your own calibration battery and notes. Untracked on purpose; this keeps a stray
+# `git add .` from publishing them.
+personalize/
