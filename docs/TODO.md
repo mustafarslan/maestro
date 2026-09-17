@@ -194,10 +194,13 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
 agent. Its judgement rules went into a candidate playbook (`docs/STATUS.md` 254); these four did
 not, each for a different reason.
 
-- **Measure the candidate.** v9 `pv_5102e10639e841f2bf489072` is published and inactive.
-  `maestro eval run --playbook pv_5102e10639e841f2bf489072 --split train`, then
-  `maestro eval gate pv_e160b0e63df746f784ca78a5 pv_5102e10639e841f2bf489072 --record`. Waits on
-  the user: twenty fixtures on `glm-5.3:cloud` is hours of runtime, and they work on this machine.
+- ~~**Measure the candidate.**~~ Done 2026-09-17, both splits, 77 minutes (`docs/STATUS.md` 255).
+  **The gate rejected it**: net +0 on the ten held out, recorded as `ra_5562934431204c0282e6a031`.
+  v9 stays inactive. Per fixture the imports changed almost nothing either way, so what the run
+  really measured is the golden set's resolution, not the wording. Anything that wants to show a
+  difference this instrument cannot see needs fixtures with more than one expected finding each,
+  or a fixture whose defect is only reachable by tracing a consumer or a flow end to end — which
+  is what two of the imported rules actually ask for.
 - **Say in the review when the posture was reduced.** A fork PR gets no setup, no allowed
   commands and no egress, so its review is a read of the diff and nothing more. The skill says a
   fork review must state that; Maestro's posted review does not. This is a rendering change in

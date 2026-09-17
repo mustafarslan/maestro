@@ -4394,3 +4394,43 @@ harness exists to measure per playbook version.
     command execution, so every edge-case finding it makes is reasoned-only; importing that rule
     would silence the lens rather than raise its bar. Confidence and `triage.minConfidence` stay
     the lever. Four further imports are recorded in `docs/TODO.md`.
+
+255. **The pr-skill candidate, measured: the gate rejects it, and the golden set is what the run
+    really tested.** Twenty fixtures against v9 `pv_5102e10639e841f2bf489072`, both splits, one at
+    a time: train in 41 minutes, held out in 36, thermal pressure nominal throughout and no
+    sandbox or network left behind. `maestro eval gate pv_e160b0e63df746f784ca78a5
+    pv_5102e10639e841f2bf489072 --record`: **would reject — net +0 on the ten held out**, gaining
+    `unhandled-rejection` and losing `severity-sql-order`, eight unchanged, recorded as
+    `ra_5562934431204c0282e6a031`. v9 stays inactive; v6 is still the active version.
+
+    **A comparison error, recorded because it was nearly reported as a result.** The first reading
+    put v9's train recall (90%) against the 56% `eval report` prints for v4 and called it a large
+    improvement. That aggregate is weighted by runs, and v4 has 57 train runs of which 28 are
+    repeats of `reaper-double-count` — the fixture it misses at 11% recall. One run per fixture,
+    v4's train recall is 91% against v9's 90%. Compare per fixture; the aggregate answers a
+    different question, and on this page it answered it convincingly enough to be believed.
+
+    **Held out, per fixture:** precision 68% → 73%, recall 88% → 85%. `unhandled-rejection`
+    improved on both (precision 44% → 100%, recall 75% → 100%) and `severity-sql-order` traded one
+    for the other (precision 58% → 100%, recall 75% → 50%); `body-utf8-split`, `doctor-first-line`
+    and `failure-policy` each lost 10–15 points of precision; `reaper-no-startup-sweep` went from
+    25% recall to 0. Nothing moved far enough, in either direction, to clear a two-fixture margin.
+
+    **Most of the lost precision is true findings the answer keys do not name.** On
+    `thinking-budget-google` the extra was *thinkingBudget is silently ignored for
+    OpenAI-compatible providers* — the same defect class the key names for Google, one provider
+    over. On `spa-immutable-cache` it was *missing /assets/ files now return 200 index.html instead
+    of 404*. Each fixture lists one expected finding, and `scoreOutcome` counts everything else
+    reported as unclassified, so a second real defect and a hallucination cost precision equally.
+    That is the instrument's resolution, not a verdict on the wording.
+
+    **And the run exercised less than it looks.** v4 enables only the architecture agent, so the
+    product, security and UI/UX personas rode along unexercised, and the triage persona runs only
+    when a developer profile is active. One persona, twenty fixtures, one expected finding each.
+
+    An honest null result: the imported rules are not shown to help, and not shown to hurt. What
+    would resolve them is a different golden set — fixtures carrying more than one expected
+    finding, or a defect reachable only by tracing a changed contract to its consumers or reading
+    a changed flow end to end, which is what those rules actually ask an agent to do. The rules
+    stay in `docs/playbooks/pr-skill-imports.yaml` and in v9, inactive, where a later round can
+    pick them up against a better instrument.
