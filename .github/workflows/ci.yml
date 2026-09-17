@@ -27,7 +27,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      # Full history, not the default shallow clone. The golden set records the commit each
+      # fixture was cut from, and `golden-set.test.ts` checks those commits are reachable —
+      # which is exactly the check that cannot run against a depth-1 clone.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # No version here: package.json's `packageManager` field is the single source, and
       # naming a version in both is a hard error rather than a fallback.
       - uses: pnpm/action-setup@v4

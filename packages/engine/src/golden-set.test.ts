@@ -20,16 +20,23 @@ const dir = join(root, "docs/golden-set");
 const seed = readFileSync(join(root, "scripts/seed-golden-set.sh"), "utf8");
 
 /**
- * Whether this tree has a git history at all.
+ * Whether this tree has a history deep enough to reach a fixture's provenance commit.
  *
- * Not every legitimate checkout does: the clean-checkout gate copies tracked files through
- * tar and a released tarball carries no repository either. Checked once rather than caught
- * per assertion, so "no history here" and "this commit is gone" stay different answers.
+ * Three legitimate checkouts do not: the clean-checkout gate copies tracked files through
+ * tar, a released tarball carries no repository either, and a shallow clone carries one
+ * commit. The third is what CI does by default, and it read as twenty broken fixtures on
+ * the first public run — a clone depth reported as a defect in the answer keys. Checked
+ * once rather than caught per assertion, so "no history here" and "this commit is gone"
+ * stay different answers.
  */
 const hasGitHistory = (() => {
   try {
     execFileSync("git", ["rev-parse", "--git-dir"], { cwd: root, stdio: "ignore" });
-    return true;
+    const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+      cwd: root,
+      encoding: "utf8",
+    }).trim();
+    return shallow !== "true";
   } catch {
     return false;
   }
