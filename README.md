@@ -9,6 +9,10 @@ editable personas and per-agent model bindings, router rules, and an environment
 the database and editable in the browser. The engine interprets that graph, so adding a reviewer
 or pointing one at a different model is a configuration change, not a code change.
 
+It can also review the way a particular developer reviews. Answer a calibration battery once, and
+the same findings are gated and worded as that person would gate and word them — see
+[Reviewing as a developer](#reviewing-as-a-developer).
+
 ## Install
 
 ```sh
@@ -49,8 +53,10 @@ maestro llm providers | models | test
 maestro playbook export pb.yaml && maestro playbook import pb.yaml --activate
 maestro eval add my-case ./repo && maestro eval run && maestro eval report
 
-# Review as a particular developer, once they have answered the calibration battery
+# Review as a particular developer: answer the calibration battery once, then activate it
 maestro profile take --subject octocat && maestro profile activate --subject octocat
+maestro profile show --subject octocat      # the scored profile, and how much of it is observed
+maestro profile review-first                # items the battery's authors shipped on judgement
 ```
 
 `maestro serve` prints a URL with a token. That opens the admin UI: a live review board, a span
@@ -112,6 +118,35 @@ honest token accounting and the terminal-tool contract possible.
 **The comment reports what was checked, never how accurate it was.** Precision and recall need
 human feedback that does not exist when the comment is written. They are gathered afterwards from
 reactions and later edits, and shown in the UI.
+
+## Reviewing as a developer
+
+Two reviewers looking at the same diff disagree about what is worth blocking for, and both are
+right for their own codebase. Maestro can hold one of those positions on purpose rather than
+averaging them away.
+
+A developer answers a calibration battery once: 100 items, each a real diff with four defensible
+responses and no correct answer. Scoring turns that into how they gate — the severity at which
+they block, how much weight they give a concurrency bug against a naming nit, how they treat a
+shortcut with a ticket attached, and how they phrase a request. Nothing about the diagnosis
+changes: the specialist agents review exactly as they always do, with no profile in their
+prompts, because a finding that changed with the reader would not be a finding. The profile acts
+afterwards, on what to do about each one.
+
+It applies in two layers. A deterministic pass scales each finding's severity by that developer's
+weight for its topic and decides whether it blocks, comments, or drops. Then the triage agent
+writes the final review as that person, and the pull request gets the review state they would
+have chosen. Two invariants live in code where no profile, persona or model can reach them:
+anything at σ ≥ 0.80 blocks regardless, and anything below σ 0.30 never blocks. If the agent
+answers outside its contract, the deterministic result stands and the comment says so.
+
+The battery is a synthetic instrument, not a validated psychometric one, and some items shipped
+on their authors' judgement rather than a clean audit. `maestro profile review-first` lists
+exactly which, so an admin can read them before trusting a profile that leans on them. Profiles
+are stored per battery version: a new version is answered again rather than silently
+reinterpreted. And a profile is behavioural data about a person — locally it is one profile per
+person, while `maestro serve` applies one active profile to every review, which is worth saying
+out loud to a team before turning it on. [Configuration](docs/CONFIGURATION.md) has the details.
 
 ## Layout
 
