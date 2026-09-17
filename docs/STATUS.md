@@ -4353,3 +4353,44 @@ harness exists to measure per playbook version.
     them. Profiles are stored per battery version, so a 2.2 sheet is not carried over by itself: the
     local `live-test` sheet (the conservative fixture) was imported again under 2.3 beside its 2.2
     row, and `maestro profile show` reads `correctness 0.93 n=5` from it.
+
+254. **The pr-review skill's judgement rules, as a candidate playbook.** The battery owner's own
+    Claude skills (`github.com/mustafarslan/skills`, MIT, same author) describe a PR-review method
+    for one interactive agent with a human at two gates, a live checkout and a shell. Maestro is
+    autonomous, sandboxed, read-only on fork PRs and multi-agent, so none of the workflow ports —
+    the worktree isolation, the two `AskUserQuestion` gates and the bot-comment parsing are all
+    problems Maestro already answers differently. The judgement rules port exactly.
+
+    **Into personas, not the fixed contract.** The cross-cutting rules belong in `FIXED_CONTRACT`
+    by topic, but that is code shared by every playbook version: editing it would move the control
+    arm too, and there would be nothing left to compare against. Personas are versioned data, so
+    the whole import ships as one candidate version that an eval can accept or reject.
+
+    **What landed.** Architecture: name the consumers you checked for every changed contract; read
+    a changed flow end to end rather than hunk by hunk; and the two shapes that are always
+    critical — a path that swallows a failure, and a check or test that can never fail. Security:
+    a bullet for code that calls a model or runs an agent. All four agents also gained the
+    cross-cutting block: try to disprove a finding first (reachable, or inferred from a name?
+    handled by a caller? pre-existing? deliberate, per a comment, the description or the issue?),
+    cite the `file:line` that makes it true or drop it, keep evidence verbatim and never drop a
+    negation, and an explicit do-not-report list. Triage: drop generated files and lockfiles as
+    content, and findings that are pre-existing rather than introduced.
+
+    **Published as v9 `pv_5102e10639e841f2bf489072`, inactive.** Built from v4
+    (`pv_e160b0e63df746f784ca78a5`), the control arm both earlier refinement candidates were built
+    from; every model binding, router rule, gate and env spec is identical to v4, asserted by the
+    builder rather than assumed. The active version is still v6. A published version lives only in
+    a local database, so the document is committed at `docs/playbooks/pr-skill-imports.yaml`.
+
+    **Unmeasured.** `maestro eval run --playbook pv_5102e10639e841f2bf489072 --split train`, then
+    `maestro eval gate pv_e160b0e63df746f784ca78a5 pv_5102e10639e841f2bf489072 --record`. Two
+    limits on what that can show: v4 enables only the architecture agent, so the other three
+    personas are carried but not exercised, and the triage persona runs only when a developer
+    profile is active. Twenty fixtures on `glm-5.3:cloud` is hours of runtime and heat, so the run
+    waits for the user.
+
+    **One rule deliberately not imported.** "Do not report an edge case you only reasoned about —
+    write a throwaway test and run it." Maestro's agents are read-only and fork PRs get zero
+    command execution, so every edge-case finding it makes is reasoned-only; importing that rule
+    would silence the lens rather than raise its bar. Confidence and `triage.minConfidence` stay
+    the lever. Four further imports are recorded in `docs/TODO.md`.

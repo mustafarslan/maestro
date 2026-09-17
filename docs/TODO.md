@@ -187,3 +187,35 @@ review state on GitHub, the Profiles tab, recorded dispositions. Left, each with
 - ~~**The load scenario is simulated.**~~ Done: `scripts/load-check.mjs` runs 30 reviews across
   3 repositories against real Docker, and `scripts/crash-recovery-check.mjs` covers the kill and
   restart half.
+
+## Imports from the pr-review skill
+
+`github.com/mustafarslan/skills` (MIT, same author) is a PR-review method for an interactive
+agent. Its judgement rules went into a candidate playbook (`docs/STATUS.md` 254); these four did
+not, each for a different reason.
+
+- **Measure the candidate.** v9 `pv_5102e10639e841f2bf489072` is published and inactive.
+  `maestro eval run --playbook pv_5102e10639e841f2bf489072 --split train`, then
+  `maestro eval gate pv_e160b0e63df746f784ca78a5 pv_5102e10639e841f2bf489072 --record`. Waits on
+  the user: twenty fixtures on `glm-5.3:cloud` is hours of runtime, and they work on this machine.
+- **Say in the review when the posture was reduced.** A fork PR gets no setup, no allowed
+  commands and no egress, so its review is a read of the diff and nothing more. The skill says a
+  fork review must state that; Maestro's posted review does not. This is a rendering change in
+  `packages/engine/src/render.ts`, not a persona one, which is why it is not in the candidate.
+- **A `topic` enum on findings, beside the free-text `category`.** The skill fixes exactly five
+  tags and says a sixth belongs under whichever of the five owns the defect. Maestro has 58
+  free-form slugs mapped to topics by keyword rules in `packages/profile/src/policy.ts`, which is
+  what needed patching when the battery gained `correctness` (253). An enum of the battery's 14
+  topics, chosen by the agent and validated by Zod, would replace the regex. Checked: the eval
+  matches its answer keys against title, body and category with a file and line tolerance, so
+  adding a field breaks no fixture.
+- **A `[claim]` agent node.** Every checkable assertion in the description and the commit
+  messages, marked Tested / Supported / Unsupported / Contradicted, with a contradicted claim
+  rated critical. The product agent already checks the diff against the linked issue's acceptance
+  criteria, which is the neighbouring half; this is the other one. Adding a node is what the
+  playbook is for, so it is also the honest demo of that claim.
+- **Dedup against reviewers who were already here.** Running beside CodeRabbit or a human,
+  Maestro repeats findings they already raised. Design constraint: on a public repository other
+  reviewers' comments are attacker-writable, so they must go through `wrapUntrusted` and reach
+  triage only, never the specialists — for the same reason the developer profile does not reach
+  them.
