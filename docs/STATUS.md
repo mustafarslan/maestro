@@ -4533,3 +4533,54 @@ harness exists to measure per playbook version.
     its own. All three are in `docs/TODO.md` rather than implied to be finished.
 
     Verified: 1284 tests across 90 files, typecheck and lint clean.
+
+258. **The first CI run this project ever completed, and the three defects it found in two
+    minutes.** The repository went public on 2026-09-17 (MIT), which made standard runners free
+    and CI worth having again. Re-enabling the `push` and `pull_request` triggers in the workflow
+    (254) turned out to be necessary and not sufficient: both workflows were `disabled_manually`
+    at GitHub's side, switched off during the no-minutes period, so nothing ran and the first
+    dispatch was refused outright with a 422. That is invisible in the repository — the workflow
+    file says `on: push` either way — and it was found only by asking for a run and reading why
+    it did not start.
+
+    Three runs to green, and every failure was a property of one machine rather than of the code.
+
+    **Run one, twenty red fixtures.** `golden-set.test.ts` checks that each fixture's provenance
+    commit is reachable in this history. `actions/checkout` clones depth-1, so none of them were.
+    The commits are fine; the clone was. The guard in that test already excused a checkout with
+    no `.git` at all — the tarball the clean-checkout gate builds — but a shallow clone has a
+    `.git`, so the guard passed and the assertion ran against a history of one commit. CI now
+    fetches the full history, which is where provenance should be enforced, and a shallow clone
+    now counts as no history, so a contributor cloning `--depth 1` gets a skip instead of twenty
+    red fixtures.
+
+    **Run two, three more.** `proxy-binary` resolves its release asset from `dockerArch()`, which
+    shells out to Docker: arm64 on this laptop, x64 on the runner. One test compared against the
+    arm64 asset and got the x64 one; another stubbed an arm64-only asset list that matched
+    nothing and fell through to the "three ways forward" error. The architecture is now an
+    argument defaulting to `dockerArch()`, so those tests are deterministic and no longer need
+    Docker installed to run at all — which they silently did.
+
+    The third was `daemon.test.ts`'s disk backpressure. It opens an in-memory database, so
+    nothing creates `maestroHome()`; on a laptop `~/.maestro` exists and the check measures a real
+    volume, and on a fresh runner `statfsSync` throws, `diskSpace` answers "cannot tell", and that
+    is deliberately a reason to carry on. The worker claimed the job and the test read as a
+    backpressure bug. It now points at a temp directory that exists. The "carries on when the
+    filesystem will not answer" policy was left alone: it is deliberate, separately tested, and
+    not what was wrong.
+
+    **Run three: green**, on the push of `2f60d30` — install, lint, typecheck, docs check, the
+    full suite including the real-Docker integration tests, the store contract on both node and
+    bun, the compiled binary, the queue race, MCP over stdio and the fresh-install smoke test.
+
+    **What this says about the suite.** All 1284 tests passed locally before each of those runs,
+    every time. The three defects were invisible to any local run because each encoded a property
+    of this machine as if it were a property of the world: a full clone, an arm64 Docker, an
+    existing `~/.maestro`. Phase 10 claimed "CI" as built; what existed was a workflow file that
+    had never executed to completion anywhere.
+
+    Two smaller things the run showed. The `concurrency` block works: a push run and a dispatch a
+    second apart, and the older one cancelled after three seconds rather than both burning
+    minutes — configuration that had also never executed before. And three actions still target
+    Node 20, which GitHub has deprecated and now force-runs on Node 24; that is an annotation
+    rather than a failure, and bumping them is a follow-up in `docs/TODO.md`.

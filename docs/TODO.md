@@ -254,3 +254,14 @@ editing controls for a viewer, who then meets a `403` on save. The server is the
 holds, but the UI should ask its level and disable what it cannot do.
 
 Until those land, `SECURITY.md` states the limitation, and the default stays loopback.
+
+## CI actions still target Node 20
+
+The first green run (`docs/STATUS.md` 258) carried one annotation: `actions/checkout@v4`,
+`actions/setup-node@v4` and `pnpm/action-setup@v4` target Node 20, which GitHub has deprecated
+and now force-runs on Node 24. It is a warning, not a failure, and the run passes.
+
+Worth doing on its own rather than mixed into a change that matters: bump each to its current
+major, push, and read the annotations again. The reason to keep it separate is that a workflow
+edit is only ever verified by running it, so the change and its evidence should be one commit
+with nothing else to blame.
