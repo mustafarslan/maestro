@@ -12,24 +12,26 @@ a code change.
 
 ## Install
 
-This repository is private, so the installer needs a token that can read it. `MAESTRO_TOKEN`
-covers both the script and the release asset:
-
 ```sh
-export MAESTRO_TOKEN=$(gh auth token)
-curl -fsSL -H "Authorization: Bearer $MAESTRO_TOKEN" \
-  https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
 maestro init
 maestro doctor
 ```
 
-Once the repository is public, the token drops out and the first line is the whole install:
+Two things `init` cannot install for you, and a review produces nothing without both:
+
+- **Docker.** Every review runs in a container. `doctor` checks for it.
+- **A model provider.** Either set `ANTHROPIC_API_KEY` — the default playbook binds its agents to
+  Claude — or run `ollama signin`, since the declared fallback is `glm-5.3:cloud` on Ollama
+  Cloud. That is a hosted account of its own, not local inference; nothing here runs a model on
+  your machine unless you bind one yourself.
+
+With those, the shortest path to a first review needs no GitHub App, no token and no pull
+request:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/mustafarslan/maestro/master/install.sh | sh
+maestro review ~/code/my-app --base HEAD~1
 ```
-
-Docker is the one dependency Maestro cannot install for you; `doctor` checks for it.
 
 ## Use it
 
@@ -202,3 +204,8 @@ nothing. Not for `--poll`, which cannot see comments; the daemon says so if you 
 
 All ten phases of the implementation plan are landed. What is verified, and what is not, is
 recorded honestly in `docs/STATUS.md`.
+
+## License
+
+[MIT](LICENSE). Security reports go through GitHub's private vulnerability reporting, not a
+public issue — [SECURITY.md](SECURITY.md) says what is in scope and what is already known.

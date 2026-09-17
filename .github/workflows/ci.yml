@@ -1,17 +1,21 @@
 name: CI
 
-# Manual only.
+# Every push to master, every pull request, and on demand.
 #
-# Every push to master started a run, and this repository has no Actions credit — so each
-# one failed for want of minutes rather than for anything about the code. A red tick that
-# means "billing" trains you to ignore red ticks, which is worse than having no CI.
+# This was manual-only while the repository was private: the account has no Actions credit, so
+# each run failed for want of minutes rather than for anything about the code, and a red tick
+# that means "billing" trains you to ignore red ticks. Public repositories get standard runners
+# free, so the triggers are back — which matters most for a pull request from someone else,
+# where the Docker suite below is what checks that the sandbox posture still holds.
 #
-# The same steps run locally in `scripts/gate.sh`, which is what every commit here already
-# goes through: install from a clean checkout, lint, typecheck, docs, tests, the store
-# contract on both runtimes, the compiled binary, the queue race, MCP over stdio, a smoke
-# test of a fresh install, and the advisory Linear query check. Re-enable the push trigger
-# when there are minutes to spend.
+# The same steps also run locally in `scripts/gate.sh`, which is what every commit here goes
+# through: install from a clean checkout, lint, typecheck, docs, tests, the store contract on
+# both runtimes, the compiled binary, the queue race, MCP over stdio, a smoke test of a fresh
+# install, and the advisory Linear query check.
 on:
+  push:
+    branches: [master]
+  pull_request:
   workflow_dispatch:
 
 # A newer push makes an older run's result irrelevant; paying for it is pure waste.
