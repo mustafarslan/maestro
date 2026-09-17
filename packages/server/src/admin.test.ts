@@ -10,6 +10,7 @@ let db: SqlDatabase;
 let admin: RunningAdmin;
 let base: string;
 const TOKEN = "test-token-abcdef";
+const VIEWER = "viewer-token-123456";
 
 beforeEach(async () => {
   db = await openStore({ path: ":memory:" });
@@ -23,7 +24,7 @@ beforeEach(async () => {
     title: "Add retries",
     playbookVersionId: pb.getActive("default")!.id,
   });
-  admin = await startAdminServer({ db, port: 0, token: TOKEN });
+  admin = await startAdminServer({ db, port: 0, token: TOKEN, viewerToken: VIEWER });
   base = `http://127.0.0.1:${admin.port}`;
 });
 
@@ -33,6 +34,78 @@ afterEach(async () => {
 });
 
 const auth = { authorization: `Bearer ${TOKEN}` };
+
+describe("the read-only token", () => {
+  // The admin token can edit the playbook, and the playbook decides what commands a sandbox
+  // may run and what it may reach. So "let them watch the board" and "let them change the
+  // sandbox" have to be different credentials, or every viewer is an operator.
+  const viewer = { authorization: `Bearer ${VIEWER}` };
+
+  it("reads what the admin token reads", async () => {
+    for (const path of ["/api/reviews", "/api/playbook", "/api/stats", "/api/providers"]) {
+      expect((await fetch(`${base}${path}`, { headers: viewer })).status, path).toBe(200);
+    }
+  });
+
+  it("is refused on every route that changes something", async () => {
+    const writes: [string, unknown][] = [
+      ["/api/playbook/activate", { versionId: "pv_whatever" }],
+      ["/api/profiles/activate", { subject: "octocat" }],
+      ["/api/profiles/deactivate", {}],
+      ["/api/providers/test", { providerId: "anthropic" }],
+    ];
+    for (const [path, body] of writes) {
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { ...viewer, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(res.status, path).toBe(403);
+      expect(await res.json(), path).toEqual({ error: "this token is read-only" });
+    }
+  });
+
+  it("cannot publish a playbook version", async () => {
+    const res = await fetch(`${base}/api/playbook`, {
+      method: "POST",
+      headers: { ...viewer, "content-type": "application/json" },
+      body: JSON.stringify({ document: defaultPlaybook() }),
+    });
+    expect(res.status).toBe(403);
+    // And nothing was written on the way to being refused.
+    expect(new PlaybookStore(db).listVersions("default")).toHaveLength(1);
+  });
+
+  it("may still validate a document, which writes nothing", async () => {
+    const res = await fetch(`${base}/api/playbook/validate`, {
+      method: "POST",
+      headers: { ...viewer, "content-type": "application/json" },
+      body: JSON.stringify({ document: defaultPlaybook() }),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("may watch the event stream, since it only reads", async () => {
+    const res = await fetch(`${base}/api/events?token=${VIEWER}`, {
+      headers: { accept: "text/event-stream" },
+    });
+    expect(res.status).toBe(200);
+    await res.body?.cancel();
+  });
+
+  it("is not a way in with the wrong token", async () => {
+    expect((await fetch(`${base}/api/reviews?token=${VIEWER}x`)).status).toBe(401);
+  });
+
+  it("leaves the admin token able to write", async () => {
+    const res = await fetch(`${base}/api/playbook`, {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ document: defaultPlaybook() }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
 
 describe("admin authentication", () => {
   it("refuses API access without a token", async () => {

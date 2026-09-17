@@ -76,6 +76,7 @@ ${color.bold("maestro serve")} [options]
     adminPort,
     adminHost: arg(argv, "--admin-host"),
     adminToken: process.env.MAESTRO_ADMIN_TOKEN,
+    viewerToken: process.env.MAESTRO_VIEWER_TOKEN,
     poll: pollRepos.length ? { repos: pollRepos, intervalMs: pollIntervalSec * 1000 } : undefined,
     concurrentReviews: workers,
   });
@@ -107,6 +108,11 @@ ${color.bold("maestro serve")} [options]
       `http://${shown}:${daemon.adminPort}/?token=${daemon.adminToken}` +
         (adminHost && adminHost !== "127.0.0.1" ? `  (bound to ${adminHost})` : ""),
     ),
+  );
+  // Printed beside the admin URL because the whole point is that there is something safe to
+  // share: the admin token edits the playbook, and the playbook controls the sandbox.
+  console.log(
+    checkLine("ok", "read-only", `${daemon.viewerToken}  (watches everything, changes nothing)`),
   );
   console.log(color.dim("\nctrl-c to stop\n"));
 

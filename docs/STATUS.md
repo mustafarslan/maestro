@@ -4497,3 +4497,39 @@ harness exists to measure per playbook version.
 
     Verified together: 1277 tests across 90 files, the real-Docker suite included, typecheck and
     lint clean, thermal pressure nominal throughout.
+
+257. **A read-only admin token, because watching and operating were the same credential.** The
+    fourth hardening finding (256) was that one token did everything. The asymmetry is what made
+    it worth fixing: the admin token publishes playbook versions, and a playbook decides which
+    commands a sandbox may run and which hosts it may reach — so handing a teammate the
+    credential for watching a review board handed them the switch for the egress control.
+
+    `authorize` now answers with a level rather than a boolean: `"admin"`, `"viewer"`, or null.
+    Routes carry `write: true` when they publish, activate, or spend money — publishing and
+    activating a playbook, activating and deactivating a developer profile, and testing a
+    provider, which makes a real outbound call. `/api/playbook/validate` deliberately stays
+    readable: it parses a document and writes nothing, and a viewer who cannot check their own
+    YAML before asking an operator to publish it is a viewer who will ask the operator twice.
+
+    Three small decisions inside that:
+
+    - **403 after the route matches, not before.** A real token on an operation that is not
+      theirs is a different answer from an unrecognised token, and an unknown path still reads
+      as 404 for both levels rather than leaking which routes exist.
+    - **Both comparisons always run**, even once the first matches, so the time taken says
+      nothing about which of the two tokens was wrong.
+    - **The event stream takes either level.** It is the review board, and it only reads.
+
+    `maestro serve` generates both and prints the read-only one beside the admin URL, so the
+    operator has something safe to hand out without being asked; `MAESTRO_VIEWER_TOKEN` pins it.
+    Seven tests cover it, including the two that would make the rest theatre: that a refused
+    publish wrote nothing, and that the admin token still publishes.
+
+    **What this is not.** Two levels are not accounts. Both are shared secrets, so revoking one
+    person means rotating everyone's, and no audit trail says who published a version. There is
+    still no lockout on the token check, which matters only once the API leaves loopback. And the
+    UI still renders the Studio's editing controls for a viewer, who then meets a 403 on save —
+    the server is the boundary and it holds, but a UI that offers what it cannot do is a bug of
+    its own. All three are in `docs/TODO.md` rather than implied to be finished.
+
+    Verified: 1284 tests across 90 files, typecheck and lint clean.

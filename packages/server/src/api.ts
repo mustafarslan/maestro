@@ -28,13 +28,26 @@ import { bundledBattery, ProfileStore, reviewFirstItems } from "@maestro/profile
 export interface ApiContext {
   db: SqlDatabase;
   token: string;
+  /**
+   * A second token that may read everything and change nothing.
+   *
+   * The admin token edits the playbook, which controls `allowedCommands`, `egressAllowlist`
+   * and `egressEnforcement` — so handing it to somebody who only wants to watch a review
+   * board hands them the sandbox's controls too. This is the credential for watching.
+   */
+  viewerToken?: string;
   /** Emits an SSE event to every connected admin client. */
   broadcast: (event: string, data: unknown) => void;
 }
 
+/** What a caller proved it may do. */
+export type AccessLevel = "admin" | "viewer";
+
 interface Route {
   method: string;
   pattern: RegExp;
+  /** Changes state, spends money, or both. Refused for a read-only token. */
+  write?: boolean;
   handler: (
     ctx: ApiContext,
     req: IncomingMessage,
@@ -50,14 +63,28 @@ function tokenMatches(provided: string, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function authorize(req: IncomingMessage, token: string): boolean {
+/**
+ * Which level the request proved, or null for neither.
+ *
+ * Both comparisons run even once the first matches, so the answer takes the same time
+ * whichever token arrived and the timing says nothing about which one was wrong.
+ */
+export function authorize(
+  req: IncomingMessage,
+  token: string,
+  viewerToken?: string,
+): AccessLevel | null {
   const header = req.headers.authorization ?? "";
   const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (bearer && tokenMatches(bearer, token)) return true;
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const query = url.searchParams.get("token") ?? "";
   // EventSource cannot set headers, so SSE has to accept the token in the query string.
-  return Boolean(query) && tokenMatches(query, token);
+  const query = new URL(req.url ?? "/", "http://localhost").searchParams.get("token") ?? "";
+  const provided = bearer || query;
+  if (!provided) return null;
+
+  const admin = tokenMatches(provided, token);
+  const viewer = viewerToken !== undefined && tokenMatches(provided, viewerToken);
+  if (admin) return "admin";
+  return viewer ? "viewer" : null;
 }
 
 const routes: Route[] = [
@@ -100,6 +127,7 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/profiles\/activate$/,
+    write: true,
     handler: async (ctx, _req, _m, body) => {
       const subject = (body as { subject?: unknown })?.subject;
       if (typeof subject !== "string" || !subject.trim()) {
@@ -117,6 +145,7 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/profiles\/deactivate$/,
+    write: true,
     handler: async (ctx) => {
       const was = new ProfileStore(ctx.db).deactivate();
       ctx.broadcast("profile", { active: null });
@@ -233,6 +262,7 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/playbook$/,
+    write: true,
     handler: async (ctx, _req, _m, body) => {
       // Validation happens here, not in the browser: an invalid graph must never reach
       // the engine, and the editor is not the only client.
@@ -257,6 +287,7 @@ const routes: Route[] = [
   {
     method: "POST",
     pattern: /^\/api\/playbook\/activate$/,
+    write: true,
     handler: async (ctx, _req, _m, body) => {
       new PlaybookStore(ctx.db).activate((body as { versionId: string }).versionId);
       ctx.broadcast("playbook", { activated: (body as { versionId: string }).versionId });
@@ -300,6 +331,7 @@ const routes: Route[] = [
     // tools, and binding a review agent to one of those fails at run time instead.
     method: "POST",
     pattern: /^\/api\/providers\/test$/,
+    write: true,
     handler: async (ctx, _req, _m, body) => {
       const { providerId, model } = (body ?? {}) as { providerId?: string; model?: string };
       if (!providerId || !model) return { ok: false, error: "providerId and model are required" };
@@ -402,7 +434,8 @@ export async function handleApi(
   const url = new URL(req.url ?? "/", "http://localhost");
   if (!url.pathname.startsWith("/api/")) return false;
 
-  if (!authorize(req, ctx.token)) {
+  const level = authorize(req, ctx.token, ctx.viewerToken);
+  if (!level) {
     res.writeHead(401, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unauthorized" }));
     return true;
@@ -411,6 +444,14 @@ export async function handleApi(
   for (const route of routes) {
     const match = route.pattern.exec(url.pathname);
     if (!match || route.method !== req.method) continue;
+
+    // 403, not 401: the token is real and the operation is not theirs. Checked after the
+    // route matched, so an unknown path still answers 404 for either level.
+    if (route.write && level !== "admin") {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "this token is read-only" }));
+      return true;
+    }
 
     let body: unknown;
     if (req.method === "POST") {

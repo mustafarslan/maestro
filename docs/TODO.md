@@ -241,12 +241,16 @@ invites.
 
 What it needs, roughly in order of how much it buys:
 
-- **A read-only token**, separate from the admin one. Every route in `packages/server/src/api.ts`
-  is already either a read or a write; the split is mechanical, and it covers the common case (a
-  dashboard a team watches) without a user model.
+- ~~**A read-only token**, separate from the admin one.~~ Done (`docs/STATUS.md` 257):
+  `MAESTRO_VIEWER_TOKEN`, refused with `403` on every route that publishes, activates or spends
+  money, and printed by `maestro serve` beside the admin one.
 - **Per-user tokens**, so revoking one person does not rotate everyone's, and so the audit trail
   of who published a playbook version means something. This wants a table, not a flag.
 - **A rate limit or lockout on the token check.** With the API on loopback, an attacker is already
   on the host; over the network the token is the whole boundary and nothing slows a guess.
 
-Until then, `SECURITY.md` states the limitation, and the default stays loopback.
+One more thing the read-only token did not fix: the admin **UI** still renders the Studio's
+editing controls for a viewer, who then meets a `403` on save. The server is the boundary and it
+holds, but the UI should ask its level and disable what it cannot do.
+
+Until those land, `SECURITY.md` states the limitation, and the default stays loopback.

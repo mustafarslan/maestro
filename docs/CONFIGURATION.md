@@ -639,6 +639,16 @@ error names this setting. `maestro doctor` reports what is configured.
 | Variable | Purpose |
 | --- | --- |
 | `MAESTRO_ADMIN_TOKEN` | Bearer token for the admin API and UI. Generated per run if unset |
+| `MAESTRO_VIEWER_TOKEN` | Read-only token for the same API and UI. Generated per run if unset |
+
+Two levels, because they are genuinely different powers. The admin token publishes and activates
+playbook versions, and a playbook decides which commands a sandbox may run and which hosts it may
+reach — so it is operator access, not a dashboard password. The viewer token reads every endpoint
+and the live event stream, and is refused with `403` on anything that publishes, activates, or
+spends money. `maestro serve` prints both. Hand out the second one.
+
+It is still a shared secret rather than an account: revoking one person's access means rotating
+the token for everyone. Per-user tokens are in `docs/TODO.md`.
 
 The admin API binds `127.0.0.1` by default and refuses to bind elsewhere without a token. The
 webhook receiver is a separate listener on its own port, because it is the only thing that must be

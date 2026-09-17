@@ -54,6 +54,8 @@ export interface DaemonOptions {
   adminPort?: number;
   adminHost?: string;
   adminToken?: string;
+  /** Read-only admin credential. Generated per run when unset, like the admin token. */
+  viewerToken?: string;
   /** Repositories to poll, for hosts with no public URL. */
   poll?: { repos: string[]; intervalMs: number };
   limits?: SchedulerLimits;
@@ -74,6 +76,7 @@ export interface RunningDaemon {
   webhookPort?: number;
   adminPort?: number;
   adminToken: string;
+  viewerToken: string;
   stop(): Promise<void>;
 }
 
@@ -149,6 +152,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const driver = opts.driver ?? new DockerSandboxDriver();
   const scheduler = new Scheduler(opts.limits ?? DEFAULT_LIMITS);
   const adminToken = opts.adminToken ?? randomBytes(24).toString("hex");
+  // Always generated, so an operator always has something to hand out that cannot edit the
+  // playbook. A token nobody shares costs nothing; a missing one gets the admin token shared.
+  const viewerToken = opts.viewerToken ?? randomBytes(24).toString("hex");
 
   // A crash leaves reviews mid-flight for ever, and the reaper now skips containers
   // belonging to in-flight reviews — so without this an orphan is protected permanently
@@ -194,6 +200,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           port: opts.adminPort,
           host: opts.adminHost,
           token: adminToken,
+          viewerToken,
         });
   const notify = (event: string, data: unknown) => admin?.broadcast(event, data);
 
@@ -720,6 +727,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     webhookPort,
     adminPort: admin?.port ?? opts.adminPort,
     adminToken,
+    viewerToken,
     async stop() {
       stopping = true;
       clearInterval(reaperTimer);

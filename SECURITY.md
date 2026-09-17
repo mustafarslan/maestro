@@ -47,11 +47,13 @@ These are real and already written down, so they are not news:
   install, so it cannot be read-only or non-root, but it now drops every capability except the
   six a root-run package manager uses to own the files it writes. A fork pull request never
   reaches this phase at all: forks get no setup commands, no allowed commands, and no egress.
-- **The admin token is a single flat secret.** Anyone holding it can edit playbooks, which
-  control allowed commands and the egress allowlist, so it is operator access rather than a
-  viewer credential — there are no roles. The daemon prints it in a URL; the UI strips it from
-  the address bar on load and keeps it for the tab rather than the browser, but it is still a
-  query parameter on the events stream, so treat it like a password. Bind the admin API to
-  loopback, which is the default.
+- **The admin API has two levels, not accounts.** The admin token publishes and activates
+  playbook versions, which control allowed commands and the egress allowlist, so it is operator
+  access; the read-only token that `serve` also prints reads everything and is refused on
+  anything that changes state or spends money. Both are shared secrets: revoking one person
+  means rotating the token for everyone, and there is no per-user audit trail. The daemon prints
+  the admin token in a URL; the UI strips it from the address bar on load and keeps it for the
+  tab, but it is still a query parameter on the events stream, so treat both like passwords.
+  Bind the admin API to loopback, which is the default.
 
 `docs/STATUS.md` records what has been verified against reality and what has not.

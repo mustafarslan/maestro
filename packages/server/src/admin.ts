@@ -11,6 +11,8 @@ export interface AdminServerOptions {
   port: number;
   host?: string;
   token: string;
+  /** Read-only token: may watch everything here, may change nothing. */
+  viewerToken?: string;
 }
 
 export interface RunningAdmin {
@@ -49,7 +51,8 @@ export async function startAdminServer(opts: AdminServerOptions): Promise<Runnin
       // Server-sent events: one direction is all the UI needs, and EventSource
       // reconnects on its own, which a WebSocket would make us implement.
       if (url.pathname === "/api/events") {
-        if (!authorize(req, opts.token)) {
+        // Both levels may watch the stream: it is the review board, and it only reads.
+        if (!authorize(req, opts.token, opts.viewerToken)) {
           res.writeHead(401).end();
           return;
         }
@@ -75,7 +78,8 @@ export async function startAdminServer(opts: AdminServerOptions): Promise<Runnin
         return;
       }
 
-      if (await handleApi({ db: opts.db, token: opts.token, broadcast }, req, res)) return;
+      const api = { db: opts.db, token: opts.token, viewerToken: opts.viewerToken, broadcast };
+      if (await handleApi(api, req, res)) return;
 
       // Static UI. Unknown paths fall through to index.html so client-side routing works.
       const assetPath = url.pathname === "/" ? "/index.html" : url.pathname;
