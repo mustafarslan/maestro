@@ -1,7 +1,8 @@
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { type AddressInfo, connect } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobQueue, newId, openStore, ReviewStore, type SqlDatabase } from "@maestro/core";
 import { GitHubClient } from "@maestro/integrations";
@@ -547,14 +548,29 @@ describe("backpressure when the disk is full", () => {
    */
   let db: SqlDatabase;
   let running: Awaited<ReturnType<typeof startDaemon>> | undefined;
+  let home: string;
+  let savedHome: string | undefined;
 
   beforeEach(async () => {
     db = await openStore({ path: ":memory:" });
     new PlaybookStore(db).publish(defaultPlaybook(), { activate: true });
+    // The daemon measures free space at `maestroHome()`, and this suite opens an
+    // in-memory database, so nothing ever creates that directory. On a developer machine
+    // ~/.maestro happens to exist and the check measures a real volume; on a fresh CI
+    // runner it does not, `statfsSync` throws, and `diskSpace` answers "cannot tell" —
+    // which is deliberately a reason to carry on. The worker then claimed the job and the
+    // test read as a backpressure bug. Point it at a directory that exists, so what is
+    // asserted is the floor and not the accident of who created ~/.maestro.
+    savedHome = process.env.MAESTRO_HOME;
+    home = mkdtempSync(join(tmpdir(), "maestro-daemon-disk-"));
+    process.env.MAESTRO_HOME = home;
   });
   afterEach(async () => {
     await running?.stop();
     running = undefined;
+    if (savedHome === undefined) delete process.env.MAESTRO_HOME;
+    else process.env.MAESTRO_HOME = savedHome;
+    rmSync(home, { recursive: true, force: true });
   });
 
   const attempts = (): number =>

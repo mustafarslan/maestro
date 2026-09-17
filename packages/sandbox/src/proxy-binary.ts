@@ -55,8 +55,19 @@ export interface ProxyBinary {
  *
  * Deliberately ordered so an explicit answer always wins over a clever one.
  */
-export async function resolveProxyBinary(opts: { version: string }): Promise<ProxyBinary> {
-  const arch = await dockerArch();
+export async function resolveProxyBinary(opts: {
+  version: string;
+  /**
+   * Docker's architecture. Defaults to asking Docker, which is what production wants.
+   *
+   * Passed explicitly by tests: without it a unit test needs Docker installed and its
+   * result depends on the machine, which is how this file passed on an arm64 laptop and
+   * failed on an x64 runner — picking a different release asset and reporting it as a
+   * wrong URL.
+   */
+  arch?: "x64" | "arm64";
+}): Promise<ProxyBinary> {
+  const arch = opts.arch ?? (await dockerArch());
 
   // 1. Told explicitly. Always first: an operator who sets this has a reason, and a
   //    fallback that quietly used something else would be the harder bug.

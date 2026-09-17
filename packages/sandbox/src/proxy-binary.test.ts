@@ -67,7 +67,7 @@ describe("downloading the proxy binary", () => {
       return { ok: true, arrayBuffer: async () => ELF };
     });
 
-    const got = await resolveProxyBinary({ version: "9.9.9" });
+    const got = await resolveProxyBinary({ version: "9.9.9", arch: "arm64" });
     expect(got.source).toBe("download");
     expect(calls[0]).toContain("api.github.com");
     expect(calls[0]).toContain("/releases/tags/v9.9.9");
@@ -85,7 +85,7 @@ describe("downloading the proxy binary", () => {
         ? { ok: true, json: async () => ({ assets: [{ name: "maestro-linux-arm64", url: "a" }] }) }
         : { ok: true, arrayBuffer: async () => ELF },
     );
-    const got = await resolveProxyBinary({ version: "9.9.9" });
+    const got = await resolveProxyBinary({ version: "9.9.9", arch: "arm64" });
     expect(got.path).toContain("-9.9.9");
     expect(readFileSync(got.path)).toEqual(ELF);
   });
@@ -99,7 +99,7 @@ describe("downloading the proxy binary", () => {
         ? { ok: true, json: async () => ({ assets: [{ name: "maestro-linux-arm64", url: "a" }] }) }
         : { ok: true, arrayBuffer: async () => Buffer.from("<!doctype html><title>Sign in") },
     );
-    await expect(resolveProxyBinary({ version: "9.9.9" })).rejects.toThrow(
+    await expect(resolveProxyBinary({ version: "9.9.9", arch: "arm64" })).rejects.toThrow(
       /could not find or fetch/,
     );
   });
@@ -108,7 +108,9 @@ describe("downloading the proxy binary", () => {
     // A 404 on a private release reads as "that version does not exist", which sends
     // somebody to check the version number rather than their credentials.
     vi.stubGlobal("fetch", async () => ({ ok: false, status: 404 }));
-    await expect(resolveProxyBinary({ version: "9.9.9" })).rejects.toThrow(/MAESTRO_TOKEN/);
+    await expect(resolveProxyBinary({ version: "9.9.9", arch: "arm64" })).rejects.toThrow(
+      /MAESTRO_TOKEN/,
+    );
   });
 
   it("prefers an explicit MAESTRO_PROXY_BINARY over anything it could fetch", async () => {
@@ -118,7 +120,7 @@ describe("downloading the proxy binary", () => {
     vi.stubGlobal("fetch", async () => {
       throw new Error("must not be called");
     });
-    const got = await resolveProxyBinary({ version: "9.9.9" });
+    const got = await resolveProxyBinary({ version: "9.9.9", arch: "arm64" });
     expect(got.source).toBe("env");
     expect(got.path).toBe(explicit);
   });
