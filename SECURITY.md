@@ -42,14 +42,16 @@ spec, and whether the pull request was a fork is much faster to reproduce.
 
 These are real and already written down, so they are not news:
 
-- **The prepare phase is weaker than analyze.** Analyze runs `--network none --read-only
-  --cap-drop ALL`; prepare, which installs dependencies for a same-repository pull request,
-  currently keeps Docker's default capability set. A fork pull request never reaches it: forks
-  get no setup commands, no allowed commands, and no egress at all.
-- **The dependency cache keys on the lockfile**, not on package scripts, so a trusted pull
-  request that edits a `postinstall` without touching the lockfile can affect later reviews of
-  that repository.
-- **The admin token is a single flat secret** that can edit playbooks, and the daemon prints it
-  in a URL. Bind the admin API to loopback, which is the default.
+- **The prepare phase is still weaker than analyze**, though not by as much as it was. Analyze
+  runs `--network none --read-only --cap-drop ALL`. Prepare runs the repository's own dependency
+  install, so it cannot be read-only or non-root, but it now drops every capability except the
+  six a root-run package manager uses to own the files it writes. A fork pull request never
+  reaches this phase at all: forks get no setup commands, no allowed commands, and no egress.
+- **The admin token is a single flat secret.** Anyone holding it can edit playbooks, which
+  control allowed commands and the egress allowlist, so it is operator access rather than a
+  viewer credential — there are no roles. The daemon prints it in a URL; the UI strips it from
+  the address bar on load and keeps it for the tab rather than the browser, but it is still a
+  query parameter on the events stream, so treat it like a password. Bind the admin API to
+  loopback, which is the default.
 
 `docs/STATUS.md` records what has been verified against reality and what has not.

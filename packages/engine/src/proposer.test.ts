@@ -456,6 +456,10 @@ describe("the model-backed proposer", () => {
     const { provider } = registry.resolve({
       providerId: "anthropic",
       model: "claude-opus-5",
+      // Required by ModelBindingLike; this test resolves a provider and never runs a loop,
+      // so the values only have to be present and valid.
+      maxSteps: 1,
+      costCapCents: 10,
       fallback: [],
     });
     return { provider, transport };

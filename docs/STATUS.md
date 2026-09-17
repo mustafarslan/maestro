@@ -4434,3 +4434,66 @@ harness exists to measure per playbook version.
     a changed flow end to end, which is what those rules actually ask an agent to do. The rules
     stay in `docs/playbooks/pr-skill-imports.yaml` and in v9, inactive, where a later round can
     pick them up against a better instrument.
+
+256. **Three of the four hardening findings, closed before going public.** The audit that preceded
+    the licence (254) named four things that would matter once strangers run this. Three are fixed
+    and asserted; the fourth is a feature and is recorded rather than hurried.
+
+    **The prepare phase keeps six capabilities instead of Docker's default set.** Analyze already
+    ran `--network none --read-only --cap-drop ALL`; prepare, where a pull request's own
+    `postinstall` executes, ran as root with everything Docker grants. It cannot take the analyze
+    posture — a package manager writes and chowns, so neither a read-only rootfs nor a non-root
+    user survives contact with a real install — but it can lose every capability an install never
+    needs. It now drops all and adds back `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `FSETID`, `SETGID`
+    and `SETUID`. Gone: `NET_RAW`, `MKNOD`, `SYS_CHROOT`, `SETFCAP`, `SETPCAP`, `AUDIT_WRITE`,
+    `KILL`.
+
+    Asserted the only way that means anything: a setup command writes `/proc/self/status`'s
+    capability bitmap into the workdir *inside the real prepare container*, the snapshot carries
+    the file, and the analyze container reads it back. The test parses the mask and requires both
+    that something is left — a container with no capabilities would mean a broken install path
+    passing as a hardened one — and that nothing outside the six is set. The full Docker suite
+    then proves the installs still work: 35 tests, all passing.
+
+    The first run of that test failed for a reason worth keeping: a non-empty `setup` starts the
+    enforced egress proxy, and the proxy refuses an empty allowlist, so prepare died before any
+    capability was read. The test was asserting nothing about capabilities and would have passed
+    once the error was gone. Giving it a one-host allowlist fixed it.
+
+    **The dependency cache key now covers the manifests, not just the lockfile.** A lockfile pins
+    what is downloaded and says nothing about what is executed: `package.json` alone carries
+    `postinstall`. A trusted pull request that added one without touching the lockfile landed in a
+    snapshot every later review of that repository reused. The key now hashes `package.json`,
+    `pyproject.toml`, `setup.py`, `setup.cfg`, `Cargo.toml`, `go.mod` and `Gemfile` when present —
+    whole files rather than parsed hook fields, because no parser has to be right about a file an
+    attacker wrote. A manifest never establishes a key on its own; without a lockfile there is
+    still nothing safe to reuse. The cost is real and accepted: a version bump busts the key.
+
+    **The admin token stops accumulating in places nobody clears.** The UI strips it from the
+    address bar on load rather than leaving it in browser history and in every screenshot of the
+    page, and keeps it in `sessionStorage` rather than `localStorage`, so it dies with the tab
+    instead of outliving the operator on a shared machine; the old entry is migrated once and
+    removed. Admin responses now carry `Referrer-Policy: no-referrer` and a content security
+    policy with `script-src 'self'` and `frame-ancestors 'none'`, so a token in a query string has
+    no off-origin request to ride out on. The embedded UI was rebuilt, since that is what the
+    binary actually serves.
+
+    **Not done: roles.** One flat token still edits playbooks, which control allowed commands and
+    the egress allowlist, so it is operator access rather than a viewer credential. That is a
+    feature with a design behind it, not a flag to flip, and it is in `docs/TODO.md` with what it
+    would take. `SECURITY.md` says so plainly rather than implying otherwise.
+
+    **A red typecheck at HEAD, found by re-enabling CI.** `pnpm typecheck` had been failing on
+    master before any of this: `proposer.test.ts` built a model binding without `maxSteps` or
+    `costCapCents`, both required. `tsc -b` alone is clean, which is why it survived — only the
+    full `pnpm typecheck` compiles the test project, and nothing ran it while CI was
+    `workflow_dispatch`-only. Re-enabling `push` and `pull_request` (254) made it the first thing
+    a public CI run would have shown. Fixed here.
+
+    **The README was rewritten** to be shorter and less dense: 212 lines to 185, no marketing, the
+    install path first, and two corrections — `packages/profile` was missing from the layout table
+    entirely, and the Compose section still said "experimental and unrun" after a full review had
+    been driven through it (249).
+
+    Verified together: 1277 tests across 90 files, the real-Docker suite included, typecheck and
+    lint clean, thermal pressure nominal throughout.

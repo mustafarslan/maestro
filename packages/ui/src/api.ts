@@ -1,7 +1,24 @@
-/** The admin API is token-guarded; the token arrives in the URL and stays in memory. */
+/**
+ * The admin API is token-guarded. The token arrives in the URL, and both of the things this
+ * does to it are deliberate.
+ *
+ * It is stripped from the address bar immediately, because otherwise it sits in browser
+ * history and in the title of every screenshot and bug report of this page. And it is kept
+ * in sessionStorage rather than localStorage: a token that outlives the tab is one that
+ * outlives the operator's session on a shared machine. The old localStorage entry is
+ * migrated and then removed, so an already-open UI keeps working exactly once.
+ */
 const params = new URLSearchParams(location.search);
-export const TOKEN = params.get("token") ?? localStorage.getItem("maestro.token") ?? "";
-if (TOKEN) localStorage.setItem("maestro.token", TOKEN);
+const fromUrl = params.get("token");
+const legacy = localStorage.getItem("maestro.token");
+export const TOKEN = fromUrl ?? sessionStorage.getItem("maestro.token") ?? legacy ?? "";
+if (legacy) localStorage.removeItem("maestro.token");
+if (TOKEN) sessionStorage.setItem("maestro.token", TOKEN);
+if (fromUrl) {
+  params.delete("token");
+  const rest = params.toString();
+  history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {

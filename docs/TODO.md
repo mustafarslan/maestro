@@ -222,3 +222,31 @@ not, each for a different reason.
   reviewers' comments are attacker-writable, so they must go through `wrapUntrusted` and reach
   triage only, never the specialists — for the same reason the developer profile does not reach
   them.
+
+## Roles for the admin API
+
+The last of the four hardening findings from the pre-publication audit (`docs/STATUS.md` 256).
+The other three are fixed; this one is a feature, and building it in a hurry would be worse than
+saying what it is.
+
+Today `maestro serve` has one token. It is checked in constant time, it defaults to loopback, and
+it is generated per run when `MAESTRO_ADMIN_TOKEN` is unset — but everyone who holds it can do
+everything: read the review board, and also edit the playbook, which controls `allowedCommands`,
+`egressAllowlist` and `egressEnforcement`. So the credential a teammate needs to watch a review is
+the same one that can turn off the sandbox's egress control.
+
+That is fine for one operator on their own machine, which is what the deployment story currently
+is. It stops being fine the moment a team shares a daemon, which is exactly what a public release
+invites.
+
+What it needs, roughly in order of how much it buys:
+
+- **A read-only token**, separate from the admin one. Every route in `packages/server/src/api.ts`
+  is already either a read or a write; the split is mechanical, and it covers the common case (a
+  dashboard a team watches) without a user model.
+- **Per-user tokens**, so revoking one person does not rotate everyone's, and so the audit trail
+  of who published a playbook version means something. This wants a table, not a flag.
+- **A rate limit or lockout on the token check.** With the API on loopback, an attacker is already
+  on the host; over the network the token is the whole boundary and nothing slows a guess.
+
+Until then, `SECURITY.md` states the limitation, and the default stays loopback.

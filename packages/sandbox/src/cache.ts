@@ -13,6 +13,14 @@ import type { Toolchain } from "./toolchain.js";
  * The key deliberately covers the base image and the setup commands as well as the
  * lockfile: changing either produces a genuinely different environment, and silently
  * reusing a stale one would make reviews irreproducible.
+ *
+ * It covers the manifests too, and that is a security property rather than a correctness
+ * one. A lockfile pins what is downloaded; it says nothing about what is EXECUTED during
+ * the install. `package.json` alone carries `postinstall`, and a pull request that adds one
+ * without touching the lockfile would otherwise land in a snapshot that every later review
+ * of that repository reuses. Hashing the whole manifest rather than parsing out the hook
+ * fields costs some cache hits — a version bump busts the key — and needs no parser to be
+ * right about a file an attacker wrote.
  */
 
 const LOCKFILES = [
@@ -26,6 +34,20 @@ const LOCKFILES = [
   "requirements.txt",
   "go.sum",
   "Cargo.lock",
+];
+
+/**
+ * Files that can run code at install time. Present in the key when they exist, but never
+ * enough on their own: without a lockfile there is still nothing safe to reuse.
+ */
+const MANIFESTS = [
+  "package.json",
+  "pyproject.toml",
+  "setup.py",
+  "setup.cfg",
+  "Cargo.toml",
+  "go.mod",
+  "Gemfile",
 ];
 
 export interface CacheKeyInput {
@@ -48,6 +70,13 @@ export function dependencyCacheKey(input: CacheKeyInput): string | null {
     hash.update(readFileSync(path));
   }
   if (!found) return null;
+
+  for (const name of MANIFESTS) {
+    const path = join(input.sourcePath, name);
+    if (!existsSync(path)) continue;
+    hash.update(name);
+    hash.update(readFileSync(path));
+  }
 
   hash.update(input.image);
   hash.update(input.setup.join(" "));

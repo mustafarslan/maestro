@@ -108,6 +108,24 @@ export async function startAdminServer(opts: AdminServerOptions): Promise<Runnin
         "content-type": asset.mime,
         "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
         "x-content-type-options": "nosniff",
+        // The admin token arrives in the query string, so anything this page can reach
+        // off-origin is a way to hand that token to someone else in a Referer header. It
+        // reaches nothing: the UI is embedded, its script and stylesheet are same-origin
+        // files, and the policy says so instead of trusting that it stays that way.
+        // `style-src` allows inline because a component library may inject a <style> tag
+        // at runtime; scripts get no such exemption.
+        "referrer-policy": "no-referrer",
+        "content-security-policy": [
+          "default-src 'self'",
+          "script-src 'self'",
+          "style-src 'self' 'unsafe-inline'",
+          "img-src 'self' data:",
+          "connect-src 'self'",
+          "object-src 'none'",
+          "base-uri 'none'",
+          "form-action 'none'",
+          "frame-ancestors 'none'",
+        ].join("; "),
       });
       res.end(Buffer.from(asset.body, "base64"));
     })().catch((err) => {

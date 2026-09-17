@@ -137,6 +137,68 @@ describe("prepare phase", () => {
   });
 });
 
+describe("prepare phase security posture", () => {
+  // Prepare is where a pull request's own `postinstall` runs, so its capability set is a
+  // security boundary and not an implementation detail. It cannot be `--read-only` or
+  // non-root — a package manager writes and chowns — so what is asserted here is that
+  // everything an install never needs is gone.
+  //
+  // Read from the kernel inside the real prepare container rather than from the flags we
+  // believe we passed: a setup command writes the capability bitmap into the workdir, which
+  // is what the snapshot is built from, and the analyze container reads it back.
+  const CAP_CHOWN = 0,
+    CAP_DAC_OVERRIDE = 1,
+    CAP_FOWNER = 3,
+    CAP_FSETID = 4;
+  const CAP_SETGID = 6,
+    CAP_SETUID = 7;
+  const allowed =
+    (1n << BigInt(CAP_CHOWN)) |
+    (1n << BigInt(CAP_DAC_OVERRIDE)) |
+    (1n << BigInt(CAP_FOWNER)) |
+    (1n << BigInt(CAP_FSETID)) |
+    (1n << BigInt(CAP_SETGID)) |
+    (1n << BigInt(CAP_SETUID));
+
+  itDocker(
+    "keeps only the capabilities a package manager needs, and none of the dangerous ones",
+    async () => {
+      const reviewId = `${REVIEW_ID}-prep-caps`;
+      const capSpec = EnvSpecSchema.parse({
+        image: "node:22-bookworm",
+        cpus: 2,
+        memory: "1GiB",
+        timeouts: { prepareSec: 300, analyzeSec: 300, commandSec: 60 },
+        setup: ["sh -c 'grep CapEff /proc/self/status > .maestro-caps'"],
+        allowedCommands: ["auto"],
+        // The setup command reaches nothing, but a non-empty setup starts the enforced
+        // proxy, and that proxy refuses to run with an empty allowlist.
+        egressAllowlist: ["registry.npmjs.org"],
+      });
+
+      let capBox: Sandbox | undefined;
+      try {
+        const prepared = await driver.prepare({ reviewId, sourcePath: sourceDir, spec: capSpec });
+        capBox = await driver.analyze(prepared, { agentId: "architecture", spec: capSpec });
+        const res = await capBox.exec("cat .maestro-caps");
+        const hex = /CapEff:\s+([0-9a-f]+)/.exec(res.stdout)?.[1];
+        expect(hex, res.stdout).toBeTruthy();
+
+        const caps = BigInt(`0x${hex}`);
+        // Something is left — a container with no capabilities at all would mean the
+        // install path is broken rather than hardened, and this test would pass either way.
+        expect(caps).not.toBe(0n);
+        // And nothing outside the allowed set: no NET_RAW, no MKNOD, no SYS_CHROOT, no
+        // SETFCAP, no SETPCAP, none of what Docker grants by default.
+        expect((caps & ~allowed).toString(16)).toBe("0");
+      } finally {
+        await capBox?.destroy();
+      }
+    },
+    900_000,
+  );
+});
+
 describe("analyze phase security posture", () => {
   itDocker(
     "leaves a container it cannot date alone when an age cutoff is given",

@@ -235,6 +235,27 @@ export class DockerSandboxDriver implements SandboxDriver {
           String(spec.pids),
           "--security-opt",
           "no-new-privileges",
+          // Prepare cannot take the analyze posture: it runs the repository's own dependency
+          // install, which writes into the workdir and routinely chowns what it writes, so
+          // neither `--read-only` nor a non-root `--user` survives contact with a real
+          // package manager. What it can drop is every capability that installing never
+          // needs — raw sockets, mknod, chroot, ptrace, changing its own capability set —
+          // leaving the file-ownership set a root-run package manager actually uses. A
+          // postinstall script from a pull request runs here, which is why this matters.
+          "--cap-drop",
+          "ALL",
+          "--cap-add",
+          "CHOWN",
+          "--cap-add",
+          "DAC_OVERRIDE",
+          "--cap-add",
+          "FOWNER",
+          "--cap-add",
+          "FSETID",
+          "--cap-add",
+          "SETGID",
+          "--cap-add",
+          "SETUID",
           // Proxy vars are the ONLY route out; the container has no direct egress path
           // it can use without them for the package managers we drive. Omitted entirely
           // when there is no network: pointing a tool at a proxy that does not exist

@@ -48,6 +48,22 @@ describe("dependency cache key", () => {
     expect(dependencyCacheKey(input({ setup: ["npm ci"] }))).not.toBe(dependencyCacheKey(input()));
   });
 
+  it("changes when an install hook changes and the lockfile does not", () => {
+    // The attack this closes: a pull request adds a `postinstall` without touching the
+    // lockfile, and the snapshot it poisons is reused by every later review of the repo.
+    writeFileSync(join(dir, "package-lock.json"), '{"lockfileVersion":3}');
+    writeFileSync(join(dir, "package.json"), '{"name":"app"}');
+    const before = dependencyCacheKey(input());
+    writeFileSync(join(dir, "package.json"), '{"name":"app","scripts":{"postinstall":"./x.sh"}}');
+    expect(dependencyCacheKey(input())).not.toBe(before);
+  });
+
+  it("refuses to key a repo with a manifest but no lockfile", () => {
+    // A manifest joins the key; it never establishes one on its own.
+    writeFileSync(join(dir, "package.json"), '{"name":"app"}');
+    expect(dependencyCacheKey(input())).toBeNull();
+  });
+
   it("refuses to key a repo with no lockfile", () => {
     // Without a lockfile there is no reproducible dependency set, so nothing is safe
     // to reuse and a full install is the only correct answer.
