@@ -3,6 +3,7 @@ import { severityAtLeast } from "@maestro/agents";
 import {
   hasPendingReviewJob,
   JobQueue,
+  MAESTRO_VERSION,
   maestroHome,
   openStore,
   ReviewStore,
@@ -41,7 +42,7 @@ function text(value: unknown) {
 
 export function buildServer(deps: McpDeps): McpServer {
   const { db } = deps;
-  const server = new McpServer({ name: "maestro", version: "0.1.0" });
+  const server = new McpServer({ name: "maestro", version: MAESTRO_VERSION });
 
   server.registerTool(
     "list_reviews",

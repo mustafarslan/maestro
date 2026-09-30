@@ -13,4 +13,9 @@
  * asked to run. Pointing the cache at a version whose release cannot answer is a failure
  * that surfaces inside a container nobody is watching.
  */
-export const MAESTRO_VERSION = "0.2.0";
+/**
+ * Bumped to 0.3.0 to carry everything master had gained since v0.2.0 — chiefly the
+ * developer profile (`maestro profile`, `@maestro/profile`), which no v0.2.0 binary
+ * contains — so the released binary and the source it was cut from agree.
+ */
+export const MAESTRO_VERSION = "0.3.0";
