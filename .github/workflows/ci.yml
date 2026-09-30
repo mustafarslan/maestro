@@ -48,11 +48,28 @@ jobs:
       # The prose half of honest documentation cannot be automated; this half can.
       - run: node scripts/docs-check.mjs
 
+      # The enforced egress proxy is this same program running in a Linux container, so the
+      # Docker suite below needs a Linux build of it. Left to look for one it downloads the
+      # release asset for MAESTRO_VERSION, which exists only once a version bump has been
+      # merged, tagged and published: every bump was red here until its own release was cut,
+      # and after that the suite was testing the published binary rather than this tree.
+      # Built from the checkout instead, as `scripts/gate.sh` does. `tsc -b` already ran under
+      # `typecheck`; naming it again keeps this step from depending on that.
+      - name: Linux build of this checkout, for the egress proxy container
+        run: |
+          pnpm exec tsc -b
+          pnpm run build:proxy-binary
+
       # The Docker integration suite asserts the sandbox security posture against real
       # containers. It runs here because a typo in a `docker run` flag is otherwise
       # completely silent, and that posture is what makes it safe to review a
       # stranger's code at all.
+      # MAESTRO_PROXY_BINARY names the binary built above (the runner is x64) rather than
+      # leaving the lookup to find it: if that file is ever not there this fails saying so,
+      # instead of falling through to whatever a release happens to hold.
       - run: pnpm test
+        env:
+          MAESTRO_PROXY_BINARY: ${{ github.workspace }}/dist/maestro-linux-x64
 
       # vitest runs on Node, so every test above exercises node:sqlite. The binary ships
       # bun:sqlite — two implementations behind one interface, and only one of them was
